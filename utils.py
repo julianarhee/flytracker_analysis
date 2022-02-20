@@ -25,7 +25,11 @@ import numpy as np
 # ---------------------------------------------------------------------
 natsort = lambda s: [int(t) if t.isdigit() else t.lower() for t in re.split('(\d+)', s)]
 
+def flatten(t):
+    return [item for sublist in t for item in sublist]
 
+def euclidean_dist(df1, df2, cols=['x_coord','y_coord']):
+    return np.linalg.norm(df1[cols].values - df2[cols].values, axis=1)
 # ---------------------------------------------------------------------
 # Data loading and formatting
 # ---------------------------------------------------------------------
@@ -207,15 +211,15 @@ def load_mat(mat_fpaths): #results_dir):
 # Calculate courtship metrics
 # ---------------------------------------------------------------------
 
-def thresh_courtship_bouts(df, max_dist=5, max_angle=30):
+def threshold_courtship_bouts(feat0, max_dist_to_other=5, max_facing_angle=30):
     '''
     Set thresholds for identifying courtship bouts using extracted features
     from FlyTracker. Sets thresholds on 'facing_angle' and 'dist_to_other'.
     
     Args:
     -----
-    df: (pd.DataFrame)
-        Calculated features from -feat.mat 
+    feat: (pd.DataFrame)
+        Calculated features from -feat.mat  *assumes 1 fly id only*
     
     max_dist: (float)
         Inter-fly distance at which interaction is considered a bout
@@ -229,42 +233,115 @@ def thresh_courtship_bouts(df, max_dist=5, max_angle=30):
         Updated dataframe with courtship (bool) as column
                 
     '''
-    df['facing_angle_deg'] = np.rad2deg(df['facing_angle'])
-    df['courtship'] = False
-    df.loc[(df['dist_to_other'] < max_dist) & (
-        df['facing_angle_deg'] < max_angle), 'courtship'] = True
-    
-    return df
+    feat = feat0.copy()
+    # Convert to deg to make my life easier
+    feat['courtship'] = False
+    all_nans=[]
+    #feat.shape
+        
+    feat['facing_angle_deg'] = np.rad2deg(feat['facing_angle'])
 
-def get_true_bouts(df, calib):
-    courtship_ixs = df[df['courtship']].index.tolist()
+    # Identify bad flips, where wings flip so fly seems to face opposite dir
+    #bad_flips = feat[feat['facing_angle'].diff().abs()>0.5].index.tolist()
+    #feat.loc[bad_flips] = np.nan
+
+#        # find all non-consecutive nan indices
+#        found_nans = feat[feat['facing_angle'].isna()].index.tolist()
+#        non_consecs = np.where(np.diff(found_nans)>1)[0] # each pair of values represents 1 chunk   
+#        non_consecs 
+#        for i, ix in enumerate(non_consecs[0::2]):
+#            curr_ix = list(non_consecs).index(ix)        
+#            s_ix = found_nans[ix]         
+#            next_ix = non_consecs[curr_ix+1]
+#            e_ix = found_nans[next_ix]
+#            print(s_ix, e_ix)
+#            feat.loc[s_ix:e_ix]=np.nan     
+# 
+#        # Get all nan indices, and block out in-between frames, too
+#        nan_ixs = feat.isna().index.tolist()
+#        chunks = []
+#        for k, g in groupby(enumerate(nan_ixs), lambda ix: ix[0]-ix[1]):
+#            chunks.append(list(map(itemgetter(1), g)))
+#        for chunk in chunks:
+#            feat.loc[chunk] = np.nan
+#
+    # Find true facing frames    
+    feat.loc[(feat['dist_to_other'] < max_dist_to_other) & (
+        feat['facing_angle_deg'] < max_facing_angle), 'courtship'] = True
+             
+    return feat
+
+def get_true_bouts(feat0, calib, ibi_min_sec=0.5):
+    '''
+    Group frames that pass threshold for "courtship" into actual bouts.
+    Bouts specified arbitrarily.
+    
+    Args:
+    -----
+    df: (pd.DataFrame)
+        Thresholded dataframe from -feat.mat (output of threshold_courtship_bouts())
+    
+    calib: (dict)
+        From calib.mat output (saved as dict)
+    
+    ibi_min_sec: (float)
+        Min. duration (in sec) to be considered a separate bout.
+    '''
+    feat = feat0.copy()
+    # Get list of all bout chunks
+    courtship_ixs = feat[feat['courtship']].index.tolist()
     bouts = []
     for k, g in groupby(enumerate(courtship_ixs), lambda ix: ix[0]-ix[1]):
         bouts.append(list(map(itemgetter(1), g)))
-        
     fps = calib['FPS']
-    print('FPS: %.2f Hz' % fps)
 
-    interbout_sec = np.array([(bouts[i+1][0] - b[-1])/fps for i, b in enumerate(bouts[0:-1])])
+    # Identify likely bout-stop false-alarms (i.e., next "bout" starts immediately after...)
+    curr_bout_ix = 0
+    combine_these=[curr_bout_ix]
+    bouts_to_combine={}
+    for i, b in enumerate(bouts[0:-1]):
+        ibi = (bouts[i+1][0] - b[-1] ) / fps
+        print(i, ibi)
 
-    # identify where interbout is "too short"
-    ibi_min_sec = 0.5
-    ibi_too_short = np.where(interbout_sec < ibi_min_sec)[0]
+        if np.round(ibi) <= ibi_min_sec: # check dur of next bout after current one
+            if len(combine_these)==0:
+                combine_these=[i]
+            combine_these.append(i+1)
+        else:
+            if len(combine_these)==0:
+                combine_these=[i]
+            bouts_to_combine.update({curr_bout_ix: combine_these})
+            curr_bout_ix+=1
+            combine_these=[]
+#     interbout_sec = np.array([(bouts[i+1][0] - b[-1])/fps for i, b in enumerate(bouts[0:-1])])
 
-    # get starting indices for true bouts
-    gap_starts = np.where(np.diff(ibi_too_short)>1)[0]
-    gap_ixs = [ibi_too_short[0]]
-    gap_ixs.extend([ibi_too_short[i+1] for i in gap_starts])
-
-    # concatenate too-short bouts into full bouts
-    true_bouts=[]
-    for i in gap_ixs:
-        curr_ = bouts[i]
-        curr_.extend(bouts[i+1])
-        true_bouts.append(curr_)
-    interbout_sec = np.array([(true_bouts[i+1][0] - b[-1])/fps for i, b in enumerate(true_bouts[0:-1])])
-    ibi_too_short = np.where(interbout_sec < ibi_min_sec)[0] 
-    assert len(ibi_too_short)==0, "Bad bout concatenation. Found %i too short" % len(ibi_too_short)
+#     # identify where interbout is "too short"
+#     #ibi_min_sec = 0.5
+#     ibi_too_short = np.where(interbout_sec < ibi_min_sec)[0] # indexes into bouts
     
-    return true_bouts
+#     # get starting indices for true bouts
+#     gap_starts = np.where(np.diff(ibi_too_short)>1)[0]
+#     gap_ixs = [ibi_too_short[0]]
+#     gap_ixs.extend([ibi_too_short[i+1] for i in gap_starts])
+
+#     # concatenate too-short bouts into full bouts
+#     true_bouts=[]
+#     for i in gap_ixs:
+#         curr_ = bouts[i]
+#         curr_.extend(bouts[i+1])
+#         true_bouts.append(curr_)
+#     interbout_sec = np.array([(true_bouts[i+1][0] - b[-1])/fps for i, b in enumerate(true_bouts[0:-1])])
+#     ibi_too_short = np.where(interbout_sec < ibi_min_sec)[0] 
+#     assert len(ibi_too_short)==0, "Bad bout concatenation. Found %i too short" % len(ibi_too_short)
+    bout_dict={}
+    for bout_num, bout_ixs in bouts_to_combine.items():
+        curr_ixs = flatten([bouts[i] for i in bout_ixs])
+        bout_dict.update({bout_num: curr_ixs})
+
+    # reassign courtship bouts:
+    for bout_num, bout_ixs in bout_dict.items():
+        start, end = bout_ixs[0], bout_ixs[-1]
+        feat.loc[start:end, 'courtship']=True
+            
+    return feat, bout_dict
 
