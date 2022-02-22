@@ -10,6 +10,10 @@
 import pylab as pl
 from matplotlib import rc
 
+def label_figure(fig, data_identifier):
+    fig.text(0, 1,data_identifier, ha='left', va='top', fontsize=8)
+
+    
 def set_plot_params(light=False, default_sizes=True, lw_axes=0.25, axis_labelsize=7, tick_labelsize=6, color='k', dpi=100):
     if light:
         color=tuple([0.8]*3)

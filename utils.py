@@ -30,6 +30,13 @@ def flatten(t):
 
 def euclidean_dist(df1, df2, cols=['x_coord','y_coord']):
     return np.linalg.norm(df1[cols].values - df2[cols].values, axis=1)
+
+def check_nan(wingR):
+    if any(np.isnan(wingR)):
+        wingR_ = pd.Series(wingR)
+        wingR = wingR_.interpolate()
+    return wingR
+
 # ---------------------------------------------------------------------
 # Data loading and formatting
 # ---------------------------------------------------------------------
@@ -301,7 +308,7 @@ def get_true_bouts(feat0, calib, ibi_min_sec=0.5):
     bouts_to_combine={}
     for i, b in enumerate(bouts[0:-1]):
         ibi = (bouts[i+1][0] - b[-1] ) / fps
-        print(i, ibi)
+        # print(i, ibi)
 
         if np.round(ibi) <= ibi_min_sec: # check dur of next bout after current one
             if len(combine_these)==0:
