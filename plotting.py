@@ -10,6 +10,9 @@
 import pylab as pl
 from matplotlib import rc
 
+# ------------------------------------------------------------------------------
+# General
+# ------------------------------------------------------------------------------
 def label_figure(fig, data_identifier):
     fig.text(0, 1,data_identifier, ha='left', va='top', fontsize=8)
 
@@ -58,3 +61,19 @@ def set_plot_params(light=False, default_sizes=True, lw_axes=0.25, axis_labelsiz
             
     for param in ['xtick.color', 'ytick.color', 'axes.labelcolor', 'axes.edgecolor']:
         pl.rcParams[param] = color
+
+# ------------------------------------------------------------------------------
+# FlyTracker
+# ------------------------------------------------------------------------------
+def plot_wing_extensions(trk, start_frame=0, end_frame=None, ax=None, figsize=(20,3),
+                         c1='lightblue', c2='steelblue', l1='var1', l2='var2', xaxis='sec'):
+    if ax is None:
+        fig, ax = pl.subplots(figsize=figsize)
+    if end_frame is None:
+        end_frame = int(trk.index.tolist()[-1])
+    bout_dur_sec = (end_frame-start_frame)/fps
+    df_ = trk.loc[start_frame:end_frame]
+    ax.plot(df_[xaxis], np.rad2deg(df_['wing_r_ang']), color=c1, label=l1)
+    ax.plot(df_[xaxis], np.rad2deg(df_['wing_l_ang']), color=c2, label=l2)
+
+    return ax
