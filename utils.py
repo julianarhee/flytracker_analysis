@@ -40,6 +40,22 @@ def check_nan(wingR):
 # ---------------------------------------------------------------------
 # Data loading and formatting
 # ---------------------------------------------------------------------
+def get_acq_dir(sessionid, assay_prefix='single_20mm*', rootdir='/mnt/sda/Videos'):
+    '''
+    Args:
+    -----
+    sessionid: (str)
+        YYYYMMDD-HHMM prefix for acquisition id
+    '''
+    acquisition_dirs = sorted([f for f in glob.glob(os.path.join(rootdir, '%s*' % assay_prefix, 
+                            '%s*' % sessionid)) if os.path.isdir(f)], key=natsort)
+    #print("Found %i acquisitions from %s" % (len(acquisition_dirs), sessionid))
+    assert len(acquisition_dirs)==1, "Unable to find unique acq. from session ID: %s" % sessionid
+    acq_dir = acquisition_dirs[0]
+    acquisition = os.path.split(acq_dir)[-1]
+
+    return acq_dir
+
 def get_movie_metadata(curr_movie_path):
     '''
     Get metadata for specified movie.
@@ -70,6 +86,25 @@ def get_movie_metadata(curr_movie_path):
     vidcap.release()
 
     return minfo
+
+
+# ---------------------------------------------------------------------
+# FlyTracker functions
+# ---------------------------------------------------------------------
+
+def add_frame_nums(trackdf, fps=None):
+    '''Add frame index and sec to dataframes
+    '''
+    frame_ixs = trackdf[trackdf['id']==0].index.tolist()
+    trackdf['frame'] = None
+    for i, g in trackdf.groupby('id'):
+        trackdf.loc[g.index, 'frame'] = frame_ixs
+    
+    # add sec
+    if fps is not None:
+        trackdf['sec'] = trackdf['frame']/float(fps)
+    
+    return trackdf
 
 def get_mat_paths_for_all_vids(acquisition_dir, ftype='track'):
     '''
@@ -123,7 +158,7 @@ def load_calibration(curr_acq):
     
     '''
     fieldnames = ['n_chambers', 'n_rows', 'n_cols', 'FPS', 'PPM', 'w', 'h', 
-                  'centroids', 'rois', 'n_flies']
+                  'centroids', 'rois', 'n_flies', 'cop_ind']
  
     calib_fpath = os.path.join(curr_acq, 'calibration.mat')
     assert os.path.exists(calib_fpath), "No calibration found: %s" % curr_acq
