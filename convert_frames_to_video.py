@@ -42,6 +42,15 @@ def select_acquisition(rootdir = '/mnt/sda/Videos/sound-chamber'):
     
     return frame_dir
 
+def check_frame_name(frame_dir):
+    fns = sorted(os.listdir(frame_dir), key=natsort)
+    for old_f in fns:
+        numstr, fmt = os.path.splitext(old_f)
+        fn_parts = numstr.split('_')
+        num = int(fn_parts[0])
+        new_f = '%06d%s' % (num, fmt)
+        os.rename(os.path.join(frame_dir, old_f), os.path.join(frame_dir, new_f))
+
 def check_frames(frame_dir):
     '''
     Check format of frames saved from acquisition (in frame_dir).
@@ -67,10 +76,18 @@ def check_frames(frame_dir):
         
     elif testf.endswith('png'):
         ftype = 'png'
+        if re.search('\d{6}', testf) is None or len(testf.split('_'))>1:
+            print("    changing frame names")
+            check_frame_name(frame_dir)
         src_dir = frame_dir
         
     elif testf.endswith('tiff'):
         ftype = 'tiff'
+        if re.search('\d{4}', testf) is None or len(testf.split('_'))>1:
+            print("    changing frame names")
+            check_frame_name(frame_dir)
+        src_dir = frame_dir
+
     else:
         print("Unknow file type: %s" % testf)        
 
