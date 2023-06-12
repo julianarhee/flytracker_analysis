@@ -1,0 +1,21 @@
+name: flytracker
+channels:
+  - defaults
+dependencies:
+  - ipython
+  - pip
+  - seaborn
+  - matplotlib
+  - scipy
+  - pandas
+  - jupyter
+  - numpy
+  - python=3.8
+  - opencv
+  - ipykernel
+  - moviepy
+  - plotly
+  - librosa
+  - python-sounddevice
+  - yaml
+prefix: /home/julianarhee/anaconda3/envs/flytracker
