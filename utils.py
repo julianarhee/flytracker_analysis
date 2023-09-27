@@ -88,6 +88,127 @@ def get_movie_metadata(curr_movie_path):
     return minfo
 
 
+# matlab analysis output to python (AO)
+def mat_data_names_to_df(currmat):
+    '''
+    Specific func for data output stores in struct with 'data' and names' as dict.
+
+    Returns: df, where data is 'data' and 'names' are columns
+    '''
+    df = pd.DataFrame(data=currmat['data'], columns=currmat['names']).fillna(0)
+
+    return df
+
+
+def mat_combine_binary_behaviors(curr_acq_mat):
+    '''
+    Take as input dict of dicts (from a given acquisition) from custom
+    output analysis (quick_ethograms.m):
+
+    Arguments:
+        curr_acq_mat (dict): mat[species][acquisition_index] 
+                             NOTE: (keys should include 'behavior', 'wings')
+
+    Returns:
+        B_df (pd.DataFrame): all aggregated behaviors that were binarized in Matlab function (GetBinaryBehaviors_v4.m and wings.m -- outputs of quick_ethograms.m)
+ 
+    '''
+    binary_behaviors = mat_data_names_to_df(curr_acq_mat['behavior'])
+    binary_behaviors = binary_behaviors.rename(columns={'All Wing Ext': 'All Wing Extensions'})
+    # tseries = pd.DataFrame(data=mat[sp][acq_ix]['wings']['tseries']['data'],
+    #                        columns=mat[sp][acq_ix]['wings']['tseries']['names']).fillna(0)
+    binary_wings = mat_data_names_to_df(curr_acq_mat['wings']['tseries'])
+    assert binary_wings['All Wing Extensions'].equals(binary_behaviors['All Wing Extensions']), "ERROR: 'wings' tseries W.E. not the same as 'behavior' dict"
+    B_df = pd.merge(binary_behaviors, binary_wings,  how='left', 
+             left_on=['All Wing Extensions', 'Time Vector (s)'], right_on=['All Wing Extensions', 'Time Vector (s)']) # right_on = ['B_c1','c2'])
+    return B_df
+
+
+
+def mat_get_bout_indices(currmat):
+    '''
+    Fromat separate bout index (start/end) arrays from custom matlab analysis into one dataframe. NOTE: This is specific to WING events.
+    
+    Arguments:
+        currmat (dict): mat[species][acquisition_index]['wings']
+
+    Returns:
+        bouts (pd.DataFrame): dataframe with start/end indices of bouts and wings
+
+    '''
+
+    # Get main BOUTS df
+    bouts = pd.DataFrame(data=currmat['wings']['bouts']['data'],
+                         columns=currmat['wings']['bouts']['names'])
+
+    # boutname = 'boutsL'
+    for boutname, colname in zip(['boutsL', 'boutsR', 'boutsB'], ['Left', 'Right', 'Bilateral']):
+        if 'names' not in currmat['wings'][boutname].keys():
+            currmat['wings'][boutname]['names'] = np.array(['{} Ext Start Indices'.format(colname), '{} Ext End Indices'.format(colname)])
+
+        if currmat['wings'][boutname]['data'].shape[0]==0:
+            continue 
+
+        if len(currmat['wings'][boutname]['data'].shape)==1:
+            bouts_ = pd.DataFrame(data=currmat['wings'][boutname]['data'],
+                             index=currmat['wings'][boutname]['names']).T
+        else:
+            bouts_ = pd.DataFrame(data=currmat['wings'][boutname]['data'],
+                             columns=currmat['wings'][boutname]['names'])
+        for bi, brow in bouts_.iterrows():
+            s_ix, e_ix = brow[['{} Ext Start Indices'.format(colname), '{} Ext End Indices'.format(colname)]]
+            # Note, sometimes bout indices not exact match for Bilateral case
+            bouts.loc[(bouts['All Ext Start Indices']<=s_ix) & (bouts['All Ext End Indices']>=e_ix), 'wing'] = colname 
+            
+        
+    return bouts
+
+
+def mat_split_courtship_bouts(bin_):
+    '''
+    Use binary Disengaged 1 or 0 to find bout starts, assign from 0
+    '''
+    diff_ = bin_['Disengaged'].diff()
+    bout_starts = np.where(diff_!=0)[0] # each of these index values is the START ix of a bout
+    for i, v in enumerate(bout_starts):
+        if i == len(bout_starts)-1:
+            bin_.loc[v:, 'boutnum'] = i
+        else:
+            v2 = bout_starts[i+1]
+            bin_.loc[v:v2, 'boutnum'] = i
+    return bin_
+
+
+def get_bout_durs(df, bout_varname='boutnum', return_as_df=False,
+                    timevar='Time Vector (s)'):
+    '''
+    Get duration of parsed bouts. 
+    Parse with parse_bouts(count_varname='instrip', bout_varname='boutnum').
+
+    Arguments:
+        df -- behavior dataframe, must have 'boutnum' as column (run parse_inout_bouts())  
+
+    Returns:
+        dict, keys=boutnum, vals=boutdur (in sec)
+    '''
+    assert 'boutnum' in df.columns, "Bouts not parse. Run:  df=parse_inout_bouts(df)"
+
+    boutdurs={}
+    grouper = ['boutnum']
+    for boutnum, df_ in df.groupby(bout_varname):
+        boutdur = df_.sort_values(by=timevar).iloc[-1][timevar] - df_.iloc[0][timevar]
+        boutdurs.update({boutnum: boutdur})
+
+    if return_as_df:
+        durs_ = pd.DataFrame.from_dict(boutdurs, orient='index').reset_index()
+        durs_.columns = [bout_varname, 'boutdur']
+
+        return durs_
+
+    return boutdurs
+
+
+
 # ---------------------------------------------------------------------
 # FlyTracker functions
 # ---------------------------------------------------------------------
@@ -248,6 +369,26 @@ def load_mat(mat_fpaths): #results_dir):
 
     return df
 
+
+def load_flytracker_data(acq_dir):
+    '''
+    Get calibration info, -feat.mat and -track.mat as DFs.
+    Returns:
+        calib: 
+        trackdf: raw tracking data (e.g., position, orientation, left wing ang)
+        featdf: features derived from tracking data (e.g., velocity, dist to x)
+    '''
+    #%% Get corresponding calibration file
+    calib = load_calibration(acq_dir)
+
+    #% Load feature mat
+    featdf = load_feat(acq_dir)
+    trackdf = load_tracks(acq_dir)
+
+    trackdf = add_frame_nums(trackdf, fps=calib['FPS'])
+    featdf = add_frame_nums(featdf, fps=calib['FPS'])
+
+    return calib, trackdf, featdf
 
 # ---------------------------------------------------------------------
 # Calculate courtship metrics

@@ -18,6 +18,12 @@ import seaborn as sns
 import utils as util
 
 ## generic
+# ----------------------------------------------------------------------
+# Visualization 
+# ----------------------------------------------------------------------
+def label_figure(fig, fig_id, x=0.01, y=0.98):
+    fig.text(x, y, fig_id, fontsize=8)
+
 def set_sns_style(style='dark', min_fontsize=6):
     font_styles = {
                     'axes.labelsize': min_fontsize+1, # x and y labels
@@ -67,11 +73,6 @@ def set_sns_style(style='dark', min_fontsize=6):
     pl.rcParams['figure.figsize'] = [6,4]
 
     pl.rcParams['svg.fonttype'] = 'none'
-
-
-
-def label_figure(fig, fig_id, x=0.01, y=0.98):
-    fig.text(x, y, fig_id, fontsize=8)
 
 
 # ticks
