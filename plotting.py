@@ -280,7 +280,8 @@ def circular_hist(ax, x, bins=16, density=True, offset=0, gaps=True,
 
 
 
-def colorbar_from_mappable(ax, norm, cmap, hue_title='', axes=[0.85, 0.3, 0.01, 0.4]): #pad=0.05):
+def colorbar_from_mappable(ax, norm, cmap, hue_title='', axes=[0.85, 0.3, 0.01, 0.4],
+                            fontsize=7): #pad=0.05):
     from mpl_toolkits.axes_grid1 import make_axes_locatable
 
     fig = ax.figure
@@ -292,8 +293,8 @@ def colorbar_from_mappable(ax, norm, cmap, hue_title='', axes=[0.85, 0.3, 0.01, 
     sm.set_array([])
 
     cbar = fig.colorbar(sm, cax=cax) #ax=ax)
-    cbar.ax.set_title(hue_title, fontsize=7)
-    cbar.ax.tick_params(labelsize=7)
+    cbar.ax.set_ylabel(hue_title, fontsize=fontsize)
+    cbar.ax.tick_params(labelsize=fontsize)
 
     #pl.colorbar(im, cax=cax)
 
@@ -353,4 +354,46 @@ def plot_skeleton(coords, inds=None, ax=None, color='k', alpha=1, lw=1):
 #         ax.add_collection(col0)
 
 
+def plot_ethogram(positions, ev, plot_behaviors=[], behavior_colors=[], nonbinary_behavs=[],
+                bg_color=[0.7]*3, lw=0.05):
+    import matplotlib.gridspec as gridspec
+
+    if len(behavior_colors)==0:
+        behavior_colors = sns.color_palette('cubehelix', 
+                            n_colors=len(positions)+1, desat=1)[1:]
+    if len(plot_behaviors)==0:
+        plot_behaviors = np.arange(0, len(positions))
+ 
+    fig = pl.figure(figsize=(8, len(nonbinary_behavs)*1.5)) #, constrained_layout=True)
+    fig.patch.set_facecolor('k') #fig.patch.set_alpha(0)
+    spec = gridspec.GridSpec(ncols=1, nrows=len(nonbinary_behavs)+2, figure=fig)
+    ax0 = fig.add_subplot(spec[0:2, 0]) # video
+
+    ax0.eventplot(positions, orientation='horizontal', 
+                  colors=behavior_colors, linewidths=lw, lineoffsets=1.25)
+    xlim = ax0.get_xlim()[-1]
+    for ai, (label, color) in enumerate(zip(plot_behaviors, behavior_colors)):
+        print(ai, label)
+        ax0.text(xlim, ai*1.25, label, color=color, va='center')
+
+    for ai, behav in enumerate(nonbinary_behavs):
+        #print(ai, behav)
+        ax_ = fig.add_subplot(spec[ai+2, 0]) #, sharex=ax0)  # 2p
+        ax_.plot(ev['Time Vector (s)'], ev[behav], color=bg_color, lw=0.5)
+        ax_.set_ylabel(behav, fontsize=8)
+        if behav=='leg_dist':
+            ax_.set_ylim([0, 18])
+        elif behav=='vel':
+            ax_.set_ylim([0, 75])
+        elif 'angle' in behav:
+            ax_.set_ylim([0, 3.2])
+    for ai, ax in enumerate(fig.axes):
+        if ai == 3:
+            ax.set_xlabel('time (s)')
+            ax.set_xticklabels(ax_.get_xticks()[0:])
+        else: 
+            ax.set_xlabel('')
+            ax.set_xticklabels([])
+    pl.subplots_adjust(left=0.1, right=0.8, top=0.9)
+    return fig
 
