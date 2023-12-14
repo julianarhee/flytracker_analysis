@@ -322,10 +322,31 @@ def load_tracks(curr_acq):
     mat_fpaths = get_mat_paths_for_all_vids(curr_acq, ftype='track')
     trk = load_mat(mat_fpaths)
     return trk
+
+def load_mat_frames_and_var(mat_fpath):
+    mat = scipy.io.loadmat(mat_fpath)
+    struct_name = [k for k in mat.keys() if not k.startswith('__')]
+    assert len(struct_name)==1, "Did not find unique struct name: %s" % str(struct_name) 
+    mdata = mat.get(struct_name[0])
+
+    # Use fields to create dict
+    # 'names' (1, 18) 
+    # 'data' (n_frames, n_vars)
+    # 'units' (units of variables) 
+    mdtype = mdata.dtype
+    ndata = {n: mdata[n][0][0] for n in mdtype.names}
+
+    columns = [n[0] for n in ndata['names'][0]]
+    n_frames, n_vars = ndata['data'].shape
+    # turn into dataframe
+    df = pd.DataFrame(data=ndata['data'], columns=columns)
+
+    return df
+ 
  
 def load_mat(mat_fpaths): #results_dir):
     '''
-    Load track.mat and parse into dataframe.
+    Load track.mat and parse into dataframe. Assumes data is nflies, nframes, nflags.
 
     Args:
     -----
@@ -369,6 +390,61 @@ def load_mat(mat_fpaths): #results_dir):
 
     return df
 
+def load_binary_evs_from_mat(matlab_src, feat=None,
+                behavior_names=['All Wing Extensions', 'Putative Tap Events', 'Chasing', 'Licking/Proboscis Ext', 'Copulation Attempts', 'Orienting']):
+
+    '''
+    Specific to output from matlab using AO's binarization of behaviors for ethograms.
+    matlab_src: path to Ddata.mat (output of quick_ethograms.m)
+
+    '''
+
+    mat = scipy.io.loadmat(matlab_src, simplify_cells=True)
+    species_list = [k for k in mat.keys() if not k.startswith('__')]
+
+    nonorienting_names = [b for b in behavior_names if b!='Orienting']
+
+    binevs_list=[]
+    for sp in species_list:
+        if not isinstance(mat[sp], list):
+            mat[sp] = [mat[sp]]
+        for acq_ix, acq_mat in enumerate(mat[sp]):
+            acq = acq_mat['acquisition']
+            print(sp, acq)
+            bin_ = mat_combine_binary_behaviors(acq_mat) #mat[sp][acq_ix])
+            # Get bout starts
+            bin_ = mat_split_courtship_bouts(bin_)
+            # wing bouts?
+            bin_['Unilateral Wing Extensions'] = [1 if (l==1 or r==1) and (l!=r) else 0 for (l, r) \
+                                      in bin_[['Left Wing Extensions', 'Right Wing Extensions']].values]
+            ori_only = bin_[(bin_[nonorienting_names].eq(0).all(1)) & (bin_['Orienting'])]
+            bin_['Orienting Only'] = 0
+            bin_['Orienting Only'].loc[ori_only.index] = 1
+
+            #bouts_ = util.mat_get_bout_indices(acq_mat) #mat[sp][acq_ix])
+            # get features mat
+            if feat is not None:
+                feat_ = feat[(feat['acquisition']==acq) & (feat['sex']=='m')].copy()
+                assert bin_.shape[0]==feat_.shape[0], "Incorrect shapes for merging: binary evs {} and feat {}".format(bin_.shape, feat_.shape)
+                evs_ = pd.merge(bin_, feat_, left_index=True, right_index=True)
+            else:
+                evs_ = bin_.copy()
+            # bouts
+            #bouts_['acquisition'] = acq_mat['acquisition']
+            #bouts_['species'] = sp
+            #bouts_['strain'] = feat_['strain'].unique()[0]
+            binevs_list.append(evs_)
+    events = pd.concat(binevs_list).reset_index()
+
+    return events
+
+def add_bout_durations(df):
+    # add bout durations
+    for aq, df_ in df.groupby('acquisition'):
+        dur_dict = get_bout_durs(df_)
+        df.loc[df_.index, 'boutdur'] = [dur_dict[v] for v in df_['boutnum']]
+
+    return df
 
 def load_flytracker_data(acq_dir):
     '''
