@@ -406,6 +406,8 @@ def load_binary_evs_from_mat(matlab_src, feat=None,
 
     binevs_list=[]
     for sp in species_list:
+        if len(mat[sp])==0:
+            continue
         if not isinstance(mat[sp], list):
             mat[sp] = [mat[sp]]
         for acq_ix, acq_mat in enumerate(mat[sp]):
