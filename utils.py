@@ -391,7 +391,7 @@ def load_mat(mat_fpaths): #results_dir):
     return df
 
 def load_binary_evs_from_mat(matlab_src, feat=None,
-                behavior_names=['All Wing Extensions', 'Putative Tap Events', 'Chasing', 'Licking/Proboscis Ext', 'Copulation Attempts', 'Orienting']):
+                behavior_names=['Bilateral Wing Extensions', 'Unilateral Wing Extensions', 'Putative Tap Events', 'Chasing', 'Licking/Proboscis Ext', 'Copulation Attempts', 'Orienting']):
 
     '''
     Specific to output from matlab using AO's binarization of behaviors for ethograms.
@@ -412,6 +412,8 @@ def load_binary_evs_from_mat(matlab_src, feat=None,
             mat[sp] = [mat[sp]]
         for acq_ix, acq_mat in enumerate(mat[sp]):
             acq = acq_mat['acquisition']
+            #if acq in ['20240109-1039_fly1_eleWT_4do_sh_eleWT_4do_gh']:
+            #    continue
             print(sp, acq)
             bin_ = mat_combine_binary_behaviors(acq_mat) #mat[sp][acq_ix])
             # Get bout starts
@@ -426,7 +428,8 @@ def load_binary_evs_from_mat(matlab_src, feat=None,
             #bouts_ = util.mat_get_bout_indices(acq_mat) #mat[sp][acq_ix])
             # get features mat
             if feat is not None:
-                feat_ = feat[(feat['acquisition']==acq) & (feat['sex']=='m')].copy()
+                feat_ = feat[(feat['acquisition']==acq) & (feat['sex']=='m')].copy().reset_index(drop=True)
+                bin_ = bin_.loc[0:feat_['frame'].iloc[-1]] # Only grab til copulation index
                 assert bin_.shape[0]==feat_.shape[0], "Incorrect shapes for merging: binary evs {} and feat {}".format(bin_.shape, feat_.shape)
                 evs_ = pd.merge(bin_, feat_, left_index=True, right_index=True)
             else:
@@ -437,6 +440,10 @@ def load_binary_evs_from_mat(matlab_src, feat=None,
             #bouts_['strain'] = feat_['strain'].unique()[0]
             binevs_list.append(evs_)
     events = pd.concat(binevs_list).reset_index()
+
+#    for aq, df_ in events.groupby('acquisition'):
+#        dur_dict = get_bout_durs(df_)
+#        events.loc[df_.index, 'boutdur'] = [dur_dict[v] for v in df_['boutnum']]
 
     return events
 
@@ -467,6 +474,143 @@ def load_flytracker_data(acq_dir):
     featdf = add_frame_nums(featdf, fps=calib['FPS'])
 
     return calib, trackdf, featdf
+
+
+## aggregate funcs
+def aggr_load_feat(savedir, found_sessionpaths=[], create_new=False):
+
+    if not create_new:
+        try:
+            # try loading saved feat.mat
+            pkl_fpath = os.path.join(savedir, 'feat.pkl')
+            feat = pd.read_pickle(pkl_fpath)
+        except Exception as e:
+            traceback.print_exc()
+            print("Error loading feat. Creating new.")
+            create_new = True
+        
+    if create_new:
+        assert len(found_sessionpaths)>1, "No session paths provided."
+        feat = aggr_feat_mats(found_sessionpaths) 
+
+    return feat
+
+def aggr_feat_mats(found_sessionpaths):
+    '''
+    Cycle through found session paths analyzed with FlyTracker, add some additional meta info, then save as feat DF. Tested and some manual corrections included.
+
+    Args:
+    -----
+    List of fullpaths to parent dirs of experiments with -feat.mat found.
+
+    Returns:
+    --------
+    feat (pd.DataFrame)
+    '''
+    f_list = []; t_list=[];
+    for i, acq_dir in enumerate(found_sessionpaths[::-1]):
+        acq = os.path.split(acq_dir)[-1]
+
+        if acq == '20240109-1039_fly1_eleWT_4do_sh_eleWT_4do_gh':
+            # RERUN, unequal feat and trk sizes
+            continue
+
+        try:
+            calib_, trk_, feat_ = load_flytracker_data(acq_dir) #os.path.join(videodir, acq))
+        except Exception as e:
+            print("ERROR: %s" % acq)
+            print(e)
+            continue
+            
+        if 'cop_ind' not in calib_.keys():
+            print(acq, 'No cop')
+        else:
+            print(acq, calib_['cop_ind'])
+            
+        # get species
+        if 'mel-' in acq:
+            species_abbr = 'mel'
+            species_strain = 'na'
+        elif 'suz-' in acq:
+            species_abbr = 'suz'
+            species_strain = 'na'
+        else:
+            if '_fly' in acq:
+                species_abbr = acq.split('_')[2]
+            else:
+                species_abbr = acq.split('_')[1]
+            species_strain = 'na'
+            if species_abbr.startswith('mau'):
+                species_strain = species_abbr[3:]
+                species_abbr = species_abbr[0:3]
+            elif species_abbr in ('Canton-S', 'ctns'):
+                species_abbr = 'mel'
+                species_strain = 'cantons'
+        # get age
+        if '_fly' in acq:
+            age = int(re.sub('\D', '', acq.split('_')[3]))
+        elif len(acq.split('_'))<2:
+            age = None
+        else:
+            age = int(re.sub('\D', '', acq.split('_')[2]))
+
+        # get sex
+        cop_ix = calib_['cop_ind'] if calib_['cop_ind']>=1 else feat_['frame'].iloc[-1]
+        #ix_male = trk_.groupby('id').mean()['body_area'].idxmax() #.unique()
+        #ix_female = trk_.groupby('id')['body_area'].mean().idxmax()
+        if acq in ['20231222-1149_fly2_eleWT_4do_sh_eleWT_4do_gh', '20231223-1212_fly3_eleWT_5do_sh_eleWT_5do_gh']:
+            ix_male = 1
+        elif float(trk_[trk_['frame']<=cop_ix].groupby('id')['body_area'].mean().round(1).diff().abs().dropna()) == 0: 
+            #float(feat_[feat_['frame']<=cop_ix].groupby('id')['max_wing_ang'].mean().round(1).diff().abs().dropna()) == 0: # difference is super tiny
+            #ix_male = trk_[trk_['frame']<=cop_ix].groupby('id')['body_area'].mean().idxmin() # use body size
+            ix_male = feat_[feat_['frame']<=cop_ix].groupby('id')['max_wing_ang'].mean().idxmax()
+        else:
+            #ix_male = feat_[feat_['frame']<=cop_ix].groupby('id')['max_wing_ang'].mean().idxmax()
+            ix_male = trk_[trk_['frame']<=cop_ix].groupby('id')['body_area'].mean().idxmin() # use body size
+            
+    #     if trk_.groupby('id')['minor_axis_len'].mean().round().diff().max() <= 1:
+    #         ix_female = trk_.groupby('id')['body_area'].mean().idxmax()
+    #     else:
+    #         ix_female = trk_.groupby('id')['minor_axis_len'].mean().idxmax() # this seems most reliable
+        #assert len(ix_max)==1, "Ambiguous sex based on size: {}".format(trk_.groupby('id').mean()[['major_axis_len', 'body_area', 'minor_axis_len']].idxmax())
+        #ix_male = feat_.groupby('id')['max_wing_ang'].mean().idxmax()
+        feat_.loc[feat_['id']==ix_male, 'sex'] = 'm'
+        feat_.loc[feat_['id']!=ix_male, 'sex'] = 'f'
+        
+        trk_.loc[trk_['id']==ix_male, 'sex'] = 'm'
+        trk_.loc[trk_['id']!=ix_male, 'sex'] = 'f'
+       
+        print('--', species_abbr, age, feat_['sex'].unique(), 'male ID: {}'.format(feat_[feat_['sex']=='m']['id'].unique()[0]))
+        try:
+            #male_wg = feat_[(feat_['frame']<=cop_ix) & (feat_['sex']=='m')]['max_wing_ang'].median()
+            #female_wg = feat_[(feat_['frame']<=cop_ix) & (feat_['sex']=='f')]['max_wing_ang'].median()
+            male_wg = feat_[(feat_['frame']<cop_ix) & (feat_['max_wing_ang']>1.5) & (feat_['sex']=='m')].count()[0]
+            female_wg = feat_[(feat_['frame']<cop_ix) & (feat_['max_wing_ang']>1.5) & (feat_['sex']=='f')].count()[0]
+            assert male_wg-female_wg > 100, "Male wing is not >> than female. Check: %s" % acq
+        except AssertionError as e: # AssertionError as e:
+            print(e)   
+            
+        # update
+        feat_['species'] = species_abbr
+        feat_['strain'] = species_strain
+        feat_['age'] = age
+        feat_['acquisition'] = acq
+        feat_['copulation_index'] = calib_['cop_ind']
+        feat_['copulation'] = calib_['cop_ind']>0
+        grab_index = calib_['cop_ind']-1 if calib_['cop_ind']>1 else feat_.iloc[-1].name
+        f_ = feat_[feat_['frame']<=grab_index].reset_index(drop=True)
+        f_list.append(f_)
+        # add trk, too
+        trk_['acquisition'] = acq
+        t_ = trk_[trk_['frame']<=grab_index].reset_index(drop=True)
+        t_list.append(t_)
+        #print(f_.shape, t_.shape)
+        assert f_.shape[0]==t_.shape[0], "Unequal"
+    feat = pd.concat(f_list) #.reset_index(drop=True)
+    trk = pd.concat(t_list)
+
+    return feat, trk
+
 
 # ---------------------------------------------------------------------
 # Calculate courtship metrics
