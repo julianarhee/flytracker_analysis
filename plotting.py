@@ -173,7 +173,8 @@ def plot_array_of_trajectories(trajdf, sorted_eff=[], nr=5, nc=7,
 # circular stuff
 
 def add_colorwheel(fig, cmap='hsv', axes=[0.8, 0.8, 0.1, 0.1], 
-                   theta_range=[-np.pi, np.pi], deg2plot=None):
+                   theta_range=[-np.pi, np.pi], deg2plot=None,
+                    flip_theta=False, plot_ring=False, north=True):
 
     '''
     Assumes values go from 0-->180, -180-->0. (radians).
@@ -197,9 +198,14 @@ def add_colorwheel(fig, cmap='hsv', axes=[0.8, 0.8, 0.1, 0.1],
     #display_axes.set_rlim([-1,1])
     if deg2plot is not None:
         display_axes.plot([0, deg2plot], [0, 1], 'k')
-    
-    display_axes.set_theta_zero_location('N')
-    display_axes.set_theta_direction(-1)  # theta increasing clockwise
+   
+    if north: 
+        display_axes.set_theta_zero_location('N')
+    if flip_theta:
+        display_axes.set_theta_direction(-1)  # theta increasing clockwise
+    if plot_ring:
+        display_axes.set_rlim([-1,1])
+
 
     return display_axes
 
