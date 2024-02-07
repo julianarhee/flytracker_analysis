@@ -11,6 +11,7 @@ import os
 import re
 import glob
 import scipy.io
+import mat73
 import cv2
 
 from itertools import groupby
@@ -252,7 +253,10 @@ def get_feature_units(mat_fpath):
     '''
     Load -feat.mat and get units for each of the var. names
     '''
-    mat = scipy.io.loadmat(mat_fpath)
+    try:
+        mat = scipy.io.loadmat(mat_fpath)
+    except NotImplementedError as e:
+        mat = mat73.loadmat(mat_fpath) #scipy.io.loadmat(mat_fpath)
     
     mdata = mat.get('feat')
     mdtype = mdata.dtype
@@ -284,7 +288,11 @@ def load_calibration(curr_acq):
     calib_fpath = os.path.join(curr_acq, 'calibration.mat')
     assert os.path.exists(calib_fpath), "No calibration found: %s" % curr_acq
 
-    mat = scipy.io.loadmat(calib_fpath)
+    try:
+        mat = scipy.io.loadmat(calib_fpath)
+    except NotImplementedError as e:
+        mat = mat73.loadmat(calib_fpath) #scipy.io.loadmat(mat_fpath)
+
     struct_name = [k for k in mat.keys() if not k.startswith('__')]
     assert len(struct_name)==1, "Did not find unique struct name: %s" % str(struct_name)
     
@@ -297,7 +305,7 @@ def load_calibration(curr_acq):
     mdtype = mdata.dtype
     ndata = {n: mdata[n][0, 0] for n in mdtype.names}
 
-    all_fields = dict((k, v[0]) for k, v in ndata.items())
+    all_fields = dict((k, v[0]) if len(v)>0 else (k, v) for k, v in ndata.items())
     calib = {}
     for k, v in all_fields.items():
         if k not in fieldnames:
@@ -324,7 +332,11 @@ def load_tracks(curr_acq):
     return trk
 
 def load_mat_frames_and_var(mat_fpath):
-    mat = scipy.io.loadmat(mat_fpath)
+    try:
+        mat = scipy.io.loadmat(mat_fpath)
+    except NotImplementedError as e:
+        mat = mat73.loadmat(mat_fpath) #scipy.io.loadmat(mat_fpath)
+
     struct_name = [k for k in mat.keys() if not k.startswith('__')]
     assert len(struct_name)==1, "Did not find unique struct name: %s" % str(struct_name) 
     mdata = mat.get(struct_name[0])
@@ -363,19 +375,26 @@ def load_mat(mat_fpaths): #results_dir):
     #print(ft_outfile)
     all_dfs=[]
     for mat_fpath in sorted(mat_fpaths, key=natsort):
-        mat = scipy.io.loadmat(mat_fpath)
-        struct_name = [k for k in mat.keys() if not k.startswith('__')]
-        assert len(struct_name)==1, "Did not find unique struct name: %s" % str(struct_name) 
-        mdata = mat.get(struct_name[0])
+        try:
+            mat = scipy.io.loadmat(mat_fpath)
+            struct_name = [k for k in mat.keys() if not k.startswith('__')]
+            assert len(struct_name)==1, "Did not find unique struct name: %s" % str(struct_name) 
+            mdata = mat.get(struct_name[0])
 
-        # Use fields to create dict
-        # 'names' (1, 35) 
-        # 'data' (n_flies, n_frames, n_fields)
-        # 'flags' (possible switches, check with flytracker/visualizer)
-        mdtype = mdata.dtype
-        ndata = {n: mdata[n][0][0] for n in mdtype.names}
+            # Use fields to create dict
+            # 'names' (1, 35) 
+            # 'data' (n_flies, n_frames, n_fields)
+            # 'flags' (possible switches, check with flytracker/visualizer)
+            mdtype = mdata.dtype
+            ndata = {n: mdata[n][0][0] for n in mdtype.names}
+            columns = [n[0].replace(' ', '_') for n in ndata['names'][0]]
+        except NotImplementedError as e:
+            mat = mat73.loadmat(mat_fpath) #scipy.io.loadmat(mat_fpath)
+            struct_name = [k for k in mat.keys() if not k.startswith('__')]
+            # is already dict
+            ndata = mat[struct_name[0]] 
+            columns = [n.replace(' ', '_') for n in ndata['names']]
 
-        columns = [n[0].replace(' ', '_') for n in ndata['names'][0]]
         n_flies, n_frames, n_flags = ndata['data'].shape
         d_list=[]
         for fly_ix in range(n_flies):
@@ -398,10 +417,12 @@ def load_binary_evs_from_mat(matlab_src, feat=None,
     matlab_src: path to Ddata.mat (output of quick_ethograms.m)
 
     '''
+    try:
+        mat = scipy.io.loadmat(matlab_src, simplify_cells=True)
+    except NotImplementedError as e:
+        mat = mat73.loadmat(mat_fpath) #scipy.io.loadmat(mat_fpath)
 
-    mat = scipy.io.loadmat(matlab_src, simplify_cells=True)
     species_list = [k for k in mat.keys() if not k.startswith('__')]
-
     nonorienting_names = [b for b in behavior_names if b!='Orienting']
 
     binevs_list=[]
