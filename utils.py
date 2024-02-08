@@ -476,7 +476,7 @@ def add_bout_durations(df):
 
     return df
 
-def load_flytracker_data(acq_dir):
+def load_flytracker_data(acq_dir, fps=60):
     '''
     Get calibration info, -feat.mat and -track.mat as DFs.
     Returns:
@@ -485,7 +485,13 @@ def load_flytracker_data(acq_dir):
         featdf: features derived from tracking data (e.g., velocity, dist to x)
     '''
     #%% Get corresponding calibration file
-    calib = load_calibration(acq_dir)
+    calib=None; trackdf=None; featdf=None;
+    try:
+        calib = load_calibration(acq_dir)
+    except Exception as e:
+        print("No calibration!")
+        calib={}
+        calib['FPS'] = fps
 
     #% Load feature mat
     featdf = load_feat(acq_dir)
