@@ -777,3 +777,42 @@ def get_true_bouts(feat0, calib, ibi_min_sec=0.5):
             
     return feat, bout_dict
 
+
+# projector functions
+from numpy.fft import fft, ifft, fftfreq
+def get_fft(df_, fft_var='pos_y', return_pos=True):
+
+    x_fly = df_[fft_var] - df_[fft_var].mean()
+    t_fly =  df_['sec'] #np.arange(0,1,ts)
+    fft_fly, all_freqs = calculate_fft(x_fly, t_fly)
+    if return_pos:
+        freq = all_freqs[np.where(all_freqs >= 0)] 
+        amp_fly = calculate_fft_amplitude(fft_fly[np.where(all_freqs >= 0)], t_fly)
+
+    else:
+        freq = all_freqs
+        amp_fly = calculate_fft_amplitude(fft_sly, t_fly)
+
+    return amp_fly, freq
+
+
+def calculate_fft(x, t, sr=60):
+
+    # sampling interval
+    ts = np.mean(np.diff(t)) #1.0/sr
+    npnts =  len(t)
+    
+    X = fft(x)
+    N = len(X)
+    n = np.arange(N)
+    T = N/sr
+#     freq = n/T  # freq mirrorin above nyquist
+    freq = fftfreq(npnts, ts)
+    
+    return X, freq #X, freq
+
+def calculate_fft_amplitude(X, t):
+
+    pwr = 2*np.abs(X)/len(t)   
+    return pwr
+
