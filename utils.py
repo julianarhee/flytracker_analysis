@@ -780,10 +780,10 @@ def get_true_bouts(feat0, calib, ibi_min_sec=0.5):
 
 # projector functions
 from numpy.fft import fft, ifft, fftfreq
-def get_fft(df_, fft_var='pos_y', return_pos=True):
+def get_fft(df_, fft_var='pos_y', time_var='sec', return_pos=True):
 
     x_fly = df_[fft_var] - df_[fft_var].mean()
-    t_fly =  df_['sec'] #np.arange(0,1,ts)
+    t_fly =  df_[time_var] #np.arange(0,1,ts)
     fft_fly, all_freqs = calculate_fft(x_fly, t_fly)
     if return_pos:
         freq = all_freqs[np.where(all_freqs >= 0)] 
@@ -815,4 +815,18 @@ def calculate_fft_amplitude(X, t):
 
     pwr = 2*np.abs(X)/len(t)   
     return pwr
+
+
+def smooth_timecourse(in_trace, win_size=42):
+    '''
+    Don't Use this one
+    '''
+    #smooth trace
+    win_half = int(round(win_size/2))
+    trace_pad = np.pad(in_trace, ((win_half, win_half)), 'reflect') # 'symmetric') #'edge')
+
+    smooth_trace = np.convolve(trace_pad, np.ones((win_size,))*(1/float(win_size)),'valid')
+     
+    return smooth_trace[int(win_half/2):-int(win_half/2)]
+
 
