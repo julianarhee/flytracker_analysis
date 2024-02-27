@@ -165,7 +165,7 @@ def mat_get_bout_indices(currmat):
     return bouts
 
 
-def mat_split_courtship_bouts(bin_):
+def mat_split_courtship_bouts(bin_, bout_marker='Disengaged'):
     '''
     Use binary Disengaged 1 or 0 to find bout starts, assign from 0
     '''
