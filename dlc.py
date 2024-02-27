@@ -56,8 +56,33 @@ def get_continuous_numbers(nums):
     return list(zip(edges, edges))
 
 
-# 
-def get_fly_params(flypos, cop_ix=None):
+#
+def convert_df_units(flydf, mm_per_pix):
+
+    flydf['dist_to_other_mm'] = flydf['dist_to_other']*mm_per_pix
+    flydf['lin_speed_mms'] = flydf['lin_speed']*mm_per_pix
+    # flydf['rel_vel'] = flydf['dist_to_other']/(5/fps)
+    flydf['dist_to_other_mm_diff'] =  flydf['dist_to_other_mm'].diff().fillna(0) # if dist incr, will be pos, if distance decr, will be neg
+    flydf['time_diff'] =  flydf['time'].diff().fillna(0) # if dist incr, will be pos, if distance decr, will be neg
+    flydf['rel_vel_mms'] = flydf['dist_to_other_mm_diff'].abs() / (5*flydf['time_diff']) #(5/fps) # if neg, objects are getting 
+
+    # flydf['centroid_x_mm'] = flydf['centroid_x']*mm_per_pix
+    # flydf['centroid_y_mm'] = flydf['centroid_y']*mm_per_pix
+    # fly_ctr = flydf[['centroid_x_mm', 'centroid_y_mm']].values
+    # cop_ix=len(flydf)
+    # flydf['lin_speed_mms'] = np.concatenate((np.zeros(1),
+    #                     np.sqrt(np.sum(np.square(np.diff(fly_ctr[:cop_ix, ], axis=0)),
+    #                     axis=1)))) / (5/60)
+    #
+    # dotdf['centroid_x_mm'] = dotdf['centroid_x']*mm_per_pix
+    # dotdf['centroid_y_mm'] = dotdf['centroid_y']*mm_per_pix
+    # dot_ctr = dotdf[['centroid_x_mm', 'centroid_y_mm']].values
+    # IFD_mm = np.sqrt(np.sum(np.square(dot_ctr - fly_ctr),axis=1))
+    # flydf['dist_to_other_mm'] = IFD_mm[:cop_ix]
+
+    return flydf
+ 
+def get_fly_params(flypos, cop_ix=None, win=5, fps=60):
     if cop_ix is None:
         cop_ix = len(flypos)
     fly_ctr = get_animal_centroid(flypos)
@@ -69,7 +94,7 @@ def get_fly_params(flypos, cop_ix=None):
     flydf['lin_speed'] = np.concatenate(
                             (np.zeros(1), 
                             np.sqrt(np.sum(np.square(np.diff(fly_ctr[:cop_ix, ], axis=0)), 
-                            axis=1))))
+                            axis=1)))) / (win/fps)
     leftw = get_bodypart_angle(flypos, 'thorax', 'wingL')
     rightw = get_bodypart_angle(flypos, 'thorax', 'wingR')
     flydf['left_wing_angle'] = wrap2pi(circular_distance(flydf['heading'].interpolate(), leftw)) - np.pi
@@ -278,6 +303,31 @@ def remove_jumps(dataframe, maxJumpLength):
     return dataframeMod
 
 # GET EPOCHS:
+def split_speed_epochs(dotdf, return_stepdict=True, 
+                        win=13, cop_ix=None, speed_var='lin_speed_filt',
+                        t_start=20, increment=40, n_levels=10):
+    '''
+    Parse speed-varying (diffspeeds2.csv) epochs for DLC-extracted tracks.
+    Smooths x, y to calculate lin_speed_filt, gets indices of each step in a dict, then adds epochs to df. 
+    '''
+    if cop_ix is None:
+        cop_ix = len(dotdf)
+
+    # smooth pos and speed
+    dotdf = smooth_speed_steps(dotdf, win=win, cop_ix=cop_ix)
+    # get step dict
+    step_dict = get_step_indices(dotdf, speed_var=speed_var, 
+                        t_start=t_start, increment=increment, n_levels=n_levels)
+
+    # add epochs
+    dotdf = add_speed_epoch(dotdf, step_dict)
+
+    if return_stepdict:
+        return dotdf, step_dict
+    else:
+        return dotdf
+
+
 def smooth_speed_steps(dotdf, win=13, cop_ix=None):
     if cop_ix is None:
         cop_ix = len(dotdf)
@@ -295,7 +345,7 @@ def smooth_speed_steps(dotdf, win=13, cop_ix=None):
 
     return dotdf
 
-def get_step_shift_index(dary, find_stepup=True):
+def get_step_shift_index(dary, find_stepup=True, plot=False):
     '''
     get index of shift in a noisy step function
     '''
@@ -309,10 +359,11 @@ def get_step_shift_index(dary, find_stepup=True):
     else:
         step_indx = np.argmin(dary_step)  # 
     # for plotting:
-#     pl.figure()
-#     pl.plot(dary)
-#     pl.plot(dary_step/100)
-#     pl.plot((step_indx, step_indx), (dary_step[step_indx]/100, 0), 'r')
+    if plot:
+        pl.figure()
+        pl.plot(dary)
+        pl.plot(dary_step/100)
+        pl.plot((step_indx, step_indx), (dary_step[step_indx]/100, 0), 'r')
     return step_indx
 
 # get chunks
@@ -336,6 +387,11 @@ def get_step_indices(dotdf, speed_var='lin_speed_filt', t_start=20,
         curr_chunk = tmpdf[ (tmpdf['time']>=t_start) & (tmpdf['time']<=t_stop)].copy().interpolate()
         #if i==(n_levels-1):
         find_stepup = i < (n_levels-1)
+        # check in case speed does not actually drop at end:
+        if i==(n_levels-1) and tmpdf.iloc[-20:][speed_var].mean()<5:
+            find_stepup = False
+        else:
+            find_stepup = True
         tmp_step_ix = get_step_shift_index(np.array(curr_chunk[speed_var].values),
                                           find_stepup=find_stepup)
         step_ix = curr_chunk.iloc[tmp_step_ix].name
@@ -347,9 +403,8 @@ def add_speed_epoch(dotdf, step_dict):
     '''
     Use step indices found with get_step_indices() to split speed-varying trajectory df into epochs
     '''
-    dotdf.loc[:step_dict[0], 'epoch'] = 0
-    #flydf.loc[:step_dict[0], 'epoch'] = 0
     last_ix = step_dict[0]
+    dotdf.loc[:last_ix, 'epoch'] = 0
     step_dict_values = list(step_dict.values())
     for i, v in enumerate(step_dict_values):
         if v == step_dict_values[-1]:
@@ -465,3 +520,29 @@ def get_filtered_pos(df, bp, pcutoff=0.9, return_df=True):
     else:
         return x_filt, y_filt
 
+## Cowley et al.
+
+def dlc_to_multipos_array(df, bps=['head', 'thorax', 'abdomentip'], pcutoff=0.95):
+    '''
+    Takes multi-index DLC df of 1 fly's coords, and converts to (2,3,T)
+    for x/y, head/body/tail, timepoints.
+    '''
+    xy_list=[]
+    df_ = df[bps].copy()
+    for bp in bps:
+        prob = df_.xs(
+            (bp, "likelihood"), level=(-2, -1), axis=1
+        ).values.squeeze()
+        mask = prob < pcutoff
+        temp_x = np.ma.array(
+            df_.xs((bp, "x"), level=(-2, -1), axis=1).values.squeeze(),
+            mask=mask)
+        temp_y = np.ma.array(
+            df_.xs((bp, "y"), level=(-2, -1), axis=1).values.squeeze(),
+            mask=mask)
+        xy_ = np.array([temp_x, temp_y])
+        xy_list.append(xy_)
+    xy = np.dstack(xy_list)
+    positions_male = np.swapaxes(xy, 2, 1)
+
+    return positions_male
