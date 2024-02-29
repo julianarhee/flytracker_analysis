@@ -169,7 +169,7 @@ def mat_split_courtship_bouts(bin_, bout_marker='Disengaged'):
     '''
     Use binary Disengaged 1 or 0 to find bout starts, assign from 0
     '''
-    diff_ = bin_['Disengaged'].diff()
+    diff_ = bin_[bout_marker].diff()
     bout_starts = np.where(diff_!=0)[0] # each of these index values is the START ix of a bout
     for i, v in enumerate(bout_starts):
         if i == len(bout_starts)-1:
