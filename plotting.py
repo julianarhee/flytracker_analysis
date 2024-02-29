@@ -403,3 +403,37 @@ def plot_ethogram(positions, ev, plot_behaviors=[], behavior_colors=[], nonbinar
     pl.subplots_adjust(left=0.1, right=0.8, top=0.9)
     return fig
 
+def add_colored_lines(b_, ax, xvar='ft_posx', yvar='ft_posy', 
+                    hue_var='heading', cmap='hsv', norm=None,
+                    lw=1, alpha=1):
+    '''
+    Plot lines between x, y points in bout, b_, with specified colors.
+
+    Arguments:
+        b_ -- _description_
+        ax -- _description_
+
+    Keyword Arguments:
+        xvar -- _description_ (default: {'ft_posx'})
+        yvar -- _description_ (default: {'ft_posy'})
+        hue_var -- _description_ (default: {'heading'})
+        cmap -- _description_ (default: {'hsv'})
+        norm -- _description_ (default: {None})
+
+    Returns:
+        ax
+    '''
+    #if norm is None:
+    #    mpl.colors.Normalize(theta_range[0], theta_range[1])
+    assert norm is not None, "Must provide norm"
+    xy = b_[[xvar, yvar]].values
+    xy = xy.reshape(-1, 1, 2)
+    huev = b_[hue_var].values
+    #print(huev.dtype)
+    segments = np.hstack([xy[:-1], xy[1:]])
+    coll = mpl.collections.LineCollection(segments, cmap=cmap, norm=norm,
+                                lw=lw, alpha=alpha) #plt.cm.gist_ncar)
+    coll.set_array(huev) #np.random.random(xy.shape[0]))
+    ax.add_collection(coll)
+    return ax
+
