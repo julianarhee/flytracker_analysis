@@ -409,7 +409,7 @@ def load_mat(mat_fpaths): #results_dir):
 
     return df
 
-def load_binary_evs_from_mat(matlab_src, feat=None,
+def load_binary_evs_from_mat(matlab_src, feat=None, sex='m',
                 behavior_names=['Bilateral Wing Extensions', 'Unilateral Wing Extensions', 'Putative Tap Events', 'Chasing', 'Licking/Proboscis Ext', 'Copulation Attempts', 'Orienting']):
 
     '''
@@ -433,6 +433,10 @@ def load_binary_evs_from_mat(matlab_src, feat=None,
             mat[sp] = [mat[sp]]
         for acq_ix, acq_mat in enumerate(mat[sp]):
             acq = acq_mat['acquisition']
+            if feat is not None and acq not in feat['acquisition'].unique():
+                print("skipping: {}".format(acq))
+                continue
+
             #if acq in ['20240109-1039_fly1_eleWT_4do_sh_eleWT_4do_gh']:
             #    continue
             print(sp, acq)
@@ -446,19 +450,15 @@ def load_binary_evs_from_mat(matlab_src, feat=None,
             bin_['Orienting Only'] = 0
             bin_['Orienting Only'].loc[ori_only.index] = 1
 
-            #bouts_ = util.mat_get_bout_indices(acq_mat) #mat[sp][acq_ix])
+            #bouts_ =.mat_get_bout_indices(acq_mat) #mat[sp][acq_ix])
             # get features mat
             if feat is not None:
-                feat_ = feat[(feat['acquisition']==acq) & (feat['sex']=='m')].copy().reset_index(drop=True)
+                feat_ = feat[(feat['acquisition']==acq) & (feat['sex']==sex)].copy().reset_index(drop=True)
                 bin_ = bin_.loc[0:feat_['frame'].iloc[-1]] # Only grab til copulation index
                 assert bin_.shape[0]==feat_.shape[0], "Incorrect shapes for merging: binary evs {} and feat {}".format(bin_.shape, feat_.shape)
                 evs_ = pd.merge(bin_, feat_, left_index=True, right_index=True)
             else:
                 evs_ = bin_.copy()
-            # bouts
-            #bouts_['acquisition'] = acq_mat['acquisition']
-            #bouts_['species'] = sp
-            #bouts_['strain'] = feat_['strain'].unique()[0]
             binevs_list.append(evs_)
     events = pd.concat(binevs_list).reset_index()
 
@@ -541,6 +541,8 @@ def aggr_feat_mats(found_sessionpaths):
         if acq == '20240109-1039_fly1_eleWT_4do_sh_eleWT_4do_gh':
             # RERUN, unequal feat and trk sizes
             continue
+        elif 'BADTRACKING' in acq:
+            continue
 
         try:
             calib_, trk_, feat_ = load_flytracker_data(acq_dir) #os.path.join(videodir, acq))
@@ -555,18 +557,24 @@ def aggr_feat_mats(found_sessionpaths):
             print(acq, calib_['cop_ind'])
             
         # get species
-        if 'mel-' in acq:
+        if 'mel' in acq:
             species_abbr = 'mel'
-            species_strain = 'na'
-        elif 'suz-' in acq:
+            species_strain = 'wt'
+        elif 'suz' in acq:
             species_abbr = 'suz'
-            species_strain = 'na'
+            species_strain = 'wt'
+        elif 'ele' in acq:
+            species_abbr = 'ele'
+            species_strain = 'wt'
+        elif 'yak' in acq:
+            species_abbr = 'yak'
+            species_strain = 'wt'
         else:
             if '_fly' in acq:
                 species_abbr = acq.split('_')[2]
             else:
                 species_abbr = acq.split('_')[1]
-            species_strain = 'na'
+            species_strain = 'wt'
             if species_abbr.startswith('mau'):
                 species_strain = species_abbr[3:]
                 species_abbr = species_abbr[0:3]
@@ -574,12 +582,13 @@ def aggr_feat_mats(found_sessionpaths):
                 species_abbr = 'mel'
                 species_strain = 'cantons'
         # get age
-        if '_fly' in acq:
-            age = int(re.sub('\D', '', acq.split('_')[3]))
-        elif len(acq.split('_'))<2:
-            age = None
-        else:
-            age = int(re.sub('\D', '', acq.split('_')[2]))
+        age = int(re.findall('(\d{1}do)', acq)[0][0])
+#        if '_fly' in acq:
+#            age = int(re.sub('\D', '', acq.split('_')[3]))
+#        elif len(acq.split('_'))<2:
+#            age = None
+#        else:
+#            age = int(re.sub('\D', '', acq.split('_')[2]))
 
         # get sex
         cop_ix = calib_['cop_ind'] if calib_['cop_ind']>=1 else feat_['frame'].iloc[-1]
@@ -829,4 +838,71 @@ def smooth_timecourse(in_trace, win_size=42):
      
     return smooth_trace[int(win_half/2):-int(win_half/2)]
 
+###
+import scipy.stats as spstats
+def groupby_circmeans(d_, circ_vars=['min_wing_ang', 'max_wing_ang',  'angle_between', 'facing_angle']):
+    return pd.concat([pd.DataFrame({varname: spstats.circmean(d_[varname], np.pi, 0)}, index=[0]) for varname in circ_vars], axis=1)
 
+def binary_events_to_bouts(events,
+        groups = ['species', 'acquisition', 'Disengaged', 'copulation']):
+    # Get SUM/MEAN of each binary event per bout
+    #groups = ['species', 'acquisition', 'Disengaged', 'copulation']
+    bouts = events.groupby(groups, group_keys=True)\
+                     .apply(get_bout_durs, return_as_df=True).reset_index()
+    grab_cols =  ['All Wing Extensions', 'Putative Tap Events', 
+                  'Chasing', 'Licking/Proboscis Ext', 'Copulation Attempts', 'Orienting',
+                 'Orienting Only', 'Unilateral Wing Extensions', 'Bilateral Wing Extensions']
+    #grab_cols.extend(['species', 'acquisition', 'boutnum'])
+    #counts = events.groupby(['acquisition', 'species', 'boutnum']).mean().reset_index()[grab_cols] ## should it be counts? maybe a fraction (fraction of bout)
+    counts = events.groupby(['acquisition', 'species', 'boutnum'])[grab_cols].mean().reset_index() ## should it be counts? maybe a fraction (fraction of bout)
+    bouts = bouts.merge(counts, on=['acquisition', 'species', 'boutnum'])
+    # Merge with FEAT averages 
+    feat_vars = ['vel', 'ang_vel', 'mean_wing_length',
+               'axis_ratio', 'fg_body_ratio', 'contrast', 'dist_to_wall',
+               'dist_to_other', 'leg_dist']
+    circ_vars = ['min_wing_ang', 'max_wing_ang',  'angle_between', 'facing_angle']
+    # Get average per bout for the other values
+    feat_means = events.groupby(['acquisition', 'species', 'boutnum'])[feat_vars].mean().reset_index()
+    feat_means_circ = events.groupby(['acquisition', 'species', 'boutnum']).apply(groupby_circmeans).reset_index()
+    feat_means = feat_means.merge(feat_means_circ, on=['acquisition', 'species', 'boutnum'])
+    #feat_means
+    bouts = bouts.merge(feat_means, on=['acquisition', 'species', 'boutnum'])
+
+    return bouts
+
+def custom_filter_events(events):
+    # manual
+    # acq = '20220130-1143_mauR_4do_sh'
+    events.loc[(events['acquisition']=='20220130-1143_mauR_4do_sh')
+               & (events['index']>=2304) & (events['index']<=2308), 'Licking Proboscis Ext'] = 1
+    events.loc[(events['acquisition']=='20220130-1143_mauR_4do_sh') 
+               & (events['index']>=2309) & (events['index']<=2313), 'Copulation Attempts'] = 1
+
+    # acq = '20220128-1516_mauR4_4do_gh'
+    # 16464, '20220128-1516_mauR4_4do_gh', uwe, but is grooming
+    #16464, '20220128-1516_mauR4_4do_gh', uwe, but is grooming
+    # 22590, def tap
+    # 23090+ abdomen vibrating?
+    events.loc[(events['acquisition']=='20220128-1516_mauR4_4do_gh') 
+            & (events['index']<=22095), 'Unilateral Wing Extensions'] = 0
+    events.loc[(events['acquisition']=='20220128-1516_mauR4_4do_gh') 
+            & (events['index']<=22095), 'All Wing Extensions'] = 0
+
+    events.loc[(events['acquisition']=='20220128-1516_mauR4_4do_gh') 
+            & (events['index']>=22630) & (events['index']<=22640), 'Licking/Proboscis Ext'] = 1
+    events.loc[(events['acquisition']=='20220128-1516_mauR4_4do_gh') 
+            & (events['index']>=22685) & (events['index']<=22704), 'Licking/Proboscis Ext'] = 1
+    events.loc[(events['acquisition']=='20220128-1516_mauR4_4do_gh') 
+            & (events['index']>=22720) & (events['index']<=22722), 'Licking/Proboscis Ext'] = 1
+
+    events.loc[(events['acquisition']=='20220128-1516_mauR4_4do_gh') 
+            & (events['index']>=22640) & (events['index']<=22656), 'Copulation Attempts'] = 1
+    events.loc[(events['acquisition']=='20220128-1516_mauR4_4do_gh') 
+            & (events['index']>=22704) & (events['index']<=22706), 'Copulation Attempts'] = 1
+
+    events.loc[(events['acquisition']=='20220128-1516_mauR4_4do_gh') 
+            & (events['index']>=22800) & (events['index']<=22905), 'Orienting'] = 1
+    events.loc[(events['acquisition']=='20220128-1516_mauR4_4do_gh') 
+            & (events['index']>=22095) & (events['index']<=22932), 'Chasing'] = 1
+
+    return events
