@@ -16,13 +16,13 @@ def get_videos(folder, vid_type='.avi'):
     found_vidpaths = glob.glob(os.path.join(folder, '*{}'.format(vid_type)))
     return found_vidpaths
 
-project = 'projector-1dot-jyr-2024-02-18'
+project = '38mm-dyad-jyr-2024-02-23'
 rootdir = '/rugpfs/fs0/ruta_lab/scratch/jrhee/DeepLabCut'
 
 project_path = os.path.join(rootdir, project)
 config_path = os.path.join(project_path, 'config.yaml')
 
-assay = 'projector-1dot'
+assay = '38mm-dyad'
 data_basepath = os.path.join('/rugpfs/fs0/ruta_lab/store/jrhee/DeepLabCut', assay, 'videos') #data'
 destfolder = os.path.join(os.path.split(data_basepath)[0], 'analyzed_videos', project)
 if not os.path.exists(destfolder):
