@@ -57,14 +57,17 @@ def get_continuous_numbers(nums):
 
 
 #
-def convert_df_units(flydf, mm_per_pix):
+def convert_df_units(flydf, mm_per_pix, win=1):
 
     flydf['dist_to_other_mm'] = flydf['dist_to_other']*mm_per_pix
     flydf['lin_speed_mms'] = flydf['lin_speed']*mm_per_pix
     # flydf['rel_vel'] = flydf['dist_to_other']/(5/fps)
-    flydf['dist_to_other_mm_diff'] =  flydf['dist_to_other_mm'].diff().fillna(0) # if dist incr, will be pos, if distance decr, will be neg
-    flydf['time_diff'] =  flydf['time'].diff().fillna(0) # if dist incr, will be pos, if distance decr, will be neg
-    flydf['rel_vel_mms'] = flydf['dist_to_other_mm_diff'].abs() / (5*flydf['time_diff']) #(5/fps) # if neg, objects are getting 
+    flydf['dist_to_other_mm_diff'] =  flydf['dist_to_other_mm'].interpolate().diff()# if dist incr, will be pos, if distance decr, will be neg
+    flydf['time_diff'] =  flydf['time'].interpolate().diff() # if dist incr, will be pos, if distance decr, will be neg
+
+    #flydf['dist_to_other_mm_diff'] =  flydf['dist_to_other_mm'].diff().fillna(0) # if dist incr, will be pos, if distance decr, will be neg
+    #flydf['time_diff'] =  flydf['time'].diff().fillna(0) # if dist incr, will be pos, if distance decr, will be neg
+    flydf['rel_vel_mms'] = flydf['dist_to_other_mm_diff'].abs() / (win*flydf['time_diff']) #(5/fps) # if neg, objects are getting 
 
     # flydf['centroid_x_mm'] = flydf['centroid_x']*mm_per_pix
     # flydf['centroid_y_mm'] = flydf['centroid_y']*mm_per_pix
