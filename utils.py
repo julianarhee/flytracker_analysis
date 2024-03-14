@@ -39,8 +39,188 @@ def check_nan(wingR):
     return wingR
 
 # ---------------------------------------------------------------------
+# Some vector calcs 
+# ---------------------------------------------------------------------
+def unit_vector(vector):
+    """ Returns the unit vector of the vector.  """
+    return vector / np.linalg.norm(vector)
+
+def angle_between(v1, v2):
+    """ Returns the angle in radians between vectors 'v1' and 'v2'::
+
+            >>> angle_between((1, 0, 0), (0, 1, 0))
+            1.5707963267948966
+            >>> angle_between((1, 0, 0), (1, 0, 0))
+            0.0
+            >>> angle_between((1, 0, 0), (-1, 0, 0))
+            3.141592653589793
+    """
+    v1_u = unit_vector(v1)
+    v2_u = unit_vector(v2)
+    return np.arccos(np.clip(np.dot(v1_u, v2_u), -1.0, 1.0))
+
+def get_heading_vector(f_ori, f_len):
+    # female ori and length
+    # get female heading as a vector
+    th = (np.pi - f_ori) % np.pi
+    y_ = f_len/2 * np.sin(th)
+    x_ = f_len/2 * np.cos(th)
+    return np.array([x_, y_])
+
+def proj_a_onto_b(a, b):
+    #np.sqrt(female_hat[0]**2 + female_hat[1]**2)
+    #sign = -1 if f_ori < 0 else 1
+    #vproj_ = sign * np.array(ortho_hat) * (np.dot(f_vec, ortho_) / np.linalg.norm(ortho_)**2) #, ortho_)
+    #vproj_ = np.array(ortho_) * (np.dot(f_vec, ortho_) / np.linalg.norm(ortho_)**2) #, ortho_)
+    vproj_ = np.array(b) * (np.dot(a, b) / np.linalg.norm(b)**2) #, ortho_)
+    #ang_bw = angle_between(female_hat, ortho_)
+    #proj_ = ortho_hat* np.sqrt(x_**2 + y_**2) * np.cos(ang_bw)
+    return vproj_
+
+def calculate_female_size_deg(xi, yi, f_ori, f_len):
+    '''
+    Calculate size of target (defined by f_ori, f_len) in degrees of visual angle.
+    Finds vector orthogonal to focal and target flies. Calculates heading of target using f_ori and f_len. Then, projects target heading onto orthogonal vector.
+    Size is calculated as 2*arctan(fem_sz/(2*dist_to_other)).
+    Note: make sure units are consistent (e.g., pixels for f_len, xi, yi).
+
+    Arguments:
+        xi -- x coordinate of vector between focal and target flies
+        yi -- y coordinate of vector between focal and target flies
+        f_ori -- orientation of target fly (from FlyTracker, -180 to 180; 0 faces east, positive is CCW)
+        f_len -- length of target fly (from FlyTracker, in pixels)
+
+    Returns:
+        Returns calculated size in deg for provided inputs.
+    '''
+    # get vector between male and female
+    #xi = fly2.loc[ix][xvar] - fly1.loc[ix][xvar] 
+    #yi = fly2.loc[ix][yvar] - fly1.loc[ix][yvar]
+
+    # get vector orthogonal to male's vector to female
+    ortho_ = [yi, -xi] #ortho_hat = ortho_ / np.linalg.norm(ortho_)
+
+    # project female heading vec onto orthog. vec
+    #f_ori = fly2.loc[ix]['ori']
+    #f_len = fly2.loc[ix]['major_axis_len']
+    fem_vec = get_heading_vector(f_ori, f_len) #np.array([x_, y_])
+    #female_hat = fem_vec / np.linalg.norm(fem_vec)
+    vproj_ = proj_a_onto_b(fem_vec, ortho_)
+
+    # calculate detg vis angle
+    fem_sz = np.sqrt(vproj_[0]**2 + vproj_[1]**2) * 2
+    dist_to_other = np.sqrt(xi**2 + yi**2)
+    fem_sz_deg = 2*np.arctan(fem_sz/(2*dist_to_other))
+
+    return fem_sz_deg
+
+
+def center_coordinates(df, frame_width, frame_height, 
+                       xvar='pos_x', yvar='pos_y', ctrx='ctr_x', ctry='ctr_y'):
+    '''
+    _summary_
+
+    Arguments:
+        df -- pd.DataFrame with columns xvar and yvar
+        frame_width -- height of frame, corresponds to fly x-pos
+        frame_height -- width of frame, corresponds to fly y-pos
+
+    Keyword Arguments:
+        xvar -- _description_ (default: {'pos_x'})
+        yvar -- _description_ (default: {'pos_y'})
+        ctrx_x -- _description_ (default: {'ctr_x'})
+        ctrx_y -- _description_ (default: {'ctr_y'})
+
+    Returns:
+        df -- pd.DataFrame with new columns ctr_x and ctr_y
+    '''
+    df[ctrx] = df[xvar] - frame_width/2
+    df[ctry] = df[yvar] - frame_height/2
+
+    return df
+
+def translate_coordinates_to_focal_fly(fly1, fly2):
+    '''
+    Translate coords so that x, y of focal fly (fly1) is (0, 0). 
+    Assumes coordsinates have been centered already (ctr_x, ctr_y).
+
+    Arguments:
+        fly1 -- _description_
+        fly2 -- _description_
+
+    Returns:
+        fly1, fly2 with columns 'trans_x' and 'trans_y'. fly1 is 0.
+    '''
+    assert 'ctr_x' in fly1.columns, "No 'ctr_x' column in fly1 df"
+    fly1['trans_x'] = fly1['ctr_x'] - fly1['ctr_x']
+    fly1['trans_y'] = fly1['ctr_y'] - fly1['ctr_y']
+    fly2['trans_x'] = fly2['ctr_x'] - fly1['ctr_x']
+    fly2['trans_y'] = fly2['ctr_y'] - fly1['ctr_y']
+
+    return fly1, fly2
+
+def rotate_coordinates_to_focal_fly(fly1, fly2):
+    '''
+    Apply rotation to fly2 so that fly1 is at 0 heading.
+    Assumes 'ori' is a column in fly1 and fly2. (from FlyTracker)
+
+    Arguments:
+        fly1 -- _description_
+        fly2 -- _description_
+
+    Returns:
+        fly1, fly2 with columns 'rot_x' and 'rot_y'. fly1 is 0.
+
+    '''
+    assert 'trans_x' in fly1.columns, "trans_x not found in fly1 DF"
+    ori_vals = fly1['ori'].values # -pi to pi
+    ori = -1*ori_vals + np.deg2rad(0) # ori - ori is 0 heading 
+
+    fly2[['rot_x', 'rot_y']]= np.nan
+    fly1[['rot_x', 'rot_y']] = 0
+
+    rotmats = np.array([np.array([[np.cos(theta), -np.sin(theta)], [np.sin(theta), np.cos(theta)]])\
+                for theta in ori] )
+
+    xys = fly2[['trans_x', 'trans_y']].values
+    fly2[['rot_x', 'rot_y']] = [xy.dot(rot) for xy, rot in zip(xys, rotmats)]
+    fly2['rot_ori'] = fly2['ori'] + ori                 
+    fly1['rot_ori'] = fly1['ori'] + ori # should be 0
+
+    return fly1, fly2
+
+
+def cart2pol(x, y):
+    rho = np.sqrt(x**2 + y**2)
+    phi = np.arctan2(y, x)
+    return(rho, phi)
+
+def pol2cart(rho, phi):
+    x = rho * np.cos(phi)
+    y = rho * np.sin(phi)
+    return(x, y)
+
+
+# ---------------------------------------------------------------------
 # Data loading and formatting
 # ---------------------------------------------------------------------
+def get_videos(folder, vid_type='.avi'):
+    '''
+    _summary_
+
+    Arguments:
+        folder -- parent dir containing video files
+
+    Keyword Arguments:
+        vid_type -- _description_ (default: {'.avi'})
+
+    Returns:
+        returns list of video file paths
+    '''
+    found_vidpaths = glob.glob(os.path.join(folder, '*{}'.format(vid_type)))
+
+    return found_vidpaths
+
 def get_acq_dir(sessionid, assay_prefix='single_20mm*', rootdir='/mnt/sda/Videos'):
     '''
     Args:
