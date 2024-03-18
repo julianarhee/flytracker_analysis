@@ -204,6 +204,20 @@ def pol2cart(rho, phi):
 # ---------------------------------------------------------------------
 # Data loading and formatting
 # ---------------------------------------------------------------------
+def get_acq_from_ftpath(fp, viddir):     
+    '''
+    Return acq name (subdir of viddir that contains video file)
+
+    Arguments:
+        fp -- _description_
+        viddir -- _description_
+
+    Returns:
+        _description_
+    '''
+    acq = os.path.split(os.path.split(fp.split(viddir+'/')[-1])[0])[0]
+    return acq
+
 def get_videos(folder, vid_type='.avi'):
     '''
     _summary_
