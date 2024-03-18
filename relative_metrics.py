@@ -153,14 +153,19 @@ def get_target_sizes_df(fly1, fly2, xvar='pos_x', yvar='pos_y'):
         xi = fly2.loc[ix][xvar] - fly1.loc[ix][xvar] 
         yi = fly2.loc[ix][yvar] - fly1.loc[ix][yvar]
         f_ori = fly2.loc[ix]['ori']
-        f_len = fly2.loc[ix]['major_axis_len']
-        fem_sz_deg = util.calculate_female_size_deg(xi, yi, f_ori, f_len)
+        f_len_maj = fly2.loc[ix]['major_axis_len']
+        f_len_min = fly2.loc[ix]['minor_axis_len']
+        # take into account major/minor axes of ellipse
+        fem_sz_deg_maj = util.calculate_female_size_deg(xi, yi, f_ori, f_len_maj)
+        fem_sz_deg_min = util.calculate_female_size_deg(xi, yi, f_ori, f_len_min)
+        fem_sz_deg = np.max([fem_sz_deg_maj, fem_sz_deg_min])
         fem_sizes.append(fem_sz_deg)
-    fly2['ang_size'] = fem_sizes
-    fly2['ang_size_deg'] = np.rad2deg(fly2['ang_size'])
+
+    fly2['targ_ang_size'] = fem_sizes
+    fly2['targ_ang_size_deg'] = np.rad2deg(fly2['targ_ang_size'])
     # copy same info for f1
-    fly1['ang_size'] = fem_sizes
-    fly1['ang_size_deg'] = np.rad2deg(fly2['ang_size'])
+    fly1['targ_ang_size'] = fem_sizes
+    fly1['targ_ang_size_deg'] = np.rad2deg(fly2['targ_ang_size'])
 
     return fly1, fly2
 
@@ -225,6 +230,21 @@ def get_copulation_ix(acq):
 
     return cop_ix
 
+def get_video_cap(acqdir, movie_fmt='avi'):
+    vids = util.get_videos(acqdir, vid_type=movie_fmt)
+    alt_movie_fmt = 'mp4' if movie_fmt=='avi' else 'avi'
+    try:
+        assert len(vids)>0, "Found no video in directory: {}".format(vids)
+        vids = [vids[-1]]
+    except AssertionError as e:
+        vids = util.get_videos(acqdir, vid_type=alt_movie_fmt)
+        assert len(vids)==1, "Found more than one video in directory: {}".format(vids)  
+
+    vidpath = vids[0]
+    cap = cv2.VideoCapture(vidpath)
+    return cap
+
+
 def get_metrics_relative_to_focal_fly(acqdir, fps=60, cop_ix=None,
                                       movie_fmt='avi', flyid1=0, flyid2=1,
                                       plot_checks=False,
@@ -252,17 +272,19 @@ def get_metrics_relative_to_focal_fly(acqdir, fps=60, cop_ix=None,
     calib_, trk_, feat_ = util.load_flytracker_data(acqdir, fps=fps)
 
     # get video file for plotting/sanity checks
-    vids = util.get_videos(acqdir, vid_type=movie_fmt)
-    alt_movie_fmt = 'mp4' if movie_fmt=='avi' else 'avi'
-    try:
-        assert len(vids)>0, "Found no video in directory: {}".format(vids)
-        vids = [vids[-1]]
-    except AssertionError as e:
-        vids = util.get_videos(acqdir, vid_type=alt_movie_fmt)
-        assert len(vids)==1, "Found more than one video in directory: {}".format(vids)  
+#    vids = util.get_videos(acqdir, vid_type=movie_fmt)
+#    alt_movie_fmt = 'mp4' if movie_fmt=='avi' else 'avi'
+#    try:
+#        assert len(vids)>0, "Found no video in directory: {}".format(vids)
+#        vids = [vids[-1]]
+#    except AssertionError as e:
+#        vids = util.get_videos(acqdir, vid_type=alt_movie_fmt)
+#        assert len(vids)==1, "Found more than one video in directory: {}".format(vids)  
+#
+#    vidpath = vids[0]
+#    cap = cv2.VideoCapture(vidpath)
+    cap = get_video_cap(acqdir, movie_fmt=movie_fmt)
 
-    vidpath = vids[0]
-    cap = cv2.VideoCapture(vidpath)
     # N frames should equal size of DCL df
     n_frames = cap.get(cv2.CAP_PROP_FRAME_COUNT)
     frame_width  = cap.get(cv2.CAP_PROP_FRAME_WIDTH)   # float `width`

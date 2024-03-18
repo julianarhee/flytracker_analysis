@@ -181,7 +181,7 @@ plotdf = meandf[meandf['boutdur']>=min_boutdur]
 
 varname = 'courting'
 x = 'rel_vel_abs'
-y = 'ang_size_deg'
+y = 'targ_ang_size_deg'
 if varname=='notcourting':
     g = sns.jointplot(data=plotdf[plotdf['courting']==0].reset_index(drop=True), 
                 x=x, y=y, 
@@ -258,12 +258,12 @@ ax=axn[0]
 sns.histplot(data=m1[m1['courting']==1], x='rel_vel_abs', ax=ax)
 sns.histplot(data=m2[m2['courting']==1], x='rel_vel_mms', ax=ax)
 ax=axn[1]
-sns.histplot(data=m1[m1['courting']==1], x='ang_size_deg', ax=ax)
+sns.histplot(data=m1[m1['courting']==1], x='targ_ang_size_deg', ax=ax)
 sns.histplot(data=m2[m2['courting']==1], x='rel_ang_size_deg', ax=ax)
 #%%
 
 fig, axn = pl.subplots(1, 2)
-plot_vars = {'ang_size_deg': 'rel_ang_size_deg',
+plot_vars = {'targ_ang_size_deg': 'rel_ang_size_deg',
              'rel_vel_abs': 'rel_vel_mms'}
 
 
@@ -287,7 +287,7 @@ def plot_polar_pos_with_hists(plotdf,
             min_pos_theta=np.deg2rad(-160), max_pos_theta=np.deg2rad(160)):
     '''
     Plot polar with relative locations, color by rel_vel_abs.
-    Also plot 3 histograms below: ang_size_deg, rel_vel_abs, dist_to_other.
+    Also plot 3 histograms below: targ_ang_size_deg, rel_vel_abs, dist_to_other.
 
     Arguments:
         plotdf -- _description_
@@ -303,7 +303,7 @@ def plot_polar_pos_with_hists(plotdf,
     spec = gridspec.GridSpec(ncols=3, nrows=3)
 
     ax = fig.add_subplot(spec[-1, 0])
-    sns.histplot(data=plotdf, x='ang_size_deg', color=[0.7]*3, ax=ax,
+    sns.histplot(data=plotdf, x='targ_ang_size_deg', color=[0.7]*3, ax=ax,
                 stat='probability')
     ax.set_box_aspect(1)
 
