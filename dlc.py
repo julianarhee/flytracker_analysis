@@ -8,6 +8,7 @@ Author         : jyr
 Email          : juliana.rhee@gmail.com
 Last Modified  : 
 '''
+import os
 import numpy as np
 import pandas as pd
 import scipy.stats as spstats
@@ -55,6 +56,9 @@ def get_continuous_numbers(nums):
     edges = iter(nums[:1] + sum(gaps, []) + nums[-1:])
     return list(zip(edges, edges))
 
+# filepaht stuff
+def get_acq_from_dlc_fpath(fpath):
+    return '_'.join(os.path.split(fpath.split('DLC')[0])[-1].split('_')[0:-1])
 
 #
 def convert_df_units(flydf, mm_per_pix, win=1):
@@ -86,12 +90,29 @@ def convert_df_units(flydf, mm_per_pix, win=1):
     return flydf
  
 def get_fly_params(flypos, cop_ix=None, win=5, fps=60):
+    '''
+    Convert tracked DLC coords to flytracker params.
+    TODO: change 'heading' to 'ori'
+
+    Arguments:
+        flypos -- _description_
+
+    Keyword Arguments:
+        cop_ix -- _description_ (default: {None})
+        win -- _description_ (default: {5})
+        fps -- _description_ (default: {60})
+
+    Returns:
+        _description_
+    '''
     if cop_ix is None:
         cop_ix = len(flypos)
+    flypos = flypos.iloc[:cop_ix]
+
     fly_ctr = get_animal_centroid(flypos)
     # get some more female parameters
-    flydf = pd.DataFrame(get_bodypart_angle(flypos.iloc[:cop_ix], 'head', 'thorax'),
-                                columns=['heading'])
+    flydf = pd.DataFrame(get_bodypart_angle(flypos, 'abdomentip', 'head'),
+                                columns=['ori'])
     flydf['centroid_x'] = fly_ctr[:cop_ix, 0]
     flydf['centroid_y'] = fly_ctr[:cop_ix, 1]
     flydf['lin_speed'] = np.concatenate(
@@ -100,18 +121,21 @@ def get_fly_params(flypos, cop_ix=None, win=5, fps=60):
                             axis=1)))) / (win/fps)
     leftw = get_bodypart_angle(flypos, 'thorax', 'wingL')
     rightw = get_bodypart_angle(flypos, 'thorax', 'wingR')
-    flydf['left_wing_angle'] = wrap2pi(circular_distance(flydf['heading'].interpolate(), leftw)) - np.pi
-    flydf['right_wing_angle'] = wrap2pi(circular_distance(flydf['heading'].interpolate(), rightw)) - np.pi
+    flydf['left_wing_angle'] = wrap2pi(circular_distance(flydf['ori'].interpolate(), leftw)) - np.pi
+    flydf['right_wing_angle'] = wrap2pi(circular_distance(flydf['ori'].interpolate(), rightw)) - np.pi
     flydf['inter_wing_dist'] = get_bodypart_distance(flypos, 'wingR', 'wingL')
+    flydf['body_length'] = get_bodypart_distance(flypos, 'head', 'abdomentip')
+    flydf['frame'] = np.arange(len(flydf))
 
     return flydf
 
 def get_dot_params(dotpos, cop_ix=None):
     if cop_ix is None:
         cop_ix = len(dotpos)
+    dotpos = dotpos.iloc[:cop_ix]
     dot_ctr = get_animal_centroid(dotpos)
     dotdf = pd.DataFrame(get_bodypart_angle(dotpos.iloc[:cop_ix], 'center', 'top'),
-                                columns=['heading'])
+                                columns=['ori'])
     dotdf['centroid_x'] = dot_ctr[:cop_ix, 0]
     dotdf['centroid_y'] = dot_ctr[:cop_ix, 1]
     dotdf['lin_speed'] = np.concatenate(
@@ -120,9 +144,11 @@ def get_dot_params(dotpos, cop_ix=None):
                             axis=1))))
     leftw_d = get_bodypart_angle(dotpos, 'center', 'left')
     rightw_d = get_bodypart_angle(dotpos, 'center', 'right')
-    dotdf['left_wing_angle'] = wrap2pi(circular_distance(dotdf['heading'].interpolate(), leftw_d)) - np.pi
-    dotdf['right_wing_angle'] = wrap2pi(circular_distance(dotdf['heading'].interpolate(), rightw_d)) - np.pi
+    dotdf['left_wing_angle'] = wrap2pi(circular_distance(dotdf['ori'].interpolate(), leftw_d)) - np.pi
+    dotdf['right_wing_angle'] = wrap2pi(circular_distance(dotdf['ori'].interpolate(), rightw_d)) - np.pi
     dotdf['inter_wing_dist'] = get_bodypart_distance(dotpos, 'left', 'right')
+    dotdf['body_length'] = get_bodypart_distance(dotpos, 'top', 'bottom')
+    dotdf['frame'] = np.arange(len(dotdf))
 
     return dotdf
 
@@ -138,19 +164,34 @@ def get_interfly_params(flydf, dotdf, cop_ix=None):
     IFD = np.sqrt(np.sum(np.square(dot_ctr - fly_ctr),axis=1))
     flydf['dist_to_other'] = IFD[:cop_ix]
     flydf['facing_angle'], flydf['ang_between'] = get_relative_orientations(
-                                                            flydf, dotdf)
+                                                            flydf, dotdf,
+                                                            ori_var='ori')
     dotdf['dist_to_other'] = IFD[:cop_ix]
-    dotdf['facing_angle'], dotdf['ang_between'] = get_relative_orientations(dotdf, flydf)
+    dotdf['facing_angle'], dotdf['ang_between'] = get_relative_orientations(dotdf, flydf,
+                                                                            ori_var='ori')
     return flydf, dotdf
 
 
-def load_trk_df(fpath, flyid='fly', fps=60, max_jump=6, cop_ix=None):
+def load_trk_df(fpath, flyid='fly', fps=60, max_jump=6, 
+                cop_ix=None, filter_bad_frames=True, pcutoff=0.9):
     
     trk = pd.read_hdf(fpath)
+
+
+    #bad_ixs = df[df[df.columns[df.columns.get_level_values(3)=='likelihood']] < 0.99].any(axis=1)
+    #bad_ixs = df[df[df[df.columns[df.columns.get_level_values(3)=='likelihood']] < 0.9].any(axis=1)].index.tolist()            
+
     tstamp = np.linspace(0, len(trk) * 1 / fps, len(trk))
     flypos = trk.xs(flyid, level='individuals', axis=1)
     flypos = remove_jumps(flypos, max_jump)
-    
+
+    if filter_bad_frames:
+        if flyid == 'fly':
+            bad_ixs = flypos[ flypos[ flypos[flypos.columns[flypos.columns.get_level_values(2)=='likelihood']] < pcutoff].any(axis=1)].index.tolist()
+        else:
+            bad_ixs = []
+        flypos.loc[bad_ixs, :] = np.nan
+
     if cop_ix is None:
         cop_ix = len(flypos)
     if 'fly' in flyid:
@@ -220,12 +261,12 @@ def wrap2pi(ang):
     return wrappedAng
 
 
-def get_relative_orientations(ani1, ani2, xvar='centroid_x', yvar='centroid_y'):
+def get_relative_orientations(ani1, ani2, ori_var='heading', xvar='centroid_x', yvar='centroid_y'):
 
     normPos = ani2[[xvar, yvar]] - ani1[[xvar, yvar]]
     absoluteAngle = np.arctan2(normPos[yvar], normPos[xvar])
-    fA = circular_distance(absoluteAngle, ani2['heading'])
-    aBetween = circular_distance(ani1['heading'],ani2['heading'])
+    fA = circular_distance(absoluteAngle, ani2[ori_var])
+    aBetween = circular_distance(ani1[ori_var], ani2[ori_var])
 
     return fA, aBetween
 
@@ -419,6 +460,25 @@ def add_speed_epoch(dotdf, step_dict):
             #flydf.loc[last_ix:next_ix, 'epoch'] = i+1
         last_ix = next_ix
     return dotdf
+
+def add_speed_epochs(dotdf, flydf, acq):
+    dotdf = smooth_speed_steps(dotdf)
+    # get epochs
+    if acq in '20240214-1045_f1_Dele-wt_5do_sh_prj10_sz12x12_2024-02-14-104540-0000':
+        n_levels = 8
+    elif acq in '20240215-1722_fly1_Dmel_sP1-ChR_3do_sh_6x6_2024-02-15-172443-0000':
+        n_levels = 9
+    else:
+        n_levels = 10
+    step_dict = get_step_indices(dotdf, speed_var='lin_speed_filt', 
+                                t_start=20, increment=40, n_levels=n_levels)
+
+    dotdf = add_speed_epoch(dotdf, step_dict)
+    flydf = add_speed_epoch(flydf, step_dict)
+    dotdf['acquisition'] = acq
+    flydf['acquisition'] = acq
+    return dotdf[dotdf['epoch'] < 10], flydf[flydf['epoch'] < 10]
+#
 
 def check_speed_steps(dotdf, step_dict):
     '''
