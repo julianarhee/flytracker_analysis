@@ -38,6 +38,15 @@ def check_nan(wingR):
         wingR = wingR_.interpolate()
     return wingR
 
+def set_angle_range_to_neg_pos_pi(ang):
+    from math import remainder, tau
+
+#    if ang>np.pi:
+#        ang = ang - 2*np.pi
+#    elif ang<-np.pi:
+#        ang = ang + 2*np.pi
+    return remainder(ang, tau)
+
 # ---------------------------------------------------------------------
 # Some vector calcs 
 # ---------------------------------------------------------------------
@@ -159,6 +168,20 @@ def translate_coordinates_to_focal_fly(fly1, fly2):
 
     return fly1, fly2
 
+def rotate_point(p, angle, origin=(0, 0)): #degrees=0):
+    '''
+    Calculate rotation matrix R and perform R.dot(p.T) to get rotated coords.
+
+    Returns:
+        _description_
+    '''
+    #angle = np.deg2rad(degrees)
+    R = np.array([[np.cos(angle), -np.sin(angle)],
+                  [np.sin(angle),  np.cos(angle)]])
+    o = np.atleast_2d(origin)
+    p = np.atleast_2d(p)
+    return np.squeeze((R @ (p.T-o.T) + o.T).T)
+
 def rotate_coordinates_to_focal_fly(fly1, fly2):
     '''
     Apply rotation to fly2 so that fly1 is at 0 heading.
@@ -179,11 +202,14 @@ def rotate_coordinates_to_focal_fly(fly1, fly2):
     fly2[['rot_x', 'rot_y']]= np.nan
     fly1[['rot_x', 'rot_y']] = 0
 
-    rotmats = np.array([np.array([[np.cos(theta), -np.sin(theta)], [np.sin(theta), np.cos(theta)]])\
-                for theta in ori] )
+    #rotmats = np.array([np.array([[np.cos(theta), -np.sin(theta)], [np.sin(theta), np.cos(theta)]])\
+    #            for theta in ori] )
 
-    xys = fly2[['trans_x', 'trans_y']].values
-    fly2[['rot_x', 'rot_y']] = [xy.dot(rot) for xy, rot in zip(xys, rotmats)]
+    #xys = fly2[['trans_x', 'trans_y']].values
+    #fly2[['rot_x', 'rot_y']] = [rot.dot(xy) for xy, rot in zip(xys, rotmats)]
+
+    fly2[['rot_x', 'rot_y']] = [rotate_point(pt, ang) for pt, ang in zip(fly2[['trans_x', 'trans_y']].values, ori)]
+
     fly2['rot_ori'] = fly2['ori'] + ori                 
     fly1['rot_ori'] = fly1['ori'] + ori # should be 0
 
@@ -231,7 +257,7 @@ def get_videos(folder, vid_type='.avi'):
     Returns:
         returns list of video file paths
     '''
-    found_vidpaths = glob.glob(os.path.join(folder, '*{}'.format(vid_type)))
+    found_vidpaths = glob.glob(os.path.join(folder, '*{}*'.format(vid_type)))
 
     return found_vidpaths
 
@@ -994,7 +1020,7 @@ def get_fft(df_, fft_var='pos_y', time_var='sec', return_pos=True):
 
     else:
         freq = all_freqs
-        amp_fly = calculate_fft_amplitude(fft_sly, t_fly)
+        amp_fly = calculate_fft_amplitude(fft_fly, t_fly)
 
     return amp_fly, freq
 
