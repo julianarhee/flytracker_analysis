@@ -43,26 +43,27 @@ def plot_frame_check_affines(ix, fly1, fly2, cap, frame_width=None, frame_height
     ax = fig.add_subplot(121) # axn = pl.subplots(1, 2)
     ax.imshow(im, cmap='gray')
     ax.set_title("Frame {}".format(ix), fontsize=8, loc='left')
+    ax.invert_yaxis()
 
     #ax = fig.add_subplot(142) 
-    ax.plot(fly1['pos_x'].iloc[ix], fly1['pos_y'].iloc[ix], 'r*')
-    ax.plot(fly2['pos_x'].iloc[ix], fly2['pos_y'].iloc[ix], 'bo')
+    ax.plot(fly1['pos_x'].loc[ix], fly1['pos_y'].loc[ix], 'r*')
+    ax.plot(fly2['pos_x'].loc[ix], fly2['pos_y'].loc[ix], 'bo')
     ax.set_aspect(1)
     ax.set_xlim(0, frame_width)
     ax.set_ylim(0, frame_height)
-    ax.invert_yaxis()
+    #ax.invert_yaxis()
 
     ax = fig.add_subplot(122)
     ax.set_title('centered and rotated to focal (*)', fontsize=8, loc='left') 
     # make a markerstyle class instance and modify its transform prop
-    ax.plot([0, fly1['rot_x'].iloc[ix]], [0, fly1['rot_y'].iloc[ix]], 'r', 
+    ax.plot([0, fly1['rot_x'].loc[ix]], [0, fly1['rot_y'].loc[ix]], 'r', 
             marker=marker_m, markerfacecolor='r', markersize=10) 
-    ax.plot([fly2['rot_x'].iloc[ix]], [fly2['rot_y'].iloc[ix]], 'b',
+    ax.plot([fly2['rot_x'].loc[ix]], [fly2['rot_y'].loc[ix]], 'b',
             marker=marker_f, markerfacecolor='b', markersize=10) 
     ax.set_aspect(1)
     ax.set_xlim(0-frame_width, frame_width)
     ax.set_ylim(0-frame_height, frame_height)
-    ax.invert_yaxis()
+    #ax.invert_yaxis()
 
     return fig
 
@@ -70,9 +71,6 @@ def plot_frame_target_projection(ix, fly1, fly2, cap, xvar='pos_x', yvar='pos_y'
     cap.set(1, ix)
     ret, im = cap.read()
     im = cv2.cvtColor(im, cv2.COLOR_BGR2GRAY) #COLOR_BGR2RGB)
-
-    xvar = 'pos_x'
-    yvar = 'pos_y'
 
     # get vector between male and female
     xi = fly2.loc[ix][xvar] - fly1.loc[ix][xvar] 
@@ -245,6 +243,79 @@ def get_video_cap(acqdir, movie_fmt='avi'):
     return cap
 
 
+def do_transformations_on_df(trk_, frame_width, frame_height, 
+                             feat_=None,
+                             cop_ix=None, flyid1=0, flyid2=1):
+    if feat_ is None:
+        assert 'dist_to_other' in trk_.columns, "No feat df provided. Need dist_to_other."
+
+    # center x- and y-coordinates
+    trk_ = util.center_coordinates(trk_, frame_width, frame_height) 
+
+    # separate fly1 and fly2
+    fly1 = trk_[trk_['id']==flyid1].copy().reset_index(drop=True)
+    fly2 = trk_[trk_['id']==flyid2].copy().reset_index(drop=True)
+
+    # translate coordinates so that focal fly is at origin
+    fly1, fly2 = util.translate_coordinates_to_focal_fly(fly1, fly2)
+
+    # rotate coordinates so that fly1 is facing 0 degrees (East)
+    fly1, fly2 = util.rotate_coordinates_to_focal_fly(fly1, fly2)
+
+    # add polar conversion
+    # FLIP y-axis? TODO check this
+    polarcoords = util.cart2pol(fly2['rot_x'], fly2['rot_y']) 
+    fly1['targ_pos_radius'] = polarcoords[0]
+    fly1['targ_pos_theta'] = polarcoords[1]
+    fly2['targ_pos_radius'] = polarcoords[0]
+    fly2['targ_pos_theta'] = polarcoords[1]
+
+    fly1['targ_rel_pos_x'] = fly2['rot_x']
+    fly1['targ_rel_pos_y'] = fly2['rot_y']
+    fly2['targ_rel_pos_x'] = fly2['rot_x']
+    fly2['targ_rel_pos_y'] = fly2['rot_y']
+
+    #% copulation index - TMP: fix this!
+    if cop_ix is None or np.isnan(cop_ix):
+        cop_ix = len(fly1)
+        copulation = False
+    else:
+        copulation = True
+    cop_ix = int(cop_ix)
+
+    #% Get all sizes and aggregate trk df
+    fly1, fly2 = get_target_sizes_df(fly1, fly2, xvar='pos_x', yvar='pos_y')
+
+    # recombine trk df
+    trk = pd.concat([fly1.iloc[:cop_ix], fly2.iloc[:cop_ix]], axis=0).reset_index(drop=True)#.sort_index()
+    trk['copulation'] = copulation
+
+    # Get relative velocity and aggregate feat df
+    if feat_ is not None:
+        f_list = []
+        for fi, df_ in feat_.groupby('id'):
+            df_ = get_relative_velocity(df_, win=1, 
+                                value_var='dist_to_other', time_var='sec')
+            f_list.append(df_.reset_index(drop=True).iloc[:cop_ix])
+        feat = pd.concat(f_list, axis=0).reset_index(drop=True) #.sort_index()
+        feat['copulation'] = copulation
+        print(trk.iloc[-1].name, feat.iloc[-1].name)
+        df = pd.concat([trk, 
+                feat.drop(columns=[c for c in feat.columns if c in trk.columns])], axis=1)
+        assert df.shape[0]==trk.shape[0], "Bad merge: {}, {}".format(feat.shape, trk.shape)
+    else:
+        f_list = []
+        assert 'dist_to_other' in trk.columns, "No feat df provided. Need dist_to_other."
+        for fi, df_ in trk.groupby('id'):
+            df_ = get_relative_velocity(df_, win=1, 
+                                value_var='dist_to_other', time_var='sec')
+            f_list.append(df_.reset_index(drop=True).iloc[:cop_ix])
+        df = pd.concat(f_list, axis=0).reset_index(drop=True) #.sort_index()
+
+    #acq = os.path.split(acqdir)[-1]
+
+    return df
+
 def get_metrics_relative_to_focal_fly(acqdir, fps=60, cop_ix=None,
                                       movie_fmt='avi', flyid1=0, flyid2=1,
                                       plot_checks=False,
@@ -290,34 +361,24 @@ def get_metrics_relative_to_focal_fly(acqdir, fps=60, cop_ix=None,
     frame_width  = cap.get(cv2.CAP_PROP_FRAME_WIDTH)   # float `width`
     frame_height = cap.get(cv2.CAP_PROP_FRAME_HEIGHT)  # float `height`
     print(frame_width, frame_height) # array columns x array rows
+    df_ = do_transformations_on_df(trk_, frame_width, frame_height, 
+                                   feat_=feat_, cop_ix=cop_ix,
+                                   flyid1=0, flyid2=1)
 
-    # center x- and y-coordinates
-    trk_ = util.center_coordinates(trk_, frame_width, frame_height) 
-
-    # separate fly1 and fly2
-    fly1 = trk_[trk_['id']==flyid1].copy().reset_index(drop=True)
-    fly2 = trk_[trk_['id']==flyid2].copy().reset_index(drop=True)
-
-    # translate coordinates so that focal fly is at origin
-    fly1, fly2 = util.translate_coordinates_to_focal_fly(fly1, fly2)
-
-    # rotate coordinates so that fly1 is facing 0 degrees (East)
-    fly1, fly2 = util.rotate_coordinates_to_focal_fly(fly1, fly2)
-
-    # add polar conversion
-    polarcoords = util.cart2pol(fly2['rot_x'], fly2['rot_y']) 
-    fly1['targ_pos_radius'] = polarcoords[0]
-    fly1['targ_pos_theta'] = polarcoords[1]
-    fly2['targ_pos_radius'] = polarcoords[0]
-    fly2['targ_pos_theta'] = polarcoords[1]
-
-    fly1['targ_rel_pos_x'] = fly2['rot_x']
-    fly1['targ_rel_pos_y'] = fly2['rot_y']
-    fly2['targ_rel_pos_x'] = fly2['rot_x']
-    fly2['targ_rel_pos_y'] = fly2['rot_y']
+    # save
+    #% save
+    if savedir is not None:
+        if not os.path.exists(savedir):
+            os.makedirs(savedir)
+        df_fpath = os.path.join(savedir, '{}_df.pkl'.format(acq))
+        with open(df_fpath, 'wb') as f: 
+            pkl.dump(df_, f)
+        print('Saved: {}'.format(df_fpath))
 
     #% plot - sanity checks
     if plot_checks:
+        fly1 = df_[df_['id']==flyid1]
+        fly2 = df_[df_['id']==flyid2]
         # check affine transformations for centering and rotating male
         ix = 6500 #5000 #2500 #590
         fig = plot_frame_check_affines(ix, fly1, fly2, cap, frame_width, frame_height)
@@ -330,56 +391,9 @@ def get_metrics_relative_to_focal_fly(acqdir, fps=60, cop_ix=None,
                                             xvar='pos_x', yvar='pos_y')
             fig.text(0.1, 0.95, os.path.split(acqdir)[-1], fontsize=4)
 
-    #% copulation index - TMP: fix this!
-    if cop_ix is None or np.isnan(cop_ix):
-        cop_ix = len(fly1)
-        copulation = False
-    else:
-        copulation = True
-    cop_ix = int(cop_ix)
+    return df_
 
-    #% Get all sizes and aggregate trk df
-    fly1, fly2 = get_target_sizes_df(fly1, fly2, xvar='pos_x', yvar='pos_y')
 
-    # recombine trk df
-    trk = pd.concat([fly1.iloc[:cop_ix], fly2.iloc[:cop_ix]], axis=0).reset_index(drop=True)#.sort_index()
-    trk['copulation'] = copulation
-    #trk = trk.reset_index(drop=True)
-
-    # Get relative velocity and aggregate feat df
-    f_list = []
-    for fi, df_ in feat_.groupby('id'):
-        df_ = get_relative_velocity(df_, win=1, 
-                              value_var='dist_to_other', time_var='sec')
-        f_list.append(df_.reset_index(drop=True).iloc[:cop_ix])
-    feat = pd.concat(f_list, axis=0).reset_index(drop=True) #.sort_index()
-    feat['copulation'] = copulation
-
-    #% save
-    if not os.path.exists(savedir):
-        os.makedirs(savedir)
-
-    acq = os.path.split(acqdir)[-1]
-#    feat_fpath = os.path.join(savedir, '{}_feat.pkl'.format(acq))
-#    with open(feat_fpath, 'wb') as f:
-#        pkl.dump(feat_, f) 
-#    print('Saved: {}'.format(feat_fpath))
-#
-#    trk_fpath = os.path.join(savedir, '{}_trk.pkl'.format(acq))
-#    with open(trk_fpath, 'wb') as f:
-#        pkl.dump(trk, f)
-#    print('Saved: {}'.format(trk_fpath)) 
-
-    print(trk.iloc[-1].name, feat.iloc[-1].name)
-    df_ = pd.concat([trk, 
-               feat.drop(columns=[c for c in feat.columns if c in trk.columns])], axis=1)
-    assert df_.shape[0]==trk.shape[0], "Bad merge: {}, {}".format(feat.shape, trk.shape)
-
-    # save
-    df_fpath = os.path.join(savedir, '{}_df.pkl'.format(acq))
-    with open(df_fpath, 'wb') as f: 
-        pkl.dump(df_, f)
-    print('Saved: {}'.format(df_fpath))
 
 def load_processed_data(acqdir, savedir=None, load=True):
     '''
