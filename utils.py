@@ -47,6 +47,24 @@ def set_angle_range_to_neg_pos_pi(ang):
 #        ang = ang + 2*np.pi
     return remainder(ang, tau)
 
+def CoM(df, xvar='pos_x', yvar='pos_y'):
+    '''
+    Calculate center of mass for x, y coordinates in df.
+    
+    Arguments:
+        df -- _description_
+
+    Returns:
+        _description_
+    '''
+    x = df[xvar].values
+    y = df[yvar].values
+    m = np.ones(df[xvar].shape)
+    cgx = np.sum(x*m) / np.sum(m)
+    cgy = np.sum(y*m) / np.sum(m)
+
+    return cgx, cgy
+
 # ---------------------------------------------------------------------
 # Some vector calcs 
 # ---------------------------------------------------------------------
@@ -640,7 +658,7 @@ def load_binary_evs_from_mat(matlab_src, feat=None, sex='m',
     try:
         mat = scipy.io.loadmat(matlab_src, simplify_cells=True)
     except NotImplementedError as e:
-        mat = mat73.loadmat(mat_fpath) #scipy.io.loadmat(mat_fpath)
+        mat = mat73.loadmat(matlab_src) #scipy.io.loadmat(mat_fpath)
 
     species_list = [k for k in mat.keys() if not k.startswith('__')]
     nonorienting_names = [b for b in behavior_names if b!='Orienting']
