@@ -284,12 +284,13 @@ def circular_hist(ax, x, bins=16, density=True, offset=0, gaps=True,
      
     return n, bins, patches
 
-def add_colorbar(fig, ax, vmin, vmax, cmap=mpl.cm.viridis, label=''):
+def add_colorbar(fig, ax, vmin, vmax, shrink=0.5, pad=0.2, 
+                 cmap=mpl.cm.viridis, label=''):
     #cmap = mpl.cm.Greys # 
     norm = mpl.colors.Normalize(vmin=vmin, vmax=vmax)
 
     fig.colorbar(mpl.cm.ScalarMappable(norm=norm, cmap=cmap), ax=ax,
-                shrink=0.5, label=label)
+                shrink=0.5, label=label, pad=pad)
     return
 
 def colorbar_from_mappable(ax, norm, cmap, hue_title='', axes=[0.85, 0.3, 0.01, 0.4],
