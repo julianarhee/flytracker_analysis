@@ -67,6 +67,66 @@ def plot_frame_check_affines(ix, fly1, fly2, cap, frame_width=None, frame_height
 
     return fig
 
+def check_rotation_transform(ix, trk_, cap, id_colors=['r', 'b']):
+    # get image
+    cap.set(1, ix)
+    ret, im = cap.read()
+    im = cv2.cvtColor(im, cv2.COLOR_BGR2GRAY) #COLOR_BGR2RGB)
+
+    fig = pl.figure(figsize=(12,5)) #pl.subplots(1, 2)
+    # plot frame
+    ax = fig.add_subplot(131)
+    ax.imshow(im, cmap='gray')
+    ax.invert_yaxis()
+    # plot positions
+    for i, d_ in trk_.groupby('id'):
+        print('pos:', i, d_[d_['frame']==ix]['pos_x'], d_[d_['frame']==ix]['pos_y'])
+        ax.plot(d_.iloc[ix]['pos_x'], d_.iloc[ix]['pos_y'], 
+                marker='o', color=id_colors[i], markersize=3)
+
+    fly1 = trk_[trk_['id']==0].copy().reset_index(drop=True)
+    fly2 = trk_[trk_['id']==1].copy().reset_index(drop=True)
+    # plot rotated positions, male faces EAST on cartesian
+    ax = fig.add_subplot(132) #, projection='polar')
+    for i, d_ in enumerate([fly1, fly2]):
+        #print('rot:', i, d_.iloc[ix]['rot_x'], d_.iloc[ix]['rot_y'])
+        pt = np.array([d_.iloc[ix]['trans_x'], d_.iloc[ix]['trans_y']])
+        #ang = rotation_angs[ix]        
+        #rx, ry = rotate([0, 0], pt, ang)
+        ang = -1*fly1.loc[ix]['ori'] 
+        rotmat = np.array([[np.cos(ang), -np.sin(ang)],
+                            [np.sin(ang), np.cos(ang)]])
+        #rx, ry = (rotmat @ pt.T).T
+        rx, ry = util.rotate_point(pt, ang) #[0, 0], pt, ang)
+        print('rot:', i, rx, ry)
+        ax.plot(rx, ry,marker='o', color=id_colors[i], markersize=3)
+    ax.set_aspect(1)
+    ax.set_title('rot')
+
+    # POLAR
+    ax = fig.add_subplot(133, projection='polar')
+    for i, d_ in enumerate([fly1, fly2]):
+        print('polar:', i, d_.iloc[ix]['targ_pos_theta'], d_.iloc[ix]['targ_pos_radius'])
+        if i==0:
+            ax.plot(0, 0, 'r*')
+        #ang = fly1.iloc[ix]['ori'] #* -1
+        pt = [d_.loc[ix]['trans_x'], d_.loc[ix]['trans_y']]
+        #ang = rotation_angs[ix]  
+        #rx, ry = rotate((0,0), pt, ang)      
+        #rx, ry = rotate2(pt, ang) #[0, 0], pt, ang)
+        rad, th = util.cart2pol(rx, ry)
+        ax.plot(th, rad, marker='o', color=id_colors[i], markersize=3)
+    ax.set_aspect(1)
+    ax.set_title('polar')
+    #ax.set_theta_direction(-1)
+
+    fig.suptitle('{}, ang={:.2f}'.format(ix, np.rad2deg(ang)))
+
+    return fig
+
+
+
+
 def plot_frame_target_projection(ix, fly1, fly2, cap, xvar='pos_x', yvar='pos_y'):
     cap.set(1, ix)
     ret, im = cap.read()
@@ -156,7 +216,7 @@ def get_target_sizes_df(fly1, fly2, xvar='pos_x', yvar='pos_y'):
         # take into account major/minor axes of ellipse
         fem_sz_deg_maj = util.calculate_female_size_deg(xi, yi, f_ori, f_len_maj)
         fem_sz_deg_min = util.calculate_female_size_deg(xi, yi, f_ori, f_len_min)
-        fem_sz_deg = np.max([fem_sz_deg_maj, fem_sz_deg_min])
+        fem_sz_deg = fem_sz_deg_maj #np.max([fem_sz_deg_maj, fem_sz_deg_min])
         fem_sizes.append(fem_sz_deg)
 
     fly2['targ_ang_size'] = fem_sizes
@@ -260,6 +320,8 @@ def do_transformations_on_df(trk_, frame_width, frame_height,
     fly1, fly2 = util.translate_coordinates_to_focal_fly(fly1, fly2)
 
     # rotate coordinates so that fly1 is facing 0 degrees (East)
+    # Assumes fly1 ORI goes from 0 to pi CCW, with y-axis NOT-inverted.
+    # if using FlyTracker, trk_['ori'] = -1*trk_['ori']
     fly1, fly2 = util.rotate_coordinates_to_focal_fly(fly1, fly2)
 
     # add polar conversion
