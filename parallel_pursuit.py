@@ -20,6 +20,8 @@ import seaborn as sns
 
 import utils as util
 import plotting as putil
+import relative_metrics as rem
+import importlib
 
 from relative_metrics import load_processed_data, get_video_cap
 #%% FUNCTIONS 
@@ -85,7 +87,7 @@ def plot_example_bouts(nr, nc, incl_bouts, df_, title=''):
     fig.text(0.1, 0.92, title, fontsize=8)
     pl.subplots_adjust(left=0.05, right=0.95)
     return fig
-
+#%%
 def main():
     #%% set plotting
     plot_style='dark'
@@ -94,29 +96,71 @@ def main():
 
     #%% set source dirs
     rootdir = '/Volumes/Julie'
-    assay = '38mm_dyad'
-    viddir = os.path.join(rootdir, 'courtship-videos', assay)
+    assay = '2d-projector' #'38mm_dyad'
 
-    found_mats = glob.glob(os.path.join(viddir,  '20*ele*', '*', '*feat.mat'))
+    acq = '20240214-0945_f1_Dele-wt_5do_sh_prj10_sz6x6'
+    subfolder = 'fly-tracker/*'
+
+    if assay == '2d-projector':
+        session = acq.split('-')[0]
+        viddir = os.path.join(rootdir, '2d-projector', session)
+        found_mats = glob.glob(os.path.join(viddir, 'fly-tracker', '20*', '*feat.mat'))
+        
+        procdir = os.path.join(rootdir, '2d-projector-analysis/FlyTracker/processed')
+    else:
+        viddir = os.path.join(rootdir, 'courtship-videos', assay)
+        found_mats = glob.glob(os.path.join(viddir,  '20*ele*', '*', '*feat.mat'))
+
+        procdir = os.path.join(rootdir, 'free-behavior-analysis/FlyTracker/38mm_dyad/processed')
+
     print("Found {} processed -feat.mat files for ele.".format(len(found_mats)))
 
     #%% set input data
-    acq = '20231226-1137_fly2_eleWT_4do_sh_eleWT_4do_gh' #util.get_acq_from_ftpath(fp, viddir)
+    #acq = '20231226-1137_fly2_eleWT_4do_sh_eleWT_4do_gh' #util.get_acq_from_ftpath(fp, viddir)
+    #acq = '20240214-0945_f1_Dele-wt_5do_sh_prj10_sz6x6'
+    importlib.reload(util)
     fp = [f for f in found_mats if acq in f][0] #found_mats[0]
     print(fp)
     acqdir = os.path.join(viddir, acq)
-    procdir = os.path.join(rootdir, 'free-behavior-analysis/FlyTracker/38mm_dyad/processed')
-    df_ = load_processed_data(acqdir, load=True, savedir=procdir)
-    df_.head()
+    try:
+        df_ = load_processed_data(acqdir, load=True, savedir=procdir)
+        df_.head()
+    except FileNotFoundError:
+        subfolder = 'fly-tracker/*'
+        calib_, trk_, feat_ = util.load_flytracker_data(viddir, 
+                                        subfolder=subfolder,
+                                        fps=fps)
+        trk_cols = [c for c in trk_.columns if c not in feat_.columns]
+        df_ = pd.concat([trk_[trk_cols], feat_], axis=1)
+        df_.to_pickle(os.path.join(procdir, '{}_df.pkl'.format(acq))) 
+
+#%%         
+    if subfolder=='fly-tracker/*':
+        vids = util.get_videos(viddir, vid_type='avi')
+        vid_fpath = [v for v in vids if acq in v][0]
+        cap = cv2.VideoCapture(vid_fpath)
+    else:
+        cap = get_video_cap(viddir) #acqdir)
+    n_frames = cap.get(cv2.CAP_PROP_FRAME_COUNT)
+    frame_width  = cap.get(cv2.CAP_PROP_FRAME_WIDTH)   # float `width`
+    frame_height = cap.get(cv2.CAP_PROP_FRAME_HEIGHT)  # float `height`
+    print(frame_width, frame_height) # array columns x array rows
+
+    #%% get relative metrics
+    importlib.reload(rem)
+    #df_ = rem.get_relative_metrics(df_, acqdir, savedir=procdir)
+    # FLIP ORI if fly-tracker
+    df_['ori'] = -1 * df_['ori']
+    df_ = rem.do_transformations_on_df(df_, frame_width, frame_height) #, fps=fps)
 
     #%% output dir
     destdir = os.path.join(os.path.split(procdir)[0], 'predictive_coding')
-    figdir = os.path.join(destdir, 'figures')
-    if not os.path.exists(destdir):
+    figdir = os.path.join(destdir, acq)
+    if not os.path.exists(figdir):
         os.makedirs(figdir)
+    print(figdir)
 
     #%% find candidate approach bouts
-
     min_vel = 12 # at lower vel, male may be doing bilateral display
     min_angle_between = 1.0
     max_facing_angle = 0.5
@@ -128,17 +172,16 @@ def main():
     consec_bouts = get_indices_of_consecutive_rows(passdf)
 
     #%% Filter bouts based on duration
-
     min_bout_len = 0.25
     fps = 60.
     incl_bouts = filter_bouts_by_frame_duration(consec_bouts, min_bout_len, fps)
     print("{} of {} bouts pass min dur {}sec".format(len(incl_bouts), len(consec_bouts), min_bout_len))
 
     #%% Plot several bouts
-    plot_example_bouts = False
+    plot_bouts = False
     filter_str = 'min_bout_len-{}_min_vel-{}_min_angle-{}_max_facing-{}'.format(min_bout_len, min_vel, min_angle_between, max_facing_angle) 
     nr=7; nc=10;
-    if plot_example_bouts:
+    if plot_bouts:
         fig = plot_example_bouts(nr, nc, incl_bouts, df_, filter_str)
         # save
         putil.label_figure(fig, acq)
@@ -146,8 +189,23 @@ def main():
         pl.savefig(os.path.join(figdir, '{}.png'.format(figname)))
         print(figdir, figname)
 
-    #%% look at 1 specific bout
+    #%% ----------------------------------------------
+    # look at 1 specific bout
+    # ------------------------------------------------
     b_ = list(copy.copy(incl_bouts[7]))
+    #b_ = [7955, 8000] # plotted, big
+    # b_ = [9110, 9340] # plotted, smaller
+    # b_ = [10336, 10492] 
+    # b_ = [10590, 10760]
+    # b_ = [10946, 11023]
+    # b_ = [11262, 11357] # big one (plotted)
+    # b_ = [11691, 11843] # big one (plotted)
+    # b_ = [12176, 13402] # lots of inner-circle chasing
+    b_ = [14001, 14160] # 1 inner-circle bout
+    #b_ = [14164, 14313] # same
+    b_ = [17858, 18663] # very long inner-circle bout, continuous
+    bout_start_frame = df_.loc[b_[0]]['frame']
+    bout_end_frame = df_.loc[b_[1]]['frame']
     nsec_pre = 0
     b_[0] = b_[0] - nsec_pre*fps
     b_[1] = b_[1] + nsec_pre*fps # look at a few sec before/after
@@ -195,7 +253,7 @@ def main():
     norm = mpl.colors.Normalize(vmin=min_val, vmax=max_val)
     color_list = cmap(ang_diffs)
 
-    fig, ax = pl.subplots(figsize=(4,8))
+    fig, ax = pl.subplots(figsize=(5,4)) #figsize=(6,6))
     ax.scatter(f1['pos_x'], f1['pos_y'], c=f1['sec'], cmap='viridis', s=5)
     ax.scatter(f2['pos_x'], f2['pos_y'], c=f2['sec'], cmap='viridis', s=5)
     ax.set_aspect(1)
@@ -209,7 +267,7 @@ def main():
                 shrink=0.5, label='ang. diff between vectors')
 
     putil.label_figure(fig, acq)
-    figname = 'vectors_example-bout_nsec-pre-{}_{}'.format(nsec_pre, acq)
+    figname = 'vectors_example-bout_frames-{}-{}_nsec-pre-{}_{}'.format(b_[0], b_[1], nsec_pre, acq)
     pl.savefig(os.path.join(figdir, '{}.png'.format(figname)))
 
     #%% Scatter: vector length vs angle difference
@@ -227,7 +285,7 @@ def main():
     ax.set_title('Vector length vs angle diff')
 
     putil.label_figure(fig, acq)
-    figname = 'vec_len_vs_ang_diff_nsec-pre-{}__{}'.format(nsec_pre, acq)
+    figname = 'vec_len_vs_ang_diff_frames-{}-{}_nsec-pre-{}__{}'.format(b_[0], b_[1], nsec_pre, acq)
     pl.savefig(os.path.join(figdir, '{}.png'.format(figname)))
 
     #%% Scatter2: vector length diff vs angle difference
@@ -245,7 +303,7 @@ def main():
     ax.set_title('Vector length diff vs angle diff')
 
     putil.label_figure(fig, acq)
-    figname = 'vec_len_diff_vs_ang_diff_nsec-pre-{}__{}'.format(nsec_pre, acq)
+    figname = 'vec_len_diff_vs_ang_diff_frames-{}-{}_nsec-pre-{}__{}'.format(b_[0], b_[1], nsec_pre, acq)
     pl.savefig(os.path.join(figdir, '{}.png'.format(figname)))
 
         
@@ -281,9 +339,170 @@ def main():
                 f1[f1['frame']==m_]['pos_y'], 'ro')   
 
     putil.label_figure(fig, acq)
-    figname = 'traj_with_shorter_vecs_and_small_ang_diff_{}_nsec-pre-{}__{}'.format(ang_diff_thr, nsec_pre, acq)
+    figname = 'traj_with_shorter_vecs_and_small_ang_diff_{}_frames-{}-{}_nsec-pre-{}__{}'.format(ang_diff_thr, b_[0], b_[1], nsec_pre, acq)
     pl.savefig(os.path.join(figdir, '{}.png'.format(figname)))
 
+    #%% ANG VEL range?
+    pl.figure()
+    pl.plot(f1['ang_vel'])
+
+    #%% -----------------------------------------
+    # plot TARG_POS_THETA vs. TIME
+    # ------------------------------------------
+    fig, ax =pl.subplots()
+    huevar = 'ang_vel'
+    yvar = 'targ_pos_theta_deg'
+    f1['targ_pos_theta_deg'] = np.rad2deg(f1['targ_pos_theta'])
+    vmin, vmax = f1[huevar].min(), 10 #f1[huevar].max()
+    sns.scatterplot(data=f1, x='frame', y=yvar, ax=ax,
+                    hue=huevar, s=30, edgecolor='none', 
+                    palette='viridis', legend=0,
+                    hue_norm=mpl.colors.Normalize(vmin=vmin, vmax=vmax))
+    putil.add_colorbar(fig, ax, vmin, vmax, 
+                       label=huevar, cmap='viridis')
+    for i in [11801]:
+        ax.plot(f1[f1['frame']==i]['frame'], 
+                f1[f1['frame']==i][yvar], 'r*')
+
+    ax.axvline(x=bout_start_frame)
+    ax.axvline(x=bout_end_frame)
+    ax.axhline(y=0, c=bg_color, ls='--')
+    ax.set_ylim([-50, 50])
+
+    putil.label_figure(fig, acq)
+    figname = 'targ_pos_theta_vs_time_frames-{}-{}_nsec-pre-{}'.format(b_[0], b_[1], nsec_pre)
+    pl.savefig(os.path.join(figdir, '{}.png'.format(figname)))
+
+    #% plot on POLAR
+    fig, ax =pl.subplots(subplot_kw={'projection': 'polar'})
+    sns.scatterplot(data=f1, x='targ_pos_theta', y='targ_pos_radius', 
+                    ax=ax, edgecolor='none',
+                    hue='frame',palette='viridis' , legend=0,
+                    )
+    if nsec_pre > 0:
+        for i in [bout_start_frame, bout_end_frame]:
+            ax.plot(f1[f1['frame']==i]['targ_pos_theta'], 
+                    f1[f1['frame']==i]['targ_pos_radius'], 'ro')
+    for i in [11801]:
+        ax.plot(f1[f1['frame']==i]['targ_pos_theta'], 
+                f1[f1['frame']==i]['targ_pos_radius'], 'r*')
+
+    putil.label_figure(fig, acq)
+    figname = 'targ_pos_polar_frames-{}-{}_nsec-pre-{}'.format(b_[0], b_[1], nsec_pre)        
+    pl.savefig(os.path.join(figdir, '{}.png'.format(figname)))
+
+
+    #%% ------------------------------
+    # MAKE VIDEO OF BOUT
+    # --------------------------------
+    #%% make video of bout?
+    tmp_outdir = '/Users/julianarhee/Documents/rutalab/projects/predictive_coding'
+    from matplotlib.animation import FuncAnimation
+    from matplotlib import animation
+
+    #frame_num = curr_frames.values[0]
+    ix = 0 
+    # get list of colors for scatter plot based on angular size using viridis cmap and normalizing to range of angular size values
+    huevar = 'ang_vel' #'targ_ang_size'
+    #vmin, vmax = f1[huevar].min(), f1[huevar].max()
+    #hue_norm=mpl.colors.Normalize(vmin=vmin, vmax=vmax)
+    print(vmin, vmax)
+    ylim = np.ceil(f1['targ_pos_radius'].max())
+    # Create a Normalize object to map the data values to the range [0, 1]
+    norm = mpl.colors.Normalize(vmin=vmin, vmax=vmax) #f1[hue_var].min(), 
+                                #vmax=0.3) #f1[hue_var].max())
+    # Create a ScalarMappable object with the Viridis colormap and the defined normalization
+    sm = mpl.cm.ScalarMappable(cmap='viridis', norm=norm)
+
+    # Get a list of colors corresponding to the data values
+    colors = [sm.to_rgba(value) for value in f1[huevar].values]
+
+    fig = pl.figure()
+    ax1 = fig.add_subplot(121)
+    ax2 = fig.add_subplot(122, projection='polar')
+    ax2.set_ylim([0, ylim])
+
+    #while im is None:
+    #for ix in range(len(curr_frames)):
+    cap.set(1, curr_frames.iloc[ix])
+    ret, im = cap.read()
+    im = cv2.cvtColor(im, cv2.COLOR_BGR2GRAY)
+    print(ix)
+
+    p1 = ax1.imshow(im, aspect='equal', cmap='gray')
+    ax1.invert_yaxis()
+    p2 = ax2.scatter(f1.iloc[:ix]['targ_pos_theta'],
+                      f1.iloc[:ix]['targ_pos_radius'],
+                      c=f1.iloc[:ix][huevar],                       
+                      vmin=vmin, vmax=vmax,
+                      s=20, #f1.iloc[:ix]['targ_ang_size'],
+                      cmap='viridis' #f1.loc[:frame_num]['targ_ang_size'],
+                      )
+
+    def init():
+        p1.set_data(np.zeros((frame_height, frame_width)))
+        # set x, y data for scatter plot
+        p2.set_data([], [])
+        # set sizes
+        #p2.set_sizes([], [])
+        p2.set_array([])
+        return (p1, p2,)
+
+    def update_figure(ix): #, p1, p2, cap, f1):        
+        # udpate imshow
+        cap.set(1, curr_frames.iloc[ix])
+        ret, im = cap.read()
+        im = cv2.cvtColor(im, cv2.COLOR_BGR2GRAY) #COLOR_BGR2RGB)
+        p1.set_data(im)
+        #p1.set_title('Frame {}'.format(frame_num))
+        
+        # Update subplot 2 (plot)
+        xys_ = f1.iloc[:ix][['targ_pos_theta', 'targ_pos_radius']].values
+        # update x, y
+        p2.set_offsets(xys_)
+        # uppdate size
+        #p2.set_sizes(f1.iloc[:ix]['targ_ang_size'] * 100) 
+        # update color
+        p2.set_array(f1.iloc[:ix][huevar])
+
+        # Adjust layou+ 1t
+        #pl.tight_layout()
+
+    frame_numbers = np.arange(0, len(curr_frames)) #curr_frames.values #range(1, 11)  # List of frame numbers
+
+    # Create the animation
+    anim = FuncAnimation(fig, update_figure, frames=frame_numbers, 
+                        interval=1000//fps)
+    
+    # Save the animation as a movie file
+    video_outrate = 30
+    save_movpath = os.path.join(figdir, 
+                        'anim_frames-{}-{}_nsec-pre-{}_hue-{}_{}hz.mp4'.format(b_[0], b_[1], nsec_pre,
+                                                                                   huevar, video_outrate))
+
+    anim.save(save_movpath, fps=video_outrate, extra_args=['-vcodec', 'libx264'])
+    #writervideo = animation.FFMpegWriter(fps=video_outrate) 
+    #anim.save(save_movpath, writer=writervideo)
+
+    #%% check transformationsa ---------------------------------
+    importlib.reload(rem)
+    f2.index = f1.index.copy() 
+    ix = 250
+    frame_ = curr_frames.iloc[ix]
+    fig = rem.plot_frame_check_affines(frame_, f1, f2, cap, 
+                                    frame_width, frame_height)
+
+    currdf = df_[df_['frame'].isin(curr_frames)].copy()
+    fig = rem.check_rotation_transform(frame_, currdf, cap) # frame_width, frame_height)
+
+
+
+
+
+
+
+
+#%%
 
     # %% Parallel pursuit in terms of ANGLES.
 
