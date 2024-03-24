@@ -461,7 +461,7 @@ def add_speed_epoch(dotdf, step_dict):
         last_ix = next_ix
     return dotdf
 
-def add_speed_epochs(dotdf, flydf, acq):
+def add_speed_epochs(dotdf, flydf, acq, filter=True):
     dotdf = smooth_speed_steps(dotdf)
     # get epochs
     if acq in '20240214-1045_f1_Dele-wt_5do_sh_prj10_sz12x12_2024-02-14-104540-0000':
@@ -477,7 +477,10 @@ def add_speed_epochs(dotdf, flydf, acq):
     flydf = add_speed_epoch(flydf, step_dict)
     dotdf['acquisition'] = acq
     flydf['acquisition'] = acq
-    return dotdf[dotdf['epoch'] < 10], flydf[flydf['epoch'] < 10]
+    if filter:
+        return dotdf[dotdf['epoch'] < 10], flydf[flydf['epoch'] < 10]
+    else:
+        return dotdf, flydf
 #
 
 def check_speed_steps(dotdf, step_dict):
