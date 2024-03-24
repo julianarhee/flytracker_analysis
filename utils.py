@@ -65,6 +65,79 @@ def CoM(df, xvar='pos_x', yvar='pos_y'):
 
     return cgx, cgy
 
+# processing
+
+def smooth_orientations(y, winsize=5):
+    yy = np.concatenate((y, y))
+    smoothed = np.convolve(np.array([1] * winsize), yy)[winsize: len(y) + winsize]
+    return smoothed #% (2 * np.pi)
+
+def smooth_orientations_pandas(x, winsize=3): 
+    # 'unwrap' the angles so there is no wrap around
+    x1 = pd.Series(np.rad2deg(np.unwrap(x)))
+    # smooth the data with a moving average
+    # note: this is pandas 17.1, the api changed for version 18
+    x2 = x1.rolling(winsize, min_periods=1).mean() #pd.rolling_mean(x1, window=3)
+    # convert back to wrapped data if desired
+    x3 = x2 % 360
+    return np.deg2rad(x3)
+
+def smooth_and_calculate_velocity_circvar(df, smooth_var='ori', vel_var='ang_vel',
+                                  time_var='sec', winsize=3):
+    '''
+    Smooth circular var and then calculate velocity. Takes care of NaNs.
+
+    Arguments:
+        df -- _description_
+
+    Keyword Arguments:
+        smooth_var -- _description_ (default: {'ori'})
+        vel_var -- _description_ (default: {'ang_vel'})
+        time_var -- _description_ (default: {'sec'})
+        winsize -- _description_ (default: {3})
+
+    Returns:
+        _description_
+    '''
+    df[vel_var] = np.nan
+    df['{}_smoothed'.format(smooth_var)] = np.nan
+    for i, df_ in df.groupby('id'): 
+        # unwrap for continuous angles, then interpolate NaNs
+        nans = df_[df_[smooth_var].isna()].index
+        unwrapped = pd.Series(np.unwrap(df_[smooth_var].fillna(method='ffill')),
+                            index=df_.index) #.interpolate().values))
+        # replace nans 
+        unwrapped.loc[nans] = np.nan 
+        # interpolate over nans now that the values are unwrapped
+        oris = unwrapped.interpolate() 
+        # revert back to -pi, pi
+        #oris = [util.set_angle_range_to_neg_pos_pi(i) for i in oris]
+        # smooth with rolling()
+        smoothed = smooth_orientations_pandas(oris, winsize=2) #smoothed = smooth_orientations(df_['ori'], winsize=3)
+        # unwrap again to take difference between oris
+        smoothed_wrap = pd.Series(np.unwrap([set_angle_range_to_neg_pos_pi(i) \
+                                            for i in smoothed]), index=df_.index)
+        # take difference
+        smoothed_diff = smoothed_wrap.diff()
+        #smoothed_diff = np.concatenate([[0], smoothed_diff])
+
+        # get angular velocity
+        ang_vel_smoothed = smoothed_diff / df_[time_var].diff().mean()
+        ang_vel = oris.diff() / df_[time_var].diff().mean() 
+        df.loc[df_.index, vel_var] = ang_vel
+        df.loc[df_.index, '{}_smoothed'.format(vel_var)] = ang_vel_smoothed
+        df.loc[df_.index, '{}_smoothed'.format(smooth_var)] = smoothed_wrap
+        df.loc[df_.index, '{}_smoothed_range'.format(smooth_var)] = [set_angle_range_to_neg_pos_pi(i) for i in smoothed_wrap]
+
+    #df.loc[df[df[smooth_var].isna()].index, :] = np.nan
+    bad_ixs = df[df[smooth_var].isna()]['frame'].dropna().index.tolist()
+    cols = [c for c in df.columns if c not in ['frame', 'id']]
+    df.loc[bad_ixs, cols] = np.nan
+
+    df['{}_abs'.format(vel_var)] = np.abs(df[vel_var])
+
+    return df
+
 # ---------------------------------------------------------------------
 # Some vector calcs 
 # ---------------------------------------------------------------------
@@ -194,8 +267,8 @@ def rotate_point(p, angle, origin=(0, 0)): #degrees=0):
         _description_
     '''
     #angle = np.deg2rad(degrees)
-    R = np.array([[np.cos(angle), -np.sin(angle)],
-                  [np.sin(angle),  np.cos(angle)]])
+    R = np.squeeze(np.array([[np.cos(angle), -np.sin(angle)],
+                  [np.sin(angle),  np.cos(angle)]]))
     o = np.atleast_2d(origin)
     p = np.atleast_2d(p)
     return np.squeeze((R @ (p.T-o.T) + o.T).T)
@@ -466,7 +539,7 @@ def add_frame_nums(trackdf, fps=None):
     
     return trackdf
 
-def get_mat_paths_for_all_vids(acquisition_dir, ftype='track'):
+def get_mat_paths_for_all_vids(acquisition_dir, subfolder='*', ftype='track'):
     '''
     Get all .mat files associated with a given acquisition (experiment)
     
@@ -481,7 +554,7 @@ def get_mat_paths_for_all_vids(acquisition_dir, ftype='track'):
     --------
     Sorted list of all .mat files. 
     ''' 
-    paths_to_matfiles = sorted(glob.glob(os.path.join(acquisition_dir, '*', '*%s.mat' % ftype)), 
+    paths_to_matfiles = sorted(glob.glob(os.path.join(acquisition_dir, subfolder, '*%s.mat' % ftype)), 
            key=natsort)
       
     return paths_to_matfiles
@@ -522,7 +595,7 @@ def load_calibration(curr_acq):
     '''
     fieldnames = ['n_chambers', 'n_rows', 'n_cols', 'FPS', 'PPM', 'w', 'h', 
                   'centroids', 'rois', 'n_flies', 'cop_ind']
- 
+
     calib_fpath = os.path.join(curr_acq, 'calibration.mat')
     assert os.path.exists(calib_fpath), "No calibration found: %s" % curr_acq
 
@@ -559,13 +632,13 @@ def load_calibration(curr_acq):
             
     return calib
 
-def load_feat(curr_acq):
-    mat_fpaths = get_mat_paths_for_all_vids(curr_acq, ftype='feat')
+def load_feat(curr_acq, subfolder='*'):
+    mat_fpaths = get_mat_paths_for_all_vids(curr_acq, subfolder=subfolder, ftype='feat')
     feat = load_mat(mat_fpaths)
     return feat
 
-def load_tracks(curr_acq):
-    mat_fpaths = get_mat_paths_for_all_vids(curr_acq, ftype='track')
+def load_tracks(curr_acq, subfolder='*'):
+    mat_fpaths = get_mat_paths_for_all_vids(curr_acq, subfolder=subfolder, ftype='track')
     trk = load_mat(mat_fpaths)
     return trk
 
@@ -714,7 +787,7 @@ def add_bout_durations(df):
 
     return df
 
-def load_flytracker_data(acq_dir, fps=60):
+def load_flytracker_data(acq_dir, fps=60, subfolder='*'):
     '''
     Get calibration info, -feat.mat and -track.mat as DFs.
     Returns:
@@ -732,8 +805,8 @@ def load_flytracker_data(acq_dir, fps=60):
         calib['FPS'] = fps
 
     #% Load feature mat
-    featdf = load_feat(acq_dir)
-    trackdf = load_tracks(acq_dir)
+    featdf = load_feat(acq_dir, subfolder=subfolder)
+    trackdf = load_tracks(acq_dir, subfolder=subfolder)
 
     trackdf = add_frame_nums(trackdf, fps=calib['FPS'])
     featdf = add_frame_nums(featdf, fps=calib['FPS'])
