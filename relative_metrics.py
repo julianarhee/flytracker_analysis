@@ -68,6 +68,20 @@ def plot_frame_check_affines(ix, fly1, fly2, cap, frame_width=None, frame_height
     return fig
 
 def check_rotation_transform(ix, trk_, cap, id_colors=['r', 'b']):
+    '''
+    Note that ix should be frame.
+
+    Arguments:
+        ix -- _description_
+        trk_ -- _description_
+        cap -- _description_
+
+    Keyword Arguments:
+        id_colors -- _description_ (default: {['r', 'b']})
+
+    Returns:
+        _description_
+    '''
     # get image
     cap.set(1, ix)
     ret, im = cap.read()
@@ -81,7 +95,7 @@ def check_rotation_transform(ix, trk_, cap, id_colors=['r', 'b']):
     # plot positions
     for i, d_ in trk_.groupby('id'):
         print('pos:', i, d_[d_['frame']==ix]['pos_x'], d_[d_['frame']==ix]['pos_y'])
-        ax.plot(d_.iloc[ix]['pos_x'], d_.iloc[ix]['pos_y'], 
+        ax.plot(d_[d_['frame']==ix]['pos_x'], d_[d_['frame']==ix]['pos_y'], 
                 marker='o', color=id_colors[i], markersize=3)
 
     fly1 = trk_[trk_['id']==0].copy().reset_index(drop=True)
@@ -90,10 +104,12 @@ def check_rotation_transform(ix, trk_, cap, id_colors=['r', 'b']):
     ax = fig.add_subplot(132) #, projection='polar')
     for i, d_ in enumerate([fly1, fly2]):
         #print('rot:', i, d_.iloc[ix]['rot_x'], d_.iloc[ix]['rot_y'])
-        pt = np.array([d_.iloc[ix]['trans_x'], d_.iloc[ix]['trans_y']])
+        pt = np.squeeze(np.array(d_[d_['frame']==ix][['trans_x', 'trans_y']].values))
+
+        print(pt.shape)
         #ang = rotation_angs[ix]        
         #rx, ry = rotate([0, 0], pt, ang)
-        ang = -1*fly1.loc[ix]['ori'] 
+        ang = -1*fly1[fly1['frame']==ix]['ori'] 
         rotmat = np.array([[np.cos(ang), -np.sin(ang)],
                             [np.sin(ang), np.cos(ang)]])
         #rx, ry = (rotmat @ pt.T).T
@@ -106,11 +122,11 @@ def check_rotation_transform(ix, trk_, cap, id_colors=['r', 'b']):
     # POLAR
     ax = fig.add_subplot(133, projection='polar')
     for i, d_ in enumerate([fly1, fly2]):
-        print('polar:', i, d_.iloc[ix]['targ_pos_theta'], d_.iloc[ix]['targ_pos_radius'])
         if i==0:
             ax.plot(0, 0, 'r*')
         #ang = fly1.iloc[ix]['ori'] #* -1
-        pt = [d_.loc[ix]['trans_x'], d_.loc[ix]['trans_y']]
+        pt = [d_[d_['frame']==ix]['trans_x'], 
+              d_[d_['frame']==ix]['trans_y']]
         #ang = rotation_angs[ix]  
         #rx, ry = rotate((0,0), pt, ang)      
         #rx, ry = rotate2(pt, ang) #[0, 0], pt, ang)
@@ -119,8 +135,8 @@ def check_rotation_transform(ix, trk_, cap, id_colors=['r', 'b']):
     ax.set_aspect(1)
     ax.set_title('polar')
     #ax.set_theta_direction(-1)
-
-    fig.suptitle('{}, ang={:.2f}'.format(ix, np.rad2deg(ang)))
+    #print(ang)
+    fig.suptitle('{}, ang={:.2f}'.format(ix, np.rad2deg(float(ang))))
 
     return fig
 
@@ -216,7 +232,7 @@ def get_target_sizes_df(fly1, fly2, xvar='pos_x', yvar='pos_y'):
         # take into account major/minor axes of ellipse
         fem_sz_deg_maj = util.calculate_female_size_deg(xi, yi, f_ori, f_len_maj)
         fem_sz_deg_min = util.calculate_female_size_deg(xi, yi, f_ori, f_len_min)
-        fem_sz_deg = fem_sz_deg_maj #np.max([fem_sz_deg_maj, fem_sz_deg_min])
+        fem_sz_deg = np.max([fem_sz_deg_maj, fem_sz_deg_min])
         fem_sizes.append(fem_sz_deg)
 
     fly2['targ_ang_size'] = fem_sizes
