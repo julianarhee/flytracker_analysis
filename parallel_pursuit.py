@@ -4,7 +4,6 @@
 """
     Time    : 2021/5/10 10:47
     Author  : julianarhee
-    Software: PyCharm
 """
 #%%
 import os
@@ -22,9 +21,22 @@ import utils as util
 import plotting as putil
 import relative_metrics as rem
 import importlib
+import dlc as dlc
 
 from relative_metrics import load_processed_data, get_video_cap
 #%% FUNCTIONS 
+def calculate_theta_error(f1, f2, xvar='pos_x', yvar='pos_y'):
+    vec_between = f2[[xvar, yvar]] - f1[[xvar, yvar]]
+    abs_ang = np.arctan2(vec_between[yvar], vec_between[xvar])
+    th_err = dlc.circular_distance(abs_ang, f1['traveling_dir']) # already bw -np.pi, pi
+    #th_err = [util.set_angle_range_to_neg_pos_pi(v) for v in th_err]
+    th_err[0] = th_err[1]
+    f1['theta_error'] = th_err
+    f1['theta_error_dt'] = pd.Series(np.unwrap(f1['theta_error'].interpolate().ffill().bfill())).diff() / f1['sec_diff'].mean()
+    f1['theta_error_deg'] = np.rad2deg(f1['theta_error'])
+
+    return f1
+
 def get_indices_of_consecutive_rows(passdf):
     '''
     Find start and stop indices of consecutive rows in a dataframe.
@@ -33,7 +45,8 @@ def get_indices_of_consecutive_rows(passdf):
         passdf -- frames which pass boolean condition(s)
 
     Returns:
-        series of tuples, each containing start and stop indices of consecutive rows
+        Series of tuples, each containing start and stop indices of consecutive rows
+        Also updates passdf with "diff" (can ignore) and "group" columns, the latter contains bout nums
     '''
     passdf['diff'] = passdf.index.to_series().diff().fillna(1)
     passdf['diff'] = passdf['diff'].apply(lambda x: 1 if x>1 else 0)
@@ -47,11 +60,16 @@ def get_vector_between_flies(f1, f2, curr_frames):
     vecs = [(i[0]-j[0], i[1]-j[1]) for i, j in zip(f2_pos, f1_pos)]
     return vecs
 
-def filter_bouts_by_frame_duration(consec_bouts, min_bout_len, fps=60):
+def filter_bouts_by_frame_duration(consec_bouts, min_bout_len, fps=60, return_indices=False):
     min_bout_len_frames = min_bout_len*fps # corresponds to 0.25s at 60Hz
-    incl_bouts = [c for c in consec_bouts if c[1]-c[0]>=min_bout_len_frames]
+    incl_bouts = [c for i, c in enumerate(consec_bouts) if c[1]-c[0]>=min_bout_len_frames]
+    incl_ixs = [i for i, c in enumerate(consec_bouts) if c[1]-c[0]>=min_bout_len_frames]
     #print("{} of {} bouts pass min dur {}sec".format(len(incl_bouts), len(consec_bouts), min_bout_len))
-    return incl_bouts
+
+    if return_indices:
+        return incl_ixs, incl_bouts
+    else:
+        return incl_bouts
 
 # plotting 
 def plot_bout_of_two_flies(df_, curr_frames, ax=None):
@@ -87,6 +105,92 @@ def plot_example_bouts(nr, nc, incl_bouts, df_, title=''):
     fig.text(0.1, 0.92, title, fontsize=8)
     pl.subplots_adjust(left=0.05, right=0.95)
     return fig
+
+def plot_allo_vs_egocentric_pos(plotdf, axn, 
+                        xvar='targ_pos_theta', yvar='targ_pos_radius',
+                        huevar='stimhz', palette_dict=None,
+                        hue_norm=None,
+                        cmap='viridis', bg_color='w',
+                        plot_com=True, markersize=5):
+
+    if palette_dict is None:
+        huevals = plotdf[huevar].unique()
+        palette_dict = cmap
+        #palette_dict = dict((k, v) for k, v in zip(huevals, 
+        #                sns.color_palette(cmap, n_colors=len(huevals))))   
+    else:    
+        huevals = np.array(list(palette_dict.keys()))
+    if axn is None:
+        fig, axn = pl.subplots(1, 2, figsize=(10,5), sharex=True, sharey=True,
+                               subplot_kw={'projection': 'polar'})
+    ax=axn[1]
+    # plot egocentric
+    ax.set_title('egocentric (targ. pos.)')
+    sns.scatterplot(data=plotdf, ax=ax,
+                    x=xvar, y=yvar, s=markersize,
+                    hue=huevar, palette=palette_dict, 
+                    hue_norm=hue_norm,
+                    edgecolor='none', legend=0, alpha=0.7)
+    if plot_com:
+        # plot Center of Mass
+        for hueval, f_ in plotdf.groupby(huevar):
+            cm_theta = pd.Series(np.unwrap(f_[xvar])).mean()
+            cm_radius = f_[yvar].mean()
+            ax.scatter(cm_theta, cm_radius, s=30, c=palette_dict[hueval],
+                    marker='o', edgecolor='k', lw=0.5,
+                    label='COM: {:.2f}'.format(hueval))
+
+    #  plot allocentric - get polar coords from transformed
+    # ctr_x, _y are the transformed coordinates of the TARGET
+    rad, th = util.cart2pol(plotdf['ctr_x'].values, plotdf['ctr_y'].values)
+    plotdf['pos_radius'] = rad
+    plotdf['pos_theta'] = th
+    ax = axn[0] #fig.add_subplot(121,projection='polar')
+    ax.set_title('allocentric')
+    sns.scatterplot(data=plotdf, ax=ax,
+                    x='pos_theta', y='pos_radius', s=markersize,
+                    hue=huevar, palette=palette_dict,
+                    hue_norm=hue_norm,
+                    edgecolor='none', legend=0, alpha=0.7) 
+    # colorbar
+    if hue_norm is None:
+        hue_norm = mpl.colors.Normalize(vmin=huevals.min(), vmax=huevals.max())
+    putil.colorbar_from_mappable(axn[0], hue_norm, cmap, hue_title=huevar, 
+                             axes=[0.92, 0.3, 0.01, 0.4], fontsize=7)
+
+    # clean up axes
+    for ax in axn:
+        ax.tick_params(pad=10)
+        ax.set_xlabel('')
+        ax.set_ylabel('')
+
+    return
+
+def load_flytracker_data(acq, viddir, subfolder='fly-tracker/*', fps=60):
+    # load flytracker .mat as df
+    calib_, trk_, feat_ = util.load_flytracker_data(viddir, 
+                                    subfolder=subfolder,
+                                    fps=fps)
+    # TODO:  fix frame numbering in util.
+    featpath = [f for f in feat_['fpath'].unique() if acq in f][0] 
+    trkpath = [f for f in trk_['fpath'].unique() if acq in f][0]
+    trk_cols = [c for c in trk_.columns if c not in feat_.columns]
+    trk_ = trk_[trk_['fpath']==trkpath]
+    feat_ = feat_[feat_['fpath']==featpath]
+    for i, t_ in trk_.groupby('id'):
+        trk_.loc[t_.index, 'frame'] = np.arange(0, len(t_))
+    for i, f_ in feat_.groupby('id'):
+        feat_.loc[f_.index, 'frame'] = np.arange(0, len(f_))
+
+    # find where we have no wing info, bec ori can't be trusted
+    # find where any of the wing columns are NaN:
+    no_wing_info = trk_[trk_[['wing_l_x', 'wing_l_y', 'wing_r_x', 'wing_r_y']].isna().sum(axis=1) == 4 ].index
+    trk_.loc[no_wing_info, 'ori'] = np.nan
+
+    df_ = pd.concat([trk_[trk_cols], feat_], axis=1).reset_index(drop=True)
+
+    return df_
+
 #%%
 def main():
     #%% set plotting
@@ -98,8 +202,12 @@ def main():
     rootdir = '/Volumes/Julie'
     assay = '2d-projector' #'38mm_dyad'
 
-    acq = '20240214-0945_f1_Dele-wt_5do_sh_prj10_sz6x6'
+    # acq = '20240214-0945_f1_Dele-wt_5do_sh_prj10_sz6x6'
+    # acq = '20240214-1010_f1_Dele-wt_5do_sh_prj10_sz4x4'
+    acq = '20240214-1025_f1_Dele-wt_5do_sh_prj10_sz10x10'
     subfolder = 'fly-tracker/*'
+
+    fps = 60.
 
     if assay == '2d-projector':
         session = acq.split('-')[0]
@@ -126,18 +234,15 @@ def main():
         df_ = load_processed_data(acqdir, load=True, savedir=procdir)
         df_.head()
     except FileNotFoundError:
+        print("creating feat/trk df.")
         subfolder = 'fly-tracker/*'
-        calib_, trk_, feat_ = util.load_flytracker_data(viddir, 
-                                        subfolder=subfolder,
-                                        fps=fps)
-        trk_cols = [c for c in trk_.columns if c not in feat_.columns]
-        df_ = pd.concat([trk_[trk_cols], feat_], axis=1)
-        df_.to_pickle(os.path.join(procdir, '{}_df.pkl'.format(acq))) 
+        df_ = load_flytracker_data(acq, viddir, subfolder=subfolder, fps=fps)
 
 #%%         
     if subfolder=='fly-tracker/*':
         vids = util.get_videos(viddir, vid_type='avi')
         vid_fpath = [v for v in vids if acq in v][0]
+        print(vid_fpath)
         cap = cv2.VideoCapture(vid_fpath)
     else:
         cap = get_video_cap(viddir) #acqdir)
@@ -152,6 +257,7 @@ def main():
     # FLIP ORI if fly-tracker
     df_['ori'] = -1 * df_['ori']
     df_ = rem.do_transformations_on_df(df_, frame_width, frame_height) #, fps=fps)
+    df_.to_pickle(os.path.join(procdir, '{}_df.pkl'.format(acq))) 
 
     #%% output dir
     destdir = os.path.join(os.path.split(procdir)[0], 'predictive_coding')
@@ -178,9 +284,10 @@ def main():
     print("{} of {} bouts pass min dur {}sec".format(len(incl_bouts), len(consec_bouts), min_bout_len))
 
     #%% Plot several bouts
-    plot_bouts = False
+    plot_bouts = True
     filter_str = 'min_bout_len-{}_min_vel-{}_min_angle-{}_max_facing-{}'.format(min_bout_len, min_vel, min_angle_between, max_facing_angle) 
-    nr=7; nc=10;
+    nr = 3 #7
+    nc = 4 #10
     if plot_bouts:
         fig = plot_example_bouts(nr, nc, incl_bouts, df_, filter_str)
         # save
@@ -192,18 +299,61 @@ def main():
     #%% ----------------------------------------------
     # look at 1 specific bout
     # ------------------------------------------------
-    b_ = list(copy.copy(incl_bouts[7]))
-    #b_ = [7955, 8000] # plotted, big
-    # b_ = [9110, 9340] # plotted, smaller
-    # b_ = [10336, 10492] 
-    # b_ = [10590, 10760]
-    # b_ = [10946, 11023]
-    # b_ = [11262, 11357] # big one (plotted)
-    # b_ = [11691, 11843] # big one (plotted)
-    # b_ = [12176, 13402] # lots of inner-circle chasing
-    b_ = [14001, 14160] # 1 inner-circle bout
-    #b_ = [14164, 14313] # same
-    b_ = [17858, 18663] # very long inner-circle bout, continuous
+    b_ = list(copy.copy(incl_bouts[7])) # for NON-projector data
+    if acq == '20240214-0945_f1_Dele-wt_5do_sh_prj10_sz6x6':
+        #b_ = [7955, 8000] # plotted, big
+        # b_ = [9110, 9340] # plotted, smaller
+        # b_ = [10336, 10492] 
+        # b_ = [10590, 10760] # pursuit
+        # b_ = [10946, 11023]
+        # b_ = [11262, 11357] # big one (plotted)
+        # b_ = [11691, 11843] # big one (plotted)
+        # b_ = [12176, 13402] # lots of inner-circle chasing
+        b_ = [14001, 14160] # 1 inner-circle bout
+        #b_ = [14164, 14313] # same
+        b_ = [17858, 18663] # very long inner-circle bout, continuous
+    # -------------------------------------------
+    elif acq == '20240214-1010_f1_Dele-wt_5do_sh_prj10_sz4x4':
+        b_ = [5100, 5216] #[4947, 5216]
+    elif acq == '20240214-1025_f1_Dele-wt_5do_sh_prj10_sz10x10':
+        # LABELING NOTES IN FT ACTIONS:
+        # 3 is definite yes, with FT successfully tracked
+        # 2 is maybes, but also where definite behavior but FT failed (for DLC)
+        # 1 is unsure
+
+        #b_ = [7330, 7530] # [ 7511]  lateral sweep
+        #b_ = [7890, 7988] # lateral sweep
+        #b_ = [8180, 8342] # big one; *dot halves in on Ft frame 8301 (py frame 8300)
+        #b_ = [9315, 9460] # ends with pursuit, lateral sweep until 9420
+        #b_ = [9601, 9780] # ends with pursuit, lateral sweep until 9724
+        b_ = [9790, 9904] #[9825, 9904] # immedaitely follows prev., fly breaks off upon reaching targ
+        # [14051, 14117] - short sweep
+
+        # long circular chasing bout
+        # [13297, 13415] # 1 bout
+        # [14804, 15095] # fly breaks off after a few rotations
+        # [15297, 15507] # tight circling
+        # [15631, 15736] # "" 
+        # [15806, 16220] # long sequence of tight circling
+        # [16730, 16975] # tight circling
+        # [18848, 19303] # insane inner-circling with u.w.e. and high vel (>20mm/s); fly jumpts to dot, hiccup at 19301; fly turns *away* at 19303
+        # [20804, 21400] # insane circling; u.w.e is SUPER obtuse (near head), fly breaks off suddenly at 21401, u.w.e., but turns away
+        # [22902, 23028] # same as above with u.w.e; right as 23028, fly turns opp. direction away
+        # [23082, 23145] # one circle bout, no u.w.e.
+        # [23215, 23343] # starts with just circling, then u.w.e starts
+        # ----- FT failed, but try with DLC:
+        # also at:
+        # [7146, 7200]
+        # [7624, 7700]
+        # [9995, 10071] # 
+        # [10281, 10361] # nice one
+        # [13669, 13697] - short one; dot crosses over at end while M still has u.w.e.
+        # [13721, 13843] - circular chase, 1 bout
+        # [20118, 20154] - big sweep for super fast dot; dot hits fly while he has u.w.e.
+
+
+
+    # -------------------------------------------
     bout_start_frame = df_.loc[b_[0]]['frame']
     bout_end_frame = df_.loc[b_[1]]['frame']
     nsec_pre = 0
@@ -367,7 +517,7 @@ def main():
     ax.axvline(x=bout_start_frame)
     ax.axvline(x=bout_end_frame)
     ax.axhline(y=0, c=bg_color, ls='--')
-    ax.set_ylim([-50, 50])
+    #ax.set_ylim([-50, 50])
 
     putil.label_figure(fig, acq)
     figname = 'targ_pos_theta_vs_time_frames-{}-{}_nsec-pre-{}'.format(b_[0], b_[1], nsec_pre)
@@ -396,7 +546,7 @@ def main():
     # MAKE VIDEO OF BOUT
     # --------------------------------
     #%% make video of bout?
-    tmp_outdir = '/Users/julianarhee/Documents/rutalab/projects/predictive_coding'
+    #tmp_outdir = '/Users/julianarhee/Documents/rutalab/projects/predictive_coding'
     from matplotlib.animation import FuncAnimation
     from matplotlib import animation
 
@@ -407,7 +557,7 @@ def main():
     #vmin, vmax = f1[huevar].min(), f1[huevar].max()
     #hue_norm=mpl.colors.Normalize(vmin=vmin, vmax=vmax)
     print(vmin, vmax)
-    ylim = np.ceil(f1['targ_pos_radius'].max())
+    ylim = np.ceil(f1['targ_pos_radius'].max()) + 50
     # Create a Normalize object to map the data values to the range [0, 1]
     norm = mpl.colors.Normalize(vmin=vmin, vmax=vmax) #f1[hue_var].min(), 
                                 #vmax=0.3) #f1[hue_var].max())
@@ -486,8 +636,13 @@ def main():
 
     #%% check transformationsa ---------------------------------
     importlib.reload(rem)
+
+    # get current df
+    f1 = df_[(df_['frame'].isin(curr_frames)) & (df_['id']==0) ].copy()
+    f2 = df_[(df_['frame'].isin(curr_frames)) & (df_['id']==1) ].copy()
+
     f2.index = f1.index.copy() 
-    ix = 250
+    ix = 100 #250
     frame_ = curr_frames.iloc[ix]
     fig = rem.plot_frame_check_affines(frame_, f1, f2, cap, 
                                     frame_width, frame_height)
@@ -496,11 +651,123 @@ def main():
     fig = rem.check_rotation_transform(frame_, currdf, cap) # frame_width, frame_height)
 
 
+    #%% -----------------------------------------
+    # Range Vector Correlation
+    # ------------------------------------------
+    # Line-of-sight (LoS) vector -> facing_angle
+    
+    # Get angle difference between successive LoS vectors,
+    # i.e., differences in facng angle
+    #ang_diffs = np.diff(np.unwrap(f1['facing_angle']))
+    #f1['facing_angle_diff'] = np.concatenate([[np.nan], ang_diffs])
+    #print(f1['facing_angle_diff'].min(), f1['facing_angle_diff'].max())
 
+    # Get difference in magnitude (length) of successive LoS vectors
 
+    from scipy.stats import pearsonr
 
+    def rolling_correlation(X, Y, window_size=5):
+        # Pad X and Y arrays with NaNs to handle edges
+        X_padded = np.pad(X, (window_size // 2, window_size // 2), mode='constant', constant_values=np.nan)
+        Y_padded = np.pad(Y, (window_size // 2, window_size // 2), mode='constant', constant_values=np.nan)
+        
+        # Initialize correlation vector
+        correlation_vector = np.zeros(len(X))
+        
+        # Calculate correlation for each timepoint using rolling window
+        for i in range(len(X)):
+            if not np.isnan(X_padded[i]):
+                x_window = X_padded[i - window_size // 2: i + window_size // 2 + 1]
+                y_window = Y_padded[i - window_size // 2: i + window_size // 2 + 1]
+                valid_indices = ~np.isnan(x_window) & ~np.isnan(y_window)
+                if np.sum(valid_indices) >= 2:
+                    correlation_vector[i] = pearsonr(x_window[valid_indices], y_window[valid_indices])[0]
+                else:
+                    correlation_vector[i] = np.nan
+        
+        return correlation_vector
 
+    #%%a
+    vecdf['sec'] = (vecdf['frame']-vecdf['frame'].iloc[0]) / fps
 
+    importlib.reload(putil)
+    # get correlation bewteen angle diff and vector length:
+    corr = vecdf['ang_diff'].corr(vecdf['vec_len'])
+    print(corr)
+
+    # get correlation vector across time points bewteen angle diff and vector length across a moving window of size 5 frames:
+    # pad vecdf with NaNs of winsize in the beginning and end to handle edges
+    # add winsize NaNs in the beginning 
+    vecdf_pads = pd.DataFrame(np.nan, index=np.arange(0, winsize), columns=vecdf.columns)
+    vecdf_padded = pd.concat([vecdf_pads, vecdf, vecdf_pads], axis=0)#.reset_index(drop=True)
+    # fill vecdf_padded with mirrored values at the edges
+    #vecdf_padded.iloc[0:winsize] = vecdf.iloc[0:winsize].iloc[::-1]
+    #vecdf_padded.iloc[-winsize:] = vecdf.iloc[-winsize:].iloc[::-1]
+    vecdf_padded.iloc[0:winsize] = vecdf.iloc[0] #.iloc[::-1]
+    vecdf_padded.iloc[-winsize:] = vecdf.iloc[-1] #-winsize:].iloc[::-1]
+    print(vecdf_padded.shape)
+
+    winsize=20
+    r_vals=[]; p_vals=[];
+    for i in range(len(vecdf_padded)-winsize):
+        r_, p_ = pearsonr(vecdf_padded['ang_diff'].iloc[i:i+winsize], 
+                vecdf_padded['vec_len'].iloc[i:i+winsize])
+        r_vals.append(r_)
+        p_vals.append(p_)
+    corrdf_padded = pd.DataFrame({'pearson_r': r_vals, 'p_val': p_vals})
+    corrdf_padded = corrdf_padded.iloc[winsize:].reset_index(drop=True)
+    
+    corrdf_padded['frame'] = vecdf['frame'].values
+    corrdf_padded['sec'] = vecdf['sec'].values
+
+    winsize=20
+    r_vals=[]; p_vals=[];
+    for i in range(len(vecdf)-winsize):
+        r_, p_ = pearsonr(vecdf['ang_diff'].iloc[i:i+winsize], 
+                vecdf['vec_len'].iloc[i:i+winsize])
+        r_vals.append(r_)
+        p_vals.append(p_)
+    corrdf = pd.DataFrame({'pearson_r': r_vals, 'p_val': p_vals})
+    
+    # plot
+    fig, axn = pl.subplots(1, 2)
+    ax=axn[0]
+    sns.scatterplot(data=vecdf, ax=ax, x='ang_diff', y='vec_len', 
+                    hue='sec', palette='viridis', legend=0)
+    ax=axn[1]
+    sns.scatterplot(data=corrdf_padded, ax=ax, x='sec', y='pearson_r', 
+                    hue='sec', palette='viridis', legend=0)
+    fig.text(0.1, 0.9, 'Corr. between angle diff and vector length = {:.2f}'.format(corr))
+    #ax.plot(corrdf['pearson_r'])
+    #ax.plot(corrdf_padded['pearson_r'])
+    #ax.plot(corrdf_padded['pearson_r'])
+
+    #putil.add_colorbar(fig, ax, vmin=vecdf['sec'].min(), vmax=vecdf['sec'].max())
+    cmap='viridis'
+    norm = mpl.colors.Normalize(vmin=vecdf['sec'].min(), vmax=vecdf['sec'].max())
+    putil.colorbar_from_mappable(ax, norm, cmap, hue_title='sec', axes=[0.93, 0.3, 0.01, 0.4],
+                            fontsize=7) #pad=0.05):
+
+    for ax in axn:
+        ax.set_box_aspect(1)
+    pl.subplots_adjust(wspace=0.5)
+
+    #%%
+    fig, ax = pl.subplots()
+
+    #%%
+
+    corrdf
+    fig, ax =pl.subplots()
+    ax.plot(corrdf['pearson_r'])
+
+    X = vecdf['ang_diff'].values
+    Y = vecdf['vec_len'].values
+    correlation_vector = rolling_correlation(X, Y, window_size=5)
+    print(correlation_vector)
+
+    fig, ax = pl.subplots()
+    ax.plot(correlation_vector)
 
 #%%
 
@@ -607,4 +874,8 @@ def main():
     ax.plot(plotdf['ori'])
     ax.plot(plotdf['heading'])
 
-    # %%
+
+
+# %%
+if __name__ == '__main__':
+    main()  
