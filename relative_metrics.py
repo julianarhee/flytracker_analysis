@@ -439,6 +439,8 @@ def get_metrics_relative_to_focal_fly(acqdir, fps=60, cop_ix=None,
     frame_width  = cap.get(cv2.CAP_PROP_FRAME_WIDTH)   # float `width`
     frame_height = cap.get(cv2.CAP_PROP_FRAME_HEIGHT)  # float `height`
     print(frame_width, frame_height) # array columns x array rows
+    # switch ORI
+    trk_['ori'] = -1*trk_['ori'] # flip for FT to match DLC and plot with 0, 0 at bottom left
     df_ = do_transformations_on_df(trk_, frame_width, frame_height, 
                                    feat_=feat_, cop_ix=cop_ix,
                                    flyid1=0, flyid2=1)
@@ -529,7 +531,7 @@ if __name__ == '__main__':
     parser.add_argument('--new', type=bool, default=False, help='Create new processed data (default: False).')
      
     args = parser.parse_args()
-
+    
     #rootdir = '/Volumes/Julie'
     #assay = '38mm_dyad'
     #viddir = '/Volumes/Julie/courtship-videos/38mm_dyad'
@@ -554,9 +556,19 @@ if __name__ == '__main__':
     #viddir = '/Volumes/Giacomo/free_behavior_data'
     #savedir = '/Volumes/Julie/free-behavior-analysis/FlyTracker/38mm_dyad/processed'
 
+    #viddir = '/Volumes/Giacomo/JAABA_classifiers/projector/changing_dot_size_speed'
+    #savedir = '/Volumes/Julie/2d-projector-analysis/FlyTracker/processed_mats'
+    #flyid1=0
+    #flyid2=1
+    #movie_fmt = 'avi'
+
     #%% 
     viddir = args.viddir 
     savedir = args.savedir
+    movie_fmt = args.movie_fmt
+    flyid1 = args.flyid1
+    flyid2 = args.flyid2
+
     found_mats = glob.glob(os.path.join(viddir,  '20*', '*', '*feat.mat'))
     print('Found {} processed videos.'.format(len(found_mats)))
     #%%
@@ -576,14 +588,15 @@ if __name__ == '__main__':
         if create_new:
             cop_ix = get_copulation_ix(acq)
             get_metrics_relative_to_focal_fly(acqdir,
-                                        savedir=args.savedir,
-                                        movie_fmt=args.movie_fmt, 
-                                        flyid1=args.flyid1, flyid2=args.flyid2,
-                                        plot_checks=False)
-
-            get_metrics_relative_to_focal_fly(acqdir,
                                         savedir=savedir,
-                                        movie_fmt='avi', 
-                                        flyid1=0, flyid2=1,
+                                        movie_fmt=movie_fmt, 
+                                        flyid1=flyid1, flyid2=flyid2,
                                         plot_checks=False)
 
+#%%
+#            get_metrics_relative_to_focal_fly(acqdir,
+#                                        savedir=savedir,
+#                                        movie_fmt='avi', 
+#                                        flyid1=0, flyid2=1,
+#                                        plot_checks=False)
+#
