@@ -284,13 +284,16 @@ def circular_hist(ax, x, bins=16, density=True, offset=0, gaps=True,
      
     return n, bins, patches
 
-def add_colorbar(fig, ax, vmin, vmax, shrink=0.5, pad=0.2, 
+def add_colorbar(fig, ax, vmin, vmax, shrink=0.1, pad=0.2, 
                  cmap=mpl.cm.viridis, label=''):
+    from mpl_toolkits.axes_grid1 import make_axes_locatable
+
     #cmap = mpl.cm.Greys # 
     norm = mpl.colors.Normalize(vmin=vmin, vmax=vmax)
 
-    fig.colorbar(mpl.cm.ScalarMappable(norm=norm, cmap=cmap), ax=ax,
-                shrink=0.5, label=label, pad=pad)
+
+    cbar = fig.colorbar(mpl.cm.ScalarMappable(norm=norm, cmap=cmap), ax=ax, 
+                shrink=shrink, label=label, pad=pad)
     return
 
 def colorbar_from_mappable(ax, norm, cmap, hue_title='', axes=[0.85, 0.3, 0.01, 0.4],
@@ -311,6 +314,26 @@ def colorbar_from_mappable(ax, norm, cmap, hue_title='', axes=[0.85, 0.3, 0.01, 
 
     #pl.colorbar(im, cax=cax)
 
+def get_palette_dict(df, huevar, cmap='viridis'):
+    '''
+    Create dict of color values for plotting huevar in df. Expects discrete values.
+
+    Arguments:
+        df -- _description_
+        huevar -- _description_
+
+    Keyword Arguments:
+        cmap -- _description_ (default: {'viridis'})
+
+    Returns:
+        _description_
+    '''
+    bin_vals = df[huevar].unique()
+    return dict((k, v) for k, v in zip(bin_vals, 
+                        sns.color_palette(cmap, n_colors=len(bin_vals))) )
+
+
+#%%
 def plot_vector_path(ax, x, y, c, scale=1.5, width=0.005, headwidth=5, pivot='tail', 
                     colormap=mpl.cm.plasma, vmin=None, vmax=None, hue_title='',
                     axes=[0.8, 0.3, 0.01, 0.4]):
