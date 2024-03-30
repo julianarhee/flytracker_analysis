@@ -784,6 +784,141 @@ def plot_skeleton(coords, inds=None, ax=None, color='k', alpha=1, lw=1):
 #         ax.add_collection(col0)
 
 
+def plot_skeleton_on_ax(ix, df0, cap, cfg, ax=None,
+                        pcutoff=0.01, animal_colors={'fly': 'm', 'single': 'c'},
+                        alphavalue=1, skeleton_color='w', skeleton_color0='w',
+                        markersize=3, skeleton_lw=0.5, lw=1):
+    '''
+    Plot skeleton of animals/bodyparts on ax.
+
+    Arguments:
+        ix -- _description_
+        df0 -- _description_
+        cap -- _description_
+        cfg -- _description_
+
+    Keyword Arguments:
+        ax -- _description_ (default: {None})
+        pcutoff -- _description_ (default: {0.01})
+        animal_colors -- _description_ (default: {{'fly': 'm', 'single': 'c'}})
+        alphavalue -- _description_ (default: {1})
+        skeleton_color -- _description_ (default: {'w'})
+        skeleton_color0 -- _description_ (default: {'w'})
+        markersize -- _description_ (default: {3})
+        skeleton_lw -- _description_ (default: {0.5})
+        lw -- _description_ (default: {1})
+    '''
+    if ax is None:
+        fig, ax =pl.subplots()
+
+    scorer = df0.columns.get_level_values(0)[0]
+
+    cap.set(1, ix)
+    ret, im = cap.read()
+    im = cv2.cvtColor(im, cv2.COLOR_BGR2GRAY) #COLOR_BGR2RGB)
+
+    ax.imshow(im, cmap='gray')
+    ax.set_title('Frame {}'.format(ix), loc='left')
+    #bodyparts2plot = set(df0.columns.get_level_values("bodyparts"))
+    #bodyparts1 = df0[scorer]['fly'].columns.get_level_values(0).tolist()
+    #bodyparts2 = df0[scorer]['fly'].columns.get_level_values(0).tolist()
+
+    individuals = set(df0.columns.get_level_values("individuals"))
+    bodyparts = dict((ind, np.unique(df0[scorer][ind].columns.get_level_values(0)).tolist()) \
+                    for ind in individuals)
+    for ind2plot in individuals:
+        curr_col = animal_colors[ind2plot]
+        df = df0.loc(axis=1)[:, ind2plot]
+        bodyparts2plot = bodyparts[ind2plot]
+
+        # original indices specified in cfg file:
+        n_bodyparts = len(np.unique(df.columns.get_level_values("bodyparts")[::3]))
+        #print(n_bodyparts)
+        all_bpts = df.columns.get_level_values("bodyparts")[::3][0:n_bodyparts]
+
+        bodyparts2connect = [v for v in cfg['skeleton'] if v[0] in bodyparts2plot]
+        inds  = dlc.get_segment_indices(bodyparts2connect, all_bpts)
+        skeleton_edges=bodyparts2connect
+        curr_colors = sns.color_palette("husl", n_bodyparts)
+
+        for bpindex, bp in enumerate(bodyparts2plot):
+            curr_col = curr_colors[bpindex]
+            prob = df.xs(
+                (bp, "likelihood"), level=(-2, -1), axis=1
+            ).values.squeeze()
+            mask = prob < pcutoff
+            temp_x = np.ma.array(
+                df.xs((bp, "x"), level=(-2, -1), axis=1).values.squeeze(),
+                mask=mask,
+            )
+            temp_y = np.ma.array(
+                df.xs((bp, "y"), level=(-2, -1), axis=1).values.squeeze(),
+                mask=mask,
+            )
+            ax.plot(temp_x[ix], temp_y[ix], ".", color=curr_col, alpha=alphavalue, markersize=markersize)
+
+        nx = int(np.nanmax(df.xs("x", axis=1, level="coords")))
+        ny = int(np.nanmax(df.xs("y", axis=1, level="coords")))
+
+        n_frames = df.shape[0]
+        xyp = df.values.reshape((n_frames, -1, 3))
+        coords = xyp[ix, :, :2]
+        coords[xyp[ix, :, 2] < pcutoff] = np.nan
+        segs = coords[tuple(zip(*tuple(inds))), :].swapaxes(0, 1) if inds else []
+        coll = mpl.collections.LineCollection(segs, colors=skeleton_color, alpha=alphavalue, lw=lw)
+        # plot
+        ax.add_collection(coll)
+        
+        segs0 = coords[tuple(zip(*tuple(inds))), :].swapaxes(0, 1) if inds else []
+        col0 = mpl.collections.LineCollection(segs0, colors=skeleton_color0, alpha=alphavalue, lw=skeleton_lw)
+        ax.add_collection(col0)
+        # axes
+        ax.set_xlim(0, nx)
+        ax.set_ylim(0, ny)
+        ax.set_aspect(1)
+
+
+def plot_skeleton_on_image(ixs2plot, df0, cap, cfg, pcutoff=0.01, animal_colors={'fly': 'm', 'single': 'c'},
+                            alphavalue=1, skeleton_color='w', skeleton_color0='w',
+                            markersize=3, skeleton_lw=0.5, lw=1):
+    '''
+    Plot ixs2plot (frames) of DLC data on image. Calls plot_skeleton_on_ax()
+
+    Arguments:
+        ixs2plot -- _description_
+        df0 -- _description_
+        cap -- _description_
+        cfg -- _description_
+
+    Keyword Arguments:
+        pcutoff -- _description_ (default: {0.01})
+        animal_colors -- _description_ (default: {{'fly': 'm', 'single': 'c'}})
+        alphavalue -- _description_ (default: {1})
+        skeleton_color -- _description_ (default: {'w'})
+        skeleton_color0 -- _description_ (default: {'w'})
+        markersize -- _description_ (default: {3})
+        skeleton_lw -- _description_ (default: {0.5})
+        lw -- _description_ (default: {1})
+
+    Returns:
+        _description_
+    '''
+    #fig, axn = pl.subplots(1, len(ixs2plot))
+    scorer = df0.columns.get_level_values(0)[0]
+    fig, axn = pl.subplots(1, len(ixs2plot))
+
+    #ix=3043
+    for ai, ix in enumerate(ixs2plot):
+        ax=axn[ai]
+        dlc.plot_skeleton_on_ax(ix, df0, cap, cfg, ax=ax,
+                        pcutoff=pcutoff, animal_colors=animal_colors,
+                        alphavalue=alphavalue, skeleton_color=skeleton_color, skeleton_color0=skeleton_color0,
+                        markersize=markersize, skeleton_lw=skeleton_lw, lw=lw)
+
+    return fig
+
+
+
 ## filter
 
 def get_filtered_pos(df, bp, pcutoff=0.9, return_df=True):
