@@ -86,6 +86,7 @@ def smooth_and_calculate_velocity_circvar(df, smooth_var='ori', vel_var='ang_vel
                                   time_var='sec', winsize=3):
     '''
     Smooth circular var and then calculate velocity. Takes care of NaNs.
+    Assumes 'id' is in df.
 
     Arguments:
         df -- _description_
@@ -104,17 +105,17 @@ def smooth_and_calculate_velocity_circvar(df, smooth_var='ori', vel_var='ang_vel
     for i, df_ in df.groupby('id'): 
         # unwrap for continuous angles, then interpolate NaNs
         nans = df_[df_[smooth_var].isna()].index
-        unwrapped = pd.Series(np.unwrap(df_[smooth_var].fillna(method='ffill')),
+        unwrapped = pd.Series(np.unwrap(df_[smooth_var].interpolate().ffill().bfill()),
                             index=df_.index) #.interpolate().values))
         # replace nans 
-        unwrapped.loc[nans] = np.nan 
+        #unwrapped.loc[nans] = np.nan 
         # interpolate over nans now that the values are unwrapped
         oris = unwrapped.interpolate() 
         # revert back to -pi, pi
         #oris = [util.set_angle_range_to_neg_pos_pi(i) for i in oris]
         # smooth with rolling()
-        smoothed = smooth_orientations_pandas(oris, winsize=2) #smoothed = smooth_orientations(df_['ori'], winsize=3)
-        # unwrap again to take difference between oris
+        smoothed = smooth_orientations_pandas(oris, winsize=winsize) #smoothed = smooth_orientations(df_['ori'], winsize=3)
+        # unwrap again to take difference between oris -- should look similar to ORIS
         smoothed_wrap = pd.Series(np.unwrap([set_angle_range_to_neg_pos_pi(i) \
                                             for i in smoothed]), index=df_.index)
         # take difference
@@ -321,6 +322,72 @@ def pol2cart(rho, phi):
 # ---------------------------------------------------------------------
 # Data loading and formatting
 # ---------------------------------------------------------------------
+
+def load_jaaba(assay):
+    '''
+    Assay can be '2d-projector' or '38mm-dyad' -- uses hard-coded local paths for faster loading.
+
+    Arguments:
+        assay -- _description_
+
+    Returns:
+        _description_
+    '''
+
+    if assay=='2d-projector':
+        srcdir = '/Users/julianarhee/Documents/rutalab/projects/courtship/2d-projector/JAABA'
+        #% Load jaaba-traansformed data
+        jaaba_fpath = os.path.join(srcdir, 'jaaba_transformed_data_transf.pkl')
+        assert os.path.exists(jaaba_fpath), "File not found: {}".format(jaaba_fpath)
+        jaaba = pd.read_pickle(jaaba_fpath)   
+        print(jaaba['species'].unique())
+    elif assay=='38mm-dyad':
+        #jaaba_file = '/Volumes/Julie/free-behavior-analysis/38mm-dyad/jaaba.pkl'
+        srcdir = '//Users/julianarhee/Documents/rutalab/projects/courtship/38mm-dyad'
+        jaab_fpath = os.path.join(srcdir, 'jaaba.pkl')
+        jaaba = pd.read_pickle(jaaba_fpath)
+        #with open(jaaba_fpath, 'rb') as f:
+        #    jaaba = pkl.load(f)
+        #jaaba.head()
+
+    return jaaba
+
+
+def get_video_cap_check_multidir(acq, assay='2d-projector'):
+    '''
+    Specific issue where multiple vid sources are possible (e.g., Minerva and Giacomo's drives).
+
+    Arguments:
+        acq -- _description_
+
+    Returns:
+        _description_
+    '''
+    minerva_base='/Volumes/Julie'
+
+    session = acq.split('-')[0]
+    viddir = os.path.join(minerva_base, assay, session)
+
+    # videos are in parent dir of FT folder
+    #cap = pp.get_video_cap(viddir) #acqdir)
+    try:
+        vids = glob.glob(os.path.join(minerva_base, assay, '20*', '{}*.avi'.format(acq)))
+        video_fpath = vids[0]
+    except IndexError:
+        if '2x2' in acq:
+            minerva_base2 = '/Volumes/Giacomo/JAABA_classifiers/projector/changing_dot_size_speed/2x2'
+        else:
+            minerva_base2 = '/Volumes/Giacomo/JAABA_classifiers/projector/changing_dot_size_speed'
+
+        found_vids = glob.glob(os.path.join(minerva_base2, '{}*'.format(acq), 'movie.avi'))
+        assert len(found_vids)>0, "No video found for acq {}\nChecked in: {}".format(acq, minerva_base2)
+        video_fpath = found_vids[0]
+        print(video_fpath)
+
+    cap = cv2.VideoCapture(video_fpath)
+
+    return cap
+
 def get_acq_from_ftpath(fp, viddir):     
     '''
     Return acq name (subdir of viddir that contains video file)
