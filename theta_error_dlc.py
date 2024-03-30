@@ -57,7 +57,13 @@ project_dir = os.path.join('/Users/julianarhee/DeepLabCut', projectname)
 df0 = pd.read_hdf(fpath)
 scorer = df0.columns.get_level_values(0)[0]
 
-# get video info
+# load config file
+cfg = pdlc.load_dlc_config(projectname=projectname)
+
+# get fig id 
+fig_id = os.path.split(fpath.split('DLC')[0])[-1]
+
+#%% get video info
 minerva_base2 = '/Volumes/Giacomo/JAABA_classifiers/projector/changing_dot_size_speed'
 found_vids = glob.glob(os.path.join(minerva_base2, '{}*'.format(acq), 'movie.avi'))
 assert len(found_vids)>0, "No video found for acq {}".format(acq)
@@ -68,11 +74,7 @@ frame_width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
 frame_height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
 print(frame_width, frame_height)
 
-# load config file
-cfg = pdlc.load_dlc_config(projectname=projectname)
-
-# get fig id 
-fig_id = os.path.split(fpath.split('DLC')[0])[-1]
+#%%
 # %% Load dlc into dataframes
 flyid = 'fly' # double check in the plots for abdomen lengths
 dotid = 'single'
@@ -86,51 +88,16 @@ pcutoff=0.8
 #tstamp = np.linspace(0, len(trk) * 1 / fps, len(trk))
 #nframes = len(trk)
 
-# get dataframes
-flydf = dlc.load_trk_df(fpath, flyid='fly', fps=fps, 
-                        max_jump=max_jump, cop_ix=None,
-                        filter_bad_frames=True, pcutoff=pcutoff)
-dotdf = dlc.load_trk_df(fpath, flyid='single', fps=fps, 
-                        max_jump=max_jump, cop_ix=None, 
-                        filter_bad_frames=True, pcutoff=pcutoff)
-print(flydf.shape, dotdf.shape)
-# set nans
-nan_rows = flydf.isna().any(axis=1)
-dotdf.loc[nan_rows] = np.nan
-
-flydf, dotdf = dlc.get_interfly_params(flydf, dotdf, cop_ix=None)
+flydf, dotdf = dlc.load_dlc_df(fpath, fly1=flyid, fly2=dotid, fps=fps, 
+                           max_jump=max_jump, pcutoff=pcutoff, diff_speeds=True)
 
 #%% add speed info
 importlib.reload(dlc)
-dotdf, flydf = dlc.add_speed_epochs(dotdf, flydf, acq, filter=False)
 
 #%% Change var names for relative metrics
-# assign IDs like FlyTracker DFs
-flydf['id'] = 0
-dotdf['id'] = 1
-trk_ = pd.concat([flydf, dotdf], axis=0)
+trk_ = dlc.dlc_df_to_flytracker_df(flydf, dotdf)
 
-# convert units from pix to mm
-#mm_per_pix = 3 / trk_['body_length'].mean()
-trk_ = trk_.rename(columns={'dist_to_other': 'dist_to_other_pix'})
-arena_size = 38 - 4
-max_dist_found = trk_['dist_to_other_pix'].max()
-approx_mm_per_pix = arena_size/max_dist_found
-print(approx_mm_per_pix)
-
-trk_['vel'] = trk_['lin_speed'] * approx_mm_per_pix
-trk_['dist_to_other'] = trk_['dist_to_other_pix'] * approx_mm_per_pix
-
-
-# % rename columns to get RELATIVE pos info
-trk_ = trk_.rename(columns={'centroid_x': 'pos_x',
-                           'centroid_y': 'pos_y',
-                           'heading': 'ori', # should rename this
-                           'body_length': 'major_axis_len',
-                           'inter_wing_dist': 'minor_axis_len',
-                           'time': 'sec'
-                           }) 
-#%%
+# do transformations
 df = rem.do_transformations_on_df(trk_, frame_width, frame_height) #, fps=fps)
 df['ori_deg'] = np.rad2deg(df['ori'])
 #df['targ_pos_theta'] = -1*df['targ_pos_theta']
@@ -199,9 +166,10 @@ print(len(turn_start_frames))
 
 nsec_pre = 10
 
-stim_hz_vals = passdf['epoch'].unique()
-stimhz_palette = dict((k, v) for k, v in zip(stim_hz_vals, 
-                        sns.color_palette('viridis', n_colors=len(stim_hz_vals))))
+#stim_hz_vals = passdf['epoch'].unique()
+stimhz_palette = putil.get_palette_dict(passdf, 'epoch', 'viridis')
+#stimhz_palette = dict((k, v) for k, v in zip(stim_hz_vals, 
+#                        sns.color_palette('viridis', n_colors=len(stim_hz_vals))))
 d_list = []
 fig, axn = pl.subplots(1, 2, figsize=(10,5), sharex=True, sharey=True,
                        subplot_kw={'projection': 'polar'})

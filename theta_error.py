@@ -26,13 +26,15 @@ import relative_metrics as rem
 plot_style='dark'
 putil.set_sns_style(style=plot_style, min_fontsize=12)
 bg_color='w' if plot_style=='dark' else 'k'
+#%%
+
 
 # %%
 #srcdir = '/Volumes/Julie/2d-projector-analysis/processed'
 srcdir = '/Users/julianarhee/Documents/rutalab/projects/courtship/2d-projector/JAABA'
 
 #% Load jaaba-traansformed data
-jaaba_fpath = os.path.join(srcdir, 'jaaba_transformed_data.pkl')
+jaaba_fpath = os.path.join(srcdir, 'jaaba_transformed_data_transf.pkl')
 assert os.path.exists(jaaba_fpath), "File not found: {}".format(jaaba_fpath)
 jaaba = pd.read_pickle(jaaba_fpath)   
 
@@ -166,53 +168,21 @@ print(len(turn_start_frames))
 
 # PLOT -------
 nsec_pre = 10
-
 d_list = []
-fig, axn = pl.subplots(1, 2, figsize=(10,5), sharex=True, sharey=True,
-                       subplot_kw={'projection': 'polar'})
-ax=axn[1]
-ax.set_title('egocentric (targ. pos.)')
 for ix in turn_start_frames: #[0::2]: #0::20]:
     start_ = ix #nsec_pre*fps
     stop_ = ix + nsec_pre*fps
-    sns.scatterplot(data=passdf.loc[start_:stop_], ax=ax,
-                x='targ_pos_theta', y='targ_pos_radius', s=3,
-                hue='stim_hz', palette=stimhz_palette,
-                edgecolor='none', legend=0, alpha=0.7)
     d_list.append(passdf.loc[start_:stop_])
 plotted_passdf = pd.concat(d_list)
 
-# plot Center of Mass
-importlib.reload(putil)
-for stimhz, df_ in plotted_passdf.groupby('stim_hz'):
-    cm_theta = df_['targ_pos_theta'].mean()
-    cm_radius = df_['targ_pos_radius'].mean()
-    ax.scatter(cm_theta, cm_radius, s=30, c=stimhz_palette[stimhz],
-               marker='o', edgecolor='k', lw=0.5,
-               label='COM: {:.2f}Hz'.format(stimhz))
-putil.add_colorbar(fig, ax, label='Stim Hz', cmap='viridis',
-                   pad=0.2, shrink=0.3,
-                   vmin=stim_hz_vals.min(), vmax=stim_hz_vals.max())
+fig, axn = pl.subplots(1, 2,#figsize=(10,5), sharex=True, sharey=True,
+                       subplot_kw={'projection': 'polar'})
+pp.plot_allo_vs_egocentric_pos(plotted_passdf, axn, huevar='stim_hz', cmap='viridis',
+                        palette_dict=stimhz_palette, 
+                        plot_com=True, bg_color=bg_color) 
+pl.subplots_adjust(left=0.1, right=0.85, wspace=0.5)
 
-# plot dot in allocentric
-rad, th = util.cart2pol(flydf['ctr_x'].values, flydf['ctr_y'].values)
-flydf['pos_radius'] = rad
-flydf['pos_theta'] = th
-ax = axn[0] #fig.add_subplot(121,projection='polar')
-ax.set_title('allocentric (male pos.)')
-plotted_allocentric = flydf.loc[plotted_passdf.index].copy()
-sns.scatterplot(data=plotted_allocentric, ax=ax,
-                x='pos_theta', y='pos_radius', s=3,
-                hue='stim_hz', palette=stimhz_palette,
-                edgecolor='none', legend=0, alpha=0.7)
-putil.add_colorbar(fig, ax, label='Stim Hz', cmap='viridis',
-                   pad=0.2, shrink=0.3,
-                   vmin=stim_hz_vals.min(), vmax=stim_hz_vals.max())
-for ax in axn:
-    ax.tick_params(pad=10)
-    ax.set_xlabel('')
-    ax.set_ylabel('')
-
+putil.label_figure(fig, acq)
 pl.subplots_adjust(left=0.1, right=0.85, wspace=0.5)
 
 putil.label_figure(fig, acq)
@@ -337,67 +307,127 @@ ax.axvline(x=nframes_win, color=bg_color, linestyle='--')
 #%%
 
 
+#%% ------------------------------
+# MAKE VIDEO OF BOUT
+# --------------------------------
+#%% make video of bout?
+#tmp_outdir = '/Users/julianarhee/Documents/rutalab/projects/predictive_coding'
+from matplotlib.animation import FuncAnimation
+from matplotlib import animation
+
+curr_frames = pd.Series(flydf.loc[start_ix:stop_ix]['frame'].values)
+
+f1 = flydf.loc[start_ix:stop_ix]
+f2 = fly2.loc[start_ix:stop_ix]
+
+vmin, vmax = f1[huevar].min(), 10 #f1[huevar].max()
+#frame_num = curr_frames.values[0]
+ix = 50
+# get list of colors for scatter plot based on angular size using viridis cmap and normalizing to range of angular size values
+huevar = 'ang_vel' #'targ_ang_size'
+#vmin, vmax = f1[huevar].min(), f1[huevar].max()
+#hue_norm=mpl.colors.Normalize(vmin=vmin, vmax=vmax)
+print(vmin, vmax)
+ylim = np.ceil(f1['targ_pos_radius'].max()) + 50
+# Create a Normalize object to map the data values to the range [0, 1]
+norm = mpl.colors.Normalize(vmin=vmin, vmax=vmax) #f1[hue_var].min(), 
+                            #vmax=0.3) #f1[hue_var].max())
+# Create a ScalarMappable object with the Viridis colormap and the defined normalization
+sm = mpl.cm.ScalarMappable(cmap='viridis', norm=norm)
+
+# Get a list of colors corresponding to the data values
+colors = [sm.to_rgba(value) for value in f1[huevar].values]
+
+fig = pl.figure()
+ax1 = fig.add_subplot(121)
+ax2 = fig.add_subplot(122, projection='polar')
+ax2.set_ylim([0, ylim])
+
+#while im is None:
+#for ix in range(len(curr_frames)):
+cap.set(1, curr_frames.iloc[ix])
+ret, im = cap.read()
+im = cv2.cvtColor(im, cv2.COLOR_BGR2GRAY)
+print(ix)
+
+p1 = ax1.imshow(im, aspect='equal', cmap='gray')
+ax1.invert_yaxis()
+p2 = ax2.scatter(f1.iloc[:ix]['targ_pos_theta'],
+                    f1.iloc[:ix]['targ_pos_radius'],
+                    c=f1.iloc[:ix][huevar],                       
+                    vmin=vmin, vmax=vmax,
+                    s=20, #f1.iloc[:ix]['targ_ang_size'],
+                    cmap='viridis' #f1.loc[:frame_num]['targ_ang_size'],
+                    )
+#%
+def init():
+    p1.set_data(np.zeros((frame_height, frame_width)))
+    # set x, y data for scatter plot
+    p2.set_data([], [])
+    # set sizes
+    #p2.set_sizes([], [])
+    p2.set_array([])
+    return (p1, p2,)
+
+def update_figure(ix): #, p1, p2, cap, f1):        
+    # udpate imshow
+    cap.set(1, curr_frames.iloc[ix])
+    ret, im = cap.read()
+    im = cv2.cvtColor(im, cv2.COLOR_BGR2GRAY) #COLOR_BGR2RGB)
+    p1.set_data(im)
+    #p1.set_title('Frame {}'.format(frame_num))
+    
+    # Update subplot 2 (plot)
+    xys_ = f1.iloc[:ix][['targ_pos_theta', 'targ_pos_radius']].values
+    # update x, y
+    p2.set_offsets(xys_)
+    # uppdate size
+    #p2.set_sizes(f1.iloc[:ix]['targ_ang_size'] * 100) 
+    # update color
+    p2.set_array(f1.iloc[:ix][huevar])
+
+    # Adjust layou+ 1t
+    #pl.tight_layout()
+
+frame_numbers = np.arange(0, len(curr_frames)) #curr_frames.values #range(1, 11)  # List of frame numbers
+
+# Create the animation
+anim = FuncAnimation(fig, update_figure, frames=frame_numbers, 
+                    interval=1000//fps)
+
+# Save the animation as a movie file
+video_outrate = 30
+figdir = '/Users/julianarhee/Documents/rutalab/projects/predictive_coding'
+save_movpath = os.path.join(figdir, 'anim_{}_frames-{}-{}.mp4'.format(acq, start_ix, stop_ix))
+
+#                    'anim_frames-{}-{}_nsec-pre-{}_hue-{}_{}hz.mp4'.format(b_[0], b_[1], nsec_pre,
+#                                                                                huevar, video_outrate))
+
+anim.save(save_movpath, fps=video_outrate, extra_args=['-vcodec', 'libx264'])
 
 
 
-
-
-
-#%% ----------------
 
 
 #%%
 nsec_pre = 10
 
 stim_hz_vals = jaaba['stim_hz'].unique()
-stimhz_palette = dict((k, v) for k, v in zip(stim_hz_vals, 
-                        sns.color_palette('viridis', n_colors=len(stim_hz_vals))))
+stimhz_palette = putil.get_palette_dict(jaaba, 'stim_hz', 'viridis')
+#stimhz_palette = dict((k, v) for k, v in zip(stim_hz_vals, 
+#                        sns.color_palette('viridis', n_colors=len(stim_hz_vals))))
 d_list = []
-fig, axn = pl.subplots(1, 2, figsize=(10,5), sharex=True, sharey=True,
-                       subplot_kw={'projection': 'polar'})
-ax=axn[1]
-ax.set_title('egocentric (targ. pos.)')
 for ix in turn_start_frames: #[0::2]: #0::20]:
     start_ = ix #nsec_pre*fps
     stop_ = ix + nsec_pre*fps
-    sns.scatterplot(data=passdf.loc[start_:stop_], ax=ax,
-                x='targ_pos_theta', y='targ_pos_radius', s=3,
-                hue='stim_hz', palette=stimhz_palette,
-                edgecolor='none', legend=0, alpha=0.7)
     d_list.append(passdf.loc[start_:stop_])
 plotted_passdf = pd.concat(d_list)
 
-# plot Center of Mass
-importlib.reload(putil)
-for stimhz, df_ in plotted_passdf.groupby('stim_hz'):
-    cm_theta = df_['targ_pos_theta'].mean()
-    cm_radius = df_['targ_pos_radius'].mean()
-    ax.scatter(cm_theta, cm_radius, s=30, c=stimhz_palette[stimhz],
-               marker='o', edgecolor='k', lw=0.5,
-               label='COM: {:.2f}Hz'.format(stimhz))
-putil.add_colorbar(fig, ax, label='Stim Hz', cmap='viridis',
-                   pad=0.2, shrink=0.3,
-                   vmin=stim_hz_vals.min(), vmax=stim_hz_vals.max())
-
-# plot dot in allocentric
-rad, th = util.cart2pol(flydf['ctr_x'].values, flydf['ctr_y'].values)
-flydf['pos_radius'] = rad
-flydf['pos_theta'] = th
-ax = axn[0] #fig.add_subplot(121,projection='polar')
-ax.set_title('allocentric (male pos.)')
-plotted_allocentric = flydf.loc[plotted_passdf.index].copy()
-sns.scatterplot(data=plotted_allocentric, ax=ax,
-                x='pos_theta', y='pos_radius', s=3,
-                hue='stim_hz', palette=stimhz_palette,
-                edgecolor='none', legend=0, alpha=0.7)
-putil.add_colorbar(fig, ax, label='Stim Hz', cmap='viridis',
-                   pad=0.2, shrink=0.3,
-                   vmin=stim_hz_vals.min(), vmax=stim_hz_vals.max())
-for ax in axn:
-    ax.tick_params(pad=10)
-    ax.set_xlabel('')
-    ax.set_ylabel('')
-
+fig, axn = pl.subplots(1, 2,#figsize=(10,5), sharex=True, sharey=True,
+                       subplot_kw={'projection': 'polar'})
+pp.plot_allo_vs_egocentric_pos(plotted_passdf, axn, huevar='stim_hz', cmap='viridis',
+                        palette_dict=stimhz_palette, 
+                        plot_com=True, bg_color=bg_color) 
 pl.subplots_adjust(left=0.1, right=0.85, wspace=0.5)
 
 putil.label_figure(fig, acq)
@@ -406,8 +436,9 @@ putil.label_figure(fig, acq)
 
 
 
-# %%
-
+# %% -------------------------------------
+# AGGREGATE ACROSS ALL FILES
+# ----------------------------------------
 #%% Do transformations to egocentric -- need BOTH M/F
 create_new=False
 if create_new:
