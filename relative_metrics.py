@@ -20,14 +20,30 @@ import argparse
 
 #%%
 def plot_frame_check_affines(ix, fly1, fly2, cap, frame_width=None, frame_height=None):
+    '''
+    Plot frame and rotations with markers oriented to fly's heading. IX is FRAME NUMBER.
+
+    Arguments:
+        ix -- _description_
+        fly1 -- _description_
+        fly2 -- _description_
+        cap -- _description_
+
+    Keyword Arguments:
+        frame_width -- _description_ (default: {None})
+        frame_height -- _description_ (default: {None})
+
+    Returns:
+        _description_
+    '''
     if frame_width is None:
         frame_width  = cap.get(cv2.CAP_PROP_FRAME_WIDTH)   # float `width`
         frame_height = cap.get(cv2.CAP_PROP_FRAME_HEIGHT)  # float `height`
 
     # set fly oris as arrows
     fly_marker = '$\u2192$' # https://en.wikipedia.org/wiki/Template:Unicode_chart_Arrows
-    m_ori = np.rad2deg(fly1.loc[ix]['rot_ori'])
-    f_ori = np.rad2deg(fly2.loc[ix]['rot_ori'])
+    m_ori = np.rad2deg(fly1[fly1['frame']==ix]['rot_ori'])
+    f_ori = np.rad2deg(fly2[fly2['frame']==ix]['rot_ori'])
     marker_m = mpl.markers.MarkerStyle(marker=fly_marker)
     marker_m._transform = marker_m.get_transform().rotate_deg(m_ori)
     marker_f = mpl.markers.MarkerStyle(marker=fly_marker)
@@ -46,8 +62,8 @@ def plot_frame_check_affines(ix, fly1, fly2, cap, frame_width=None, frame_height
     ax.invert_yaxis()
 
     #ax = fig.add_subplot(142) 
-    ax.plot(fly1['pos_x'].loc[ix], fly1['pos_y'].loc[ix], 'r*')
-    ax.plot(fly2['pos_x'].loc[ix], fly2['pos_y'].loc[ix], 'bo')
+    ax.plot(fly1[fly1['frame']==ix]['pos_x'], fly1[fly1['frame']==ix]['pos_y'], 'r*')
+    ax.plot(fly2[fly2['frame']==ix]['pos_x'], fly2[fly2['frame']==ix]['pos_y'], 'bo')
     ax.set_aspect(1)
     ax.set_xlim(0, frame_width)
     ax.set_ylim(0, frame_height)
@@ -56,9 +72,10 @@ def plot_frame_check_affines(ix, fly1, fly2, cap, frame_width=None, frame_height
     ax = fig.add_subplot(122)
     ax.set_title('centered and rotated to focal (*)', fontsize=8, loc='left') 
     # make a markerstyle class instance and modify its transform prop
-    ax.plot([0, fly1['rot_x'].loc[ix]], [0, fly1['rot_y'].loc[ix]], 'r', 
+    ax.plot([0, float(fly1[fly1['frame']==ix]['rot_x'].iloc[0])], 
+            [0, float(fly1[fly1['frame']==ix]['rot_y'].iloc[0])], 'r', 
             marker=marker_m, markerfacecolor='r', markersize=10) 
-    ax.plot([fly2['rot_x'].loc[ix]], [fly2['rot_y'].loc[ix]], 'b',
+    ax.plot([fly2[fly2['frame']==ix]['rot_x']], [fly2[fly2['frame']==ix]['rot_y']], 'b',
             marker=marker_f, markerfacecolor='b', markersize=10) 
     ax.set_aspect(1)
     ax.set_xlim(0-frame_width, frame_width)
