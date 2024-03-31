@@ -170,11 +170,25 @@ winsize=5
 #print(acq)
 
 #df_ = ftjaaba[ftjaaba['acquisition']==acq]
+ftjaaba['targ_pos_theta_deg'] = np.rad2deg(ftjaaba['targ_pos_theta'])
 
 for acq, df_ in ftjaaba.groupby('acquisition'):
     df_ = util.smooth_and_calculate_velocity_circvar(df_, smooth_var='targ_pos_theta', vel_var='targ_ang_vel',
                                   time_var='sec', winsize=winsize)
+    df_ = util.smooth_and_calculate_velocity_circvar(df_, smooth_var='targ_pos_theta_deg', vel_var='targ_ang_vel_deg',
+                                  time_var='sec', winsize=winsize)
+
     ftjaaba.loc[ftjaaba['acquisition']==acq, 'targ_ang_vel'] = df_['targ_ang_vel']
+    ftjaaba.loc[ftjaaba['acquisition']==acq, 'targ_ang_vel_deg'] = df_['targ_ang_vel_deg']
+
+#%%
+ftjaaba['targ_ang_vel_abs'] = np.abs(ftjaaba['targ_ang_vel'])
+ftjaaba['targ_pos_theta_abs'] = np.abs(ftjaaba['targ_pos_theta'])
+ftjaaba['targ_ang_size_deg'] = np.rad2deg(ftjaaba['targ_ang_size'])
+ftjaaba['targ_ang_vel_deg_abs'] = np.abs(ftjaaba['targ_ang_vel_deg'])
+#ftjaaba['targ_pos_theta_abs_deg'] = np.rad2deg(ftjaaba['targ_pos_theta_abs'])  
+ftjaaba['facing_angle_deg'] = np.rad2deg(ftjaaba['facing_angle'])
+ftjaaba['ang_vel_abs'] = np.abs(ftjaaba['ang_vel'])
 
 #%% get means by BOUT
 groupcols = [ 'species', 'acquisition', 'boutnum']
@@ -183,11 +197,13 @@ min_pos_theta = np.deg2rad(-160)
 max_pos_theta = np.deg2rad(160)
 min_dist_to_other = 1
 
-ftjaaba_filt = ftjaaba[(ftjaaba['id']==0)
+filtdf = ftjaaba[(ftjaaba['id']==0)
             & (ftjaaba['targ_pos_theta']>=min_pos_theta) 
-            & (ftjaaba['targ_pos_theta']<=max_pos_theta)]
+            & (ftjaaba['targ_pos_theta']<=max_pos_theta)
+            & (ftjaaba['good_frames']==1)
+            ].copy().reset_index(drop=True)
 
-meandf = ftjaaba_filt.groupby(groupcols).mean().reset_index()
+#meandf = ftjaaba_filt.groupby(groupcols).mean().reset_index()
 
 #%% DEBUG
 #meandf = meandf[meandf['boutdur']>=min_boutdur] 
@@ -196,14 +212,15 @@ meandf = ftjaaba_filt.groupby(groupcols).mean().reset_index()
 # PLOT
 # ------------------------------
 #%% boutdurs
+importlib.reload(util)
 min_boutdur = 0.5
 
-jaaba_thresh = 5
-for varname in ['chasing', 'singing', 'orienting']:
-    meandf['{}_binary'.format(varname)] = 0
-    meandf.loc[meandf[varname]>jaaba_thresh, '{}_binary'.format(varname)] = 1
+jaaba_thresh_dict = {'orienting': 10,
+                     'chasing': 10,
+                     'singing': 5}
+filtdf = util.binarize_behaviors(filtdf, jaaba_thresh_dict=jaaba_thresh_dict)
 
-plotdf = meandf[meandf['boutdur']>=min_boutdur]
+plotdf = filtdf[filtdf['boutdur']>=min_boutdur]
 
 xvar = 'dist_to_other'
 varname = 'singing'
@@ -240,22 +257,24 @@ print(figdir, figname)
 
 
 #%% JOINT DISTS
-min_boutdur = 3
-plotdf = meandf[meandf['boutdur']>=min_boutdur]
+min_boutdur = 0.5
+plotdf = filtdf[filtdf['boutdur']>=min_boutdur]
 
-varname = 'chasing_binary'
-x = 'targ_ang_vel'
-y = 'targ_ang_size_deg'
+varname = 'singing'
+
+joint_kind = 'kde'
+x = 'abs_rel_ang_vel'
+y = 'dovas'
 if varname=='notcourting':
     g = sns.jointplot(data=plotdf[plotdf['courting']==0].reset_index(drop=True), 
                 x=x, y=y, 
                 hue='species', palette=species_palette, #palette=species_cdict,
-                kind='kde', joint_kws={'s': 10, 'alpha': 0.8, 'n_levels': 30})
+                kind=joint_kind) #, joint_kws={'s': 10, 'alpha': 0.8, 'n_levels': 30})
 else:
-    g = sns.jointplot(data=plotdf[plotdf[varname]>0].reset_index(drop=True), 
+    g = sns.jointplot(data=plotdf[plotdf['{}_binary'.format(varname)]>0].reset_index(drop=True), 
                 x=x, y=y, 
                 hue='species', palette=species_palette, #palette=species_cdict,
-                kind='kde', joint_kws={'s': 10, 'alpha': 0.8, 'n_levels': 20})
+                kind=joint_kind) #, joint_kws={'s': 10, 'alpha': 0.8, 'n_levels': 20})
 #pl.xlim([-2, 20])
 #pl.ylim([-5, 50]) 
 g.fig.suptitle(varname)
@@ -263,83 +282,9 @@ pl.subplots_adjust(top=0.9)
 
 putil.label_figure(g.fig, figid) 
 
-figname = 'jointdist_{}_{}-v-{}_minboutdur-{}_mel-v-yak'.format(varname, x, y, min_boutdur)
+figname = 'jointdist-{}_{}_{}-v-{}_minboutdur-{}_mel-v-yak'.format(joint_kind, varname, x, y, min_boutdur)
 pl.savefig(os.path.join(figdir, figname+'.png'), dpi=300)
 print(figdir, figname)
-
-
-#%%
-# ------------------------------------
-# COMPARE WITH DLC
-# ------------------------------------
-
-#%%
-dlc_file = '/Volumes/Julie/free-behavior-analysis/38mm-dyad/dlc.pkl'
-with open(dlc_file, 'rb') as f:
-    dlc = pkl.load(f)
-
-d_list = []
-no_jaaba = []
-for acq, df_ in dlc[dlc['species'].isin(['Dyak', 'Dmel'])].groupby('acquisition'):
-    last_ix = df_.iloc[-1].name
-    if acq not in jaaba['acquisition'].unique():
-        no_jaaba.append(acq)
-        continue
-    j_ = jaaba[jaaba['acquisition']==acq].loc[:last_ix]
-    assert j_.shape[0] ==  df_.shape[0], "Bad match: {}".format(acq)
-    df_ = pd.concat([df_, j_.drop(columns=['species', 'acquisition', 'age'])], axis=1)
-    d_list.append(df_)
-
-fulldf = pd.concat(d_list)
-
-#%%
-
-acq = '20240126-1023-fly2-melWT_4do_sh_melWT_4do_gh'
-df1 = ftjaaba[ftjaaba['acquisition']==acq].reset_index(drop=True)
-df2 = fulldf[fulldf['acquisition']==acq].reset_index(drop=True)
-
-fig, ax = pl.subplots()
-sns.histplot(data=df1[df1['courting']==1], x='dist_to_other', ax=ax)
-sns.histplot(data=df2[df2['courting']==1], x='dist_to_other_mm', ax=ax)
-
-fig, ax =pl.subplots()
-sns.histplot(data=df1[df1['courting']==1], x='rel_vel_abs', ax=ax)
-sns.histplot(data=df2[df2['courting']==1], x='rel_vel_mms', ax=ax)
-
-
-#%%
-df1 = util.mat_split_courtship_bouts(df1, bout_marker='courting')
-df2 = util.mat_split_courtship_bouts(df2, bout_marker='courting')
-
-# df1['rel_vel_abs_raw'] = df1['rel_vel_abs'] * 5
-
-m1 = df1.groupby(['species', 'acquisition', 'boutnum']).mean().reset_index()
-m2 = df2.groupby(['species', 'acquisition', 'boutnum']).mean().reset_index()
-
-
-fig, axn =pl.subplots(1, 2)
-ax=axn[0]
-sns.histplot(data=m1[m1['courting']==1], x='rel_vel_abs', ax=ax)
-sns.histplot(data=m2[m2['courting']==1], x='rel_vel_mms', ax=ax)
-ax=axn[1]
-sns.histplot(data=m1[m1['courting']==1], x='targ_ang_size_deg', ax=ax)
-sns.histplot(data=m2[m2['courting']==1], x='rel_ang_size_deg', ax=ax)
-#%%
-
-fig, axn = pl.subplots(1, 2)
-plot_vars = {'targ_ang_size_deg': 'rel_ang_size_deg',
-             'rel_vel_abs': 'rel_vel_mms'}
-
-
-for ai, (v1, v2) in enumerate(plot_vars.items()):
-    ax=axn[ai]
-    sns.scatterplot(ax=ax, x=m1[m1['courting']==1][v1],
-                    y=m2[m2['courting']==1][v2])
-    ax.set_aspect(1)
-    ax.set_xlabel('FlyTracker')
-    ax.set_ylabel('DLC')
-    ax.set_title(v1)
-
 
 #%%
 
@@ -392,14 +337,14 @@ def plot_polar_pos_with_hists(plotdf,
 
     return fig
 
-def assign_jaaba_behaviors(plotdf, jaaba_thresh_dict, min_thresh=5):
-    plotdf.loc[plotdf['courting']==0, 'behavior'] = 'disengaged'
-    for b, thr in jaaba_thresh_dict.items():
-        plotdf.loc[plotdf[b]>thr, 'behavior'] = b
-    #plotdf.loc[plotdf['chasing']>, 'behavior'] = 'chasing'
-    #plotdf.loc[plotdf['singing']>0, 'behavior'] = 'singing'
-    #plotdf.loc[((plotdf['chasing']>0) & (plotdf['singing']==0)), 'behavior'] = 'chasing only'
-    return plotdf
+#def assign_jaaba_behaviors(plotdf, jaaba_thresh_dict, courtvar='courting', min_thresh=5):
+#    plotdf.loc[plotdf[courtvar]==0, 'behavior'] = 'disengaged'
+#    for b, thr in jaaba_thresh_dict.items():
+#        plotdf.loc[plotdf[b]>thr, 'behavior'] = b
+#    #plotdf.loc[plotdf['chasing']>, 'behavior'] = 'chasing'
+#    #plotdf.loc[plotdf['singing']>0, 'behavior'] = 'singing'
+#    #plotdf.loc[((plotdf['chasing']>0) & (plotdf['singing']==0)), 'behavior'] = 'chasing only'
+#    return plotdf
 
 def plot_2d_hist_by_behavior(plotdf, binwidth=10,
             plot_behavs = ['disengaged', 'orienting', 'chasing', 'singing'],
@@ -512,6 +457,21 @@ def plot_2d_hist_by_behavior_subplots(plotdf,
     return fig
 
 
+def plot_2d_hist(plotdf, xvar='targ_rel_pos_x', yvar='targ_rel_pos_y', ax=ax,
+                 color='b', nbins=25, xlim=[-100, 600], ylim=[250, 250], stat='count'):
+    if ax is None:
+        fig, ax =pl.subplots()
+
+    sns.histplot(plotdf, ax=ax, 
+                     x=xvar, y=yvar, color=color, bins=nbins, stat=stat)
+    ax.set_aspect(1)
+    ax.set_ylim(ylim)
+    ax.set_xlim(xlim)
+
+    #ax.plot(0, 0, 'w', marker=focal_marker, markersize=markersize)
+    #ax.set_title(behav)
+
+    return
 
 #%% plot 1 individual - trajectories and hists
 acq = ftjaaba['acquisition'].unique()[9]
@@ -547,8 +507,10 @@ for acq in ftjaaba['acquisition'].unique():
         print(figdir, figname)
 
 #%% 2D Hists, color by BEHAVIOR TYPE
+importlib.reload(util)
+courtvar='courting'
 
-jaaba_thresh_dict = {'orienting': 20,
+jaaba_thresh_dict = {'orienting': 10,
                      'chasing': 10,
                      'singing': 5}
 
@@ -562,7 +524,7 @@ for acq in ftjaaba['acquisition'].unique():
                 & (ftjaaba['targ_pos_theta']>=min_pos_theta) 
                 & (ftjaaba['targ_pos_theta']<=max_pos_theta)
                 & (ftjaaba['dist_to_other']>=min_dist_to_other)][::50]
-    plotdf = assign_jaaba_behaviors(plotdf, jaaba_thresh_dict)
+    plotdf = util.assign_jaaba_behaviors(plotdf, courtvar=courtvar, jaaba_thresh_dict=jaaba_thresh_dict)
 
     plot_behavs = ['disengaged', 'orienting', 'chasing', 'singing']
     behavior_colors = [[0.3]*3, 'mediumaquamarine', 'aqua', 'violet']
@@ -591,7 +553,7 @@ for acq in ftjaaba['acquisition'].unique():
                 & (ftjaaba['targ_pos_theta']>=min_pos_theta) 
                 & (ftjaaba['targ_pos_theta']<=max_pos_theta)
                 & (ftjaaba['dist_to_other']>=min_dist_to_other)][::50]
-    plotdf = assign_jaaba_behaviors(plotdf, jaaba_thresh_dict)
+    plotdf = util.assign_jaaba_behaviors(plotdf, courtvar=courtvar, jaaba_thresh_dict=jaaba_thresh_dict)
     #% Plot each COURTING BEHAV
     plot_behavs = ['disengaged', 'orienting', 'chasing', 'singing']
     behavior_colors = [[0.3]*3, 'mediumaquamarine', 'aqua', 'violet']
@@ -604,110 +566,140 @@ for acq in ftjaaba['acquisition'].unique():
     print(figdir, figname)
 
 
-#%% AGGREGATE -- 2D hists by species
 
-min_boutdur = 0.25
+#%% ---------------------------------------------
+# AGGREGATE -- 2D hists by species
+# -----------------------------------------------
+min_boutdur = 1.0
 filtdf = ftjaaba[(ftjaaba['id']==0)
-                & (ftjaaba['targ_pos_theta']>=min_pos_theta) 
-                & (ftjaaba['targ_pos_theta']<=max_pos_theta)
+                #& (ftjaaba['targ_pos_theta']>=min_pos_theta) 
+                #& (ftjaaba['targ_pos_theta']<=max_pos_theta)
                 & (ftjaaba['dist_to_other']>=min_dist_to_other)
                 & (ftjaaba['boutdur']>=min_boutdur)
-                ].copy()
-meanbins = filtdf.groupby(['species', 'acquisition', 'boutnum']).mean().reset_index()    
+                & (ftjaaba['good_frames']==1)
+                ].copy().reset_index(drop=True)
+#meanbins = filtdf.groupby(['species', 'acquisition', 'boutnum']).mean().reset_index()    
 
 # means are averaged over bout, so threshold is now 0
-jaaba_thresh_dict = {'orienting': 0,
-                     'chasing': 0,
-                     'singing': 0}
+jaaba_thresh_dict = {'orienting': 10,
+                     'chasing': 10,
+                     'singing': 5}
 
-meanbins = assign_jaaba_behaviors(meanbins, jaaba_thresh_dict)
+filtdf = util.assign_jaaba_behaviors(filtdf, courtvar=courtvar, jaaba_thresh_dict=jaaba_thresh_dict)
 plot_behavs = ['disengaged', 'orienting', 'chasing', 'singing']
 behavior_colors = [[0.3]*3, 'mediumaquamarine', 'aqua', 'violet']
 behavior_palette = dict((b, c) for b, c in zip(plot_behavs[1:], behavior_colors[1:]))
 
-for sp in meanbins['species'].unique():
-    plotdf = meanbins[meanbins['species']==sp]
-    fig = plot_2d_hist_by_behavior_subplots(plotdf, plot_behavs,
-                                    behavior_palette, focal_marker='o', binwidth=30, #nbins=20,
-                                    discrete=False,markersize=2,
-                                    ylim=[-500, 500], xlim=(-200,800))
+for sp in filtdf['species'].unique():
+    fig, axn = pl.subplots(1, 3, figsize=(10, 5))
+    for ai, (behav, thr) in enumerate(jaaba_thresh_dict.items()):
+        ax=axn[ai]
+        plotdf = filtdf[ (filtdf['species']==sp) & (filtdf[behav]> thr)]
+        plot_2d_hist(plotdf, ax=ax, color=behavior_palette[behav], nbins=30,
+                                    ylim=[-900, 900], xlim=(-500, 900))
+        ax.set_title(behav)
     #fig.suptitle(sp)
     fig.text(0.05, 0.85, 
-        '{}: Relative target pos. (mean of bouts, min bout dur={:.12}s)'.format(sp, min_boutdur), fontsize=12)
+        '{}: Relative target pos. (all frames, min bout dur={:.12}s)'.format(sp, min_boutdur), fontsize=12)
+    
+    pl.subplots_adjust(wspace=0.6)
     putil.label_figure(fig, figid)
 
-    figname = 'rel-pos_binned_mindur-{}_by-courting-behavior_{}'.format(min_boutdur, sp)
+    figname = 'rel-pos_frames_mindur-{}_by-courting-behavior_{}'.format(min_boutdur, sp)
     pl.savefig(os.path.join(figdir, figname+'.png'), dpi=300)
 
+#%%
+    
+# negatively correlated -- 
+# targ_ang_vel: negative values, rightward rotation (smaller val - larger val)
+# rel_ang_vel: positive values, rightward rotation (smaller val - larger val)?
+fig, ax = pl.subplots()
 
+behav = 'chasing'
+sns.scatterplot(data=filtdf[filtdf[behav]>jaaba_thresh_dict[behav]],
+                x='rel_ang_vel', y='targ_ang_vel', ax=ax)
+ax.set_box_aspect(1)
 
 
 #%% plot heatmaps
 
-ftjaaba['targ_ang_vel_abs'] = np.abs(ftjaaba['targ_ang_vel']) 
-ftjaaba['targ_ang_size_deg'] = np.rad2deg(ftjaaba['targ_ang_size'])
-ftjaaba['targ_ang_vel_abs_deg'] = np.rad2deg(ftjaaba['targ_ang_vel_abs'])
 
-ftjaaba.loc[ftjaaba['targ_ang_vel_abs_deg']>500, 'targ_ang_vel_abs_deg'] = np.nan
+#ftjaaba.loc[ftjaaba['targ_ang_vel_abs_deg']>500, 'targ_ang_vel_abs_deg'] = np.nan
 
 min_pos_theta = np.deg2rad(-160)
 max_pos_theta = np.deg2rad(160)
 min_dist_to_other = 1
    
-min_boutdur = 3 #0.25
+min_boutdur = 0.25 #0.25
 
 filtdf = ftjaaba[(ftjaaba['id']==0)
                 #& (ftjaaba['targ_pos_theta']>=min_pos_theta) 
                 #& (ftjaaba['targ_pos_theta']<=max_pos_theta)
                 #& (ftjaaba['dist_to_other']>=min_dist_to_other)
                 & (ftjaaba['boutdur']>=min_boutdur)
-                ].copy()
-meanbins = filtdf.groupby(['species', 'acquisition', 'boutnum']).mean().reset_index()    
+                & (ftjaaba['good_frames']==1)
+                ].copy().reset_index(drop=True)
+#meanbins = filtdf.groupby(['species', 'acquisition', 'boutnum']).mean().reset_index()    
 
 
 #%%
-means_ = meanbins[meanbins['species']=='Dmel']
+frames_ = filtdf[filtdf['species']=='Dmel']
 
 #xvar = 'targ_ang_size_deg'
 #yvar = 'targ_ang_vel_abs_deg'
-xvar = 'dovas' #'targ_ang_size_deg'
+xvar = 'targ_pos_theta_abs' #'dovas' #'targ_ang_size_deg'
 yvar = 'abs_rel_ang_vel' #'targ_ang_vel_abs_deg'
 
+jaaba_thresh_dict = {'orienting': 10,
+                     'chasing': 10,
+                     'singing': 5}
 
-g = sns.jointplot(data=means_[means_['chasing']>0], ax=ax,
+g = sns.jointplot(data=frames_[frames_['chasing']>jaaba_thresh_dict['chasing']], ax=ax,
              x = xvar, y = yvar, 
-           kind='hist', bins=20, palette='magma') 
+           kind='hist', bins=40, palette='magma') 
 g.fig.suptitle('Dmel: chasing')
 
 
-means_ = meanbins[meanbins['species']=='Dyak']
-sns.jointplot(data=means_[means_['chasing']>0], ax=ax,
+frames_ = filtdf[filtdf['species']=='Dyak']
+g2 = sns.jointplot(data=frames_[frames_['chasing']>jaaba_thresh_dict['chasing']], ax=ax,
              x = xvar, y = yvar, 
            kind='hist', bins=20, palette='magma') 
-g.fig.suptitle('Dyak: chasing')
+g2.fig.suptitle('Dyak: chasing')
 
 
 #%%
-xvar = 'targ_rel_pos_x' # 'targ_ang_size'
-yvar = 'targ_rel_pos_y' #'targ_ang_vel'
 
-xvar = 'dovas' #'targ_ang_size_deg'
-yvar = 'targ_ang_vel_abs_deg'
+min_boutdur = 0.25 #0.25
+
+filtdf = ftjaaba[(ftjaaba['id']==0)
+                #& (ftjaaba['targ_pos_theta']>=min_pos_theta) 
+                #& (ftjaaba['targ_pos_theta']<=max_pos_theta)
+                #& (ftjaaba['dist_to_other']>=min_dist_to_other)
+                & (ftjaaba['boutdur']>=min_boutdur)
+                & (ftjaaba['good_frames']==1)
+                & (ftjaaba['led_level']>0)
+                ].copy().reset_index(drop=True)
+
+#xvar = 'targ_rel_pos_x' # 'targ_ang_size'
+#yvar = 'targ_rel_pos_y' #'targ_ang_vel'
+
+xvar = 'facing_angle_deg' #'targ_ang_size_deg'
+yvar = 'abs_rel_ang_vel' #targ_ang_vel_abs_deg'
 #xmin, xmax = meanbins[xvar].min(), 0.5 #meanbins[xvar].max()
 #ymin, ymax = -2, 2 #meanbins[yvar].min(), meanbins[yvar].max()
 
-xmin, xmax = meanbins[xvar].min(), meanbins[xvar].max()
-ymin, ymax = meanbins[yvar].min(), 200 #meanbins[yvar].max()
+xmin, xmax = filtdf[xvar].min(), filtdf[xvar].max()
+ymin, ymax = filtdf[yvar].min(), filtdf[yvar].max()
 
 plot_behavs = ['orienting', 'chasing', 'singing']
 fig, axn =pl.subplots(2, len(plot_behavs), figsize=(10,8))
 
 for ci, behav in enumerate(plot_behavs):
-    for ri, (sp, means_) in enumerate(meanbins.groupby('species')):
+    for ri, (sp, frames_) in enumerate(filtdf.groupby('species')):
         ax = axn[ri, ci]
-
-        x_data = means_[means_[behav]>0][xvar].dropna()
-        y_data = means_[means_[behav]>0][yvar].dropna()
+        ax.set_title(behav)
+        x_data = frames_[frames_[behav]>jaaba_thresh_dict[behav]][xvar].dropna()
+        y_data = frames_[frames_[behav]>jaaba_thresh_dict[behav]][yvar].dropna()
 
         if len(x_data) != len(y_data):
             if len(x_data) < len(y_data):
@@ -717,7 +709,7 @@ for ci, behav in enumerate(plot_behavs):
                 x_data = np.random.choice(x_data, size=len(y_data), replace=False)
 
         # Create 2D histogram using np.histogram2d()
-        hist, x_edges, y_edges = np.histogram2d(x_data, y_data, bins=20)
+        hist, x_edges, y_edges = np.histogram2d(x_data, y_data, bins=25)
 
         # Normalize
         total_counts = np.sum(hist)
@@ -725,21 +717,282 @@ for ci, behav in enumerate(plot_behavs):
 
         # Create meshgrid from edges
         x_mesh, y_mesh = np.meshgrid(x_edges, y_edges)
-
-        pcm = ax.pcolormesh(x_mesh, y_mesh, hist_normalized.T, cmap='magma', vmin=0, vmax=0.05)
-
-        #ax.hist2d(means_[means_[behav]>0][xvar].dropna(),
-        #          means_[means_[behav]>0][yvar].dropna(), bins=10, cmap='magma')
-                #   vmin=0, vmax=10)
+        pcm = ax.pcolormesh(x_mesh, y_mesh, hist_normalized.T, cmap='magma') #, vmin=0, vmax=0.05)
 
         if ci==0:
-            ax.set_title(sp)
-        ax.set_xlim([xmin, xmax])
-        ax.set_ylim([ymin, ymax])
+            ax.set_title('{}: {}'.format(sp, behav))
+        # ax.set_xlim([xmin, xmax])
+        ax.set_ylim([ymin, 300])
 
         ax.set_xlabel(xvar)
         ax.set_ylabel(yvar)
         ax.set_box_aspect(1)
+
+#%%
+# look at hist of 1 variable
+plotvar = 'targ_ang_vel_abs_deg'
+plot_behavs = ['orienting', 'chasing', 'singing']
+fig, axn = pl.subplots(1, 3, figsize=(10,4)) #sharex=True, sharey=True)
+for ai, behav in enumerate(plot_behavs):
+    ax=axn[ai]
+    sns.histplot(data=filtdf[filtdf[behav]>jaaba_thresh_dict[behav]], x=plotvar, ax=ax,
+             hue='species')
+    ax.set_title(behav)
+    ax.set_box_aspect(1)
+    #ax.set_xlim([-50, 100])
+pl.subplots_adjust(wspace=0.6)
+
+#%%
+importlib.reload(util)
+
+
+
+#%% cut up into mini-bouts
+
+def subdivide_into_bouts(filtdf, bout_dur=1.0):
+
+    # assign grouping based on row index -- filtdf should have the original indices (frames) as ftjaaba
+    consec_bouts = util.get_indices_of_consecutive_rows(filtdf)
+
+    b_list = []
+    boutnum = 0
+    for g, df_ in filtdf.groupby('group'):
+        group_dur_sec = df_.iloc[-1]['sec'] - df_.iloc[0]['sec']
+        #print(group_dur_sec)
+        if group_dur_sec / bout_dur < 2:
+            df_['boutnum'] = boutnum
+            #filtdf.loc[filtdf['group'] == g, 'boutnum'] = boutnum
+            bin_labels = [boutnum]
+        else:
+            # subdivide into mini-bouts of bout_dur length
+            group_dur_sec = df_.iloc[-1]['sec'] - df_.iloc[0]['sec']
+            #t0 = df_.iloc[0]['sec']
+            n_mini_bouts = int(group_dur_sec / bout_dur)
+            #t1_values = np.linspace(t0 + bout_dur, t0 + group_dur_sec, n_mini_bouts, endpoint=False, )
+
+            bins = np.linspace(df_.iloc[0]['sec'], df_.iloc[-1]['sec'], n_mini_bouts, endpoint=False)
+            bin_labels = np.arange(boutnum, boutnum + len(bins)-1)
+            #print(bin_labels)
+            df_['boutnum'] = pd.cut(df_['sec'], bins=bins, labels=bin_labels)
+
+            #filtdf.loc[filtdf['group']==g, 'boutnum'] = df_['bin_sec']
+
+        boutnum += len(bin_labels)
+        b_list.append(df_)
+    filtdf = pd.concat(b_list)
+
+    return filtdf
+
+#%%
+min_bout_dur = 0.25
+min_dist_to_other = 2
+
+filtdf = ftjaaba[(ftjaaba['id']==0)
+                #& (ftjaaba['targ_pos_theta']>=min_pos_theta) 
+                #& (ftjaaba['targ_pos_theta']<=max_pos_theta)
+                & (ftjaaba['dist_to_other']>=min_dist_to_other)
+                & (ftjaaba['boutdur']>=min_boutdur)
+                & (ftjaaba['good_frames']==1)
+                & (ftjaaba['led_level']>0)
+                ].copy() #.reset_index(drop=True)
+
+# binarize behavs
+filtdf = util.binarize_behaviors(filtdf, jaaba_thresh_dict=jaaba_thresh_dict)
+
+# subdivide into smaller bouts
+filtdf = subdivide_into_bouts(filtdf, bout_dur=1.5)
+
+#%%
+
+meanbouts = filtdf.groupby(['species', 'acquisition', 'boutnum']).mean().reset_index()
+meanbouts.head()
+
+
+#%%
+#xvar = 'facing_angle_deg'
+#yvar = 'abs_rel_ang_vel'
+
+yvar = 'dovas'
+xvar = 'abs_rel_vel' #'abs_rel_ang_vel'
+xmin, xmax = meanbouts[xvar].min(), meanbouts[xvar].max()
+ymin, ymax = meanbouts[yvar].min(), meanbouts[yvar].max()
+
+min_frac_bout = 0.3
+plot_behavs = ['orienting', 'chasing', 'singing']
+fig, axn =pl.subplots(2, len(plot_behavs), figsize=(10,8), sharex=True, sharey=True)
+
+vmin=0
+vmax=0.04
+cmap='magma'
+for ci, behav in enumerate(plot_behavs):
+    for ri, (sp, means_) in enumerate(meanbouts.groupby('species')):
+        ax = axn[ri, ci]
+        ax.set_title(behav)
+        x_data = means_[means_['{}_binary'.format(behav)]>min_frac_bout][xvar].dropna()
+        y_data = means_[means_['{}_binary'.format(behav)]>min_frac_bout][yvar].dropna()
+
+        if len(x_data) != len(y_data):
+            if len(x_data) < len(y_data):
+                # Randomly sample y_data to match the length of x_data
+                y_data = np.random.choice(y_data, size=len(x_data), replace=False)
+            else:
+                x_data = np.random.choice(x_data, size=len(y_data), replace=False)
+
+        # Create 2D histogram using np.histogram2d()
+        hist, x_edges, y_edges = np.histogram2d(x_data, y_data, bins=25)
+
+        # Normalize
+        total_counts = np.sum(hist)
+        hist_normalized = hist / total_counts
+
+        # Create meshgrid from edges
+        x_mesh, y_mesh = np.meshgrid(x_edges, y_edges)
+        pcm = ax.pcolormesh(x_mesh, y_mesh, hist_normalized.T, cmap=cmap, 
+                            vmin=vmin, vmax=vmax)  #, vmin=0, vmax=0.05) #, vmin=0, vmax=0.05)
+
+        if ci==0:
+            ax.set_title('{}: {}'.format(sp, behav))
+        # ax.set_xlim([xmin, xmax])
+        #ax.set_ylim([ymin, 300])
+
+        ax.set_xlabel(xvar)
+        ax.set_ylabel(yvar)
+        ax.set_box_aspect(1)
+
+putil.colorbar_from_mappable(ax, norm=mpl.colors.Normalize(vmin=vmin, vmax=vmax),
+                             cmap=cmap, axes=[0.92, 0.3, 0.01, 0.4])
+fig.suptitle('Behavior tuning profile, min frac of bout={}'.format(min_frac_bout))
+
+
+putil.label_figure(fig, figid)
+
+#%%
+# KDE joints
+
+xvar = 'abs_rel_vel'
+yvar = 'dovas'
+
+min_frac_bout = 0.5
+
+for behav in ['chasing',  'singing']:
+    g = sns.jointplot(data=meanbouts[meanbouts['{}_binary'.format(behav)]>min_frac_bout], ax=ax,
+                x = xvar, y = yvar, hue='species', palette=species_palette,
+            kind='kde') 
+    g.fig.suptitle('{}: min frac of bout={:.2f}'.format(behav, min_frac_bout))
+
+#%%
+# Prob(singing) vs. DIST TO OTHER
+nbins = 10
+dist_bins =  np.linspace(meanbouts['dist_to_other'].min(), meanbouts['dist_to_other'].max(), nbins, endpoint=False)
+meanbouts['dist_bin'] = pd.cut(meanbouts['dist_to_other'], bins=dist_bins, labels=dist_bins[0:-1])
+
+fig, axn = pl.subplots(1, 2, figsize=(10,4))
+ax=axn[0]
+behav = 'singing'
+sns.barplot(data=meanbouts, x='dist_bin', y='{}_binary'.format(behav), ax=ax,
+            hue='species', palette=species_palette, edgecolor='none')
+ax.legend_.remove()
+ax.set_xticklabels([np.round(v) for v in dist_bins[0:-1]])
+
+ax = axn[1]#
+min_frac_bout=0
+sns.histplot(data=meanbouts[meanbouts['{}_binary'.format(behav)]>min_frac_bout], x='dist_to_other', ax=ax,
+            hue='species', palette=species_palette, fill=False, element='poly',
+            common_norm=False, stat='probability')
+sns.move_legend(ax, bbox_to_anchor=(1,1), loc='upper left', frameon=False)
+
+for ax in axn:
+    ax.set_box_aspect(1)
+
+putil.label_figure(fig, figid)
+
+
+#%%
+
+behav = 'chasing'
+min_frac_bout = 0.2
+chase_ = meanbouts[meanbouts['{}_binary'.format(behav)]>min_frac_bout].copy()
+fig, axn = pl.subplots(1, 2, sharex=True, sharey=True)
+
+for ai, (sp, df_) in enumerate(chase_.groupby('species')):
+    ax = axn[ai]
+    sns.regplot(data=df_, x='facing_angle_deg', y='ang_vel_abs', ax=ax,
+                color=species_palette[sp])
+    ax.set_title(sp)
+    ax.set_box_aspect(1)
+
+fig.suptitle('{} bouts, where min fract of bout >= {:.2f}'.format(behav, min_frac_bout))
+
+putil.label_figure(fig, figid)
+
+#%%
+
+xvar = 'facing_angle_deg'
+yvar = 'ang_vel_abs'
+
+plot_behavs = ['orienting', 'chasing', 'singing']
+fig, axn =pl.subplots(2, len(plot_behavs), figsize=(10,8), sharex=True, sharey=True)
+
+nbins=25
+x_bins = np.linspace(0, meanbouts[xvar].max(), nbins, endpoint=False)
+y_bins = np.linspace(0, meanbouts[yvar].max(), nbins, endpoint=False)
+
+meanbouts['x_bin'] = pd.cut(meanbouts[xvar], bins=x_bins, labels=x_bins[0:-1])
+meanbouts['y_bin'] = pd.cut(meanbouts[yvar], bins=y_bins, labels=y_bins[0:-1])
+
+
+vmin = 0
+vmax = 1.0
+cmap='magma'
+for ri, (sp, means_) in enumerate(meanbouts.groupby('species')):
+
+    #xmin, xmax = means_[xvar].min(), means_[xvar].max()
+    #ymin, ymax = means_[yvar].min(), means_[yvar].max()
+     
+    for ci, behav in enumerate(plot_behavs):
+        ax = axn[ri, ci]
+        ax.set_title(behav)
+        
+        probs = means_.groupby(['x_bin', 'y_bin'])['{}_binary'.format(behav)].mean().reset_index()
+        arr_ = pd.pivot_table(probs, columns='x_bin', index='y_bin').values
+
+        ax.imshow(arr_, origin='lower', vmin=vmin, vmax=vmax, cmap=cmap)
+        print(np.nanmax(arr_))        
+        
+        ax.set_xticks(np.arange(len(x_bins)))
+        ax.set_xticklabels([np.round(v) if i%10==0 else '' for i, v in enumerate(x_bins)]) #probs['x_bin'])
+        ax.set_yticks(np.arange(len(y_bins)))
+        ax.set_yticklabels([np.round(v) if i%10==0 else '' for i, v in enumerate(y_bins)]) #probs['x_bin'])
+
+        # Create 2D histogram using np.histogram2d()
+        #hist, x_edges, y_edges = np.histogram2d(x_data, y_data, bins=25)
+
+        # Normalize
+        #total_counts = np.sum(hist)
+        #hist_normalized = hist / total_counts
+
+        # Create meshgrid from edges
+        #x_mesh, y_mesh = np.meshgrid(x_edges, y_edges)
+        #pcm = ax.pcolormesh(x_mesh, y_mesh, hist_normalized.T, cmap='magma') #, vmin=0, vmax=0.05) #, vmin=0, vmax=0.05)
+
+        if ci==0:
+            ax.set_title('{}: {}'.format(sp, behav))
+        # ax.set_xlim([xmin, xmax])
+        #ax.set_ylim([ymin, 300])
+
+        ax.set_xlabel(xvar)
+        ax.set_ylabel(yvar)
+        ax.set_box_aspect(1)
+
+putil.colorbar_from_mappable(ax, norm=mpl.colors.Normalize(vmin=vmin, vmax=vmax),
+                             cmap=cmap, axes=[0.92, 0.3, 0.01, 0.4])
+
+fig.suptitle('Prob of each behavior, bin x and y values (n={} bins)'.format(nbins))
+
+putil.label_figure(fig, figid)
+
+
+#%%
 
 
 #%%
