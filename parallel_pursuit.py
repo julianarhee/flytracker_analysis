@@ -37,22 +37,22 @@ def calculate_theta_error(f1, f2, xvar='pos_x', yvar='pos_y'):
 
     return f1
 
-def get_indices_of_consecutive_rows(passdf):
-    '''
-    Find start and stop indices of consecutive rows in a dataframe.
-
-    Arguments:
-        passdf -- frames which pass boolean condition(s)
-
-    Returns:
-        Series of tuples, each containing start and stop indices of consecutive rows
-        Also updates passdf with "diff" (can ignore) and "group" columns, the latter contains bout nums
-    '''
-    passdf['diff'] = passdf.index.to_series().diff().fillna(1)
-    passdf['diff'] = passdf['diff'].apply(lambda x: 1 if x>1 else 0)
-    passdf['group'] = passdf['diff'].cumsum()
-
-    return passdf.groupby('group').apply(lambda x: (x.index[0], x.index[-1]))
+#def get_indices_of_consecutive_rows(passdf):
+#    '''
+#    Find start and stop indices of consecutive rows in a dataframe.
+#
+#    Arguments:
+#        passdf -- frames which pass boolean condition(s)
+#
+#    Returns:
+#        Series of tuples, each containing start and stop indices of consecutive rows
+#        Also updates passdf with "diff" (can ignore) and "group" columns, the latter contains bout nums
+#    '''
+#    passdf['diff'] = passdf.index.to_series().diff().fillna(1)
+#    passdf['diff'] = passdf['diff'].apply(lambda x: 1 if x>1 else 0)
+#    passdf['group'] = passdf['diff'].cumsum()
+#
+#    return passdf.groupby('group').apply(lambda x: (x.index[0], x.index[-1]))
 
 def get_vector_between_flies(f1, f2, curr_frames):
     f1_pos = f1[f1['frame'].isin(curr_frames)][['pos_x', 'pos_y']].values
@@ -60,16 +60,16 @@ def get_vector_between_flies(f1, f2, curr_frames):
     vecs = [(i[0]-j[0], i[1]-j[1]) for i, j in zip(f2_pos, f1_pos)]
     return vecs
 
-def filter_bouts_by_frame_duration(consec_bouts, min_bout_len, fps=60, return_indices=False):
-    min_bout_len_frames = min_bout_len*fps # corresponds to 0.25s at 60Hz
-    incl_bouts = [c for i, c in enumerate(consec_bouts) if c[1]-c[0]>=min_bout_len_frames]
-    incl_ixs = [i for i, c in enumerate(consec_bouts) if c[1]-c[0]>=min_bout_len_frames]
-    #print("{} of {} bouts pass min dur {}sec".format(len(incl_bouts), len(consec_bouts), min_bout_len))
-
-    if return_indices:
-        return incl_ixs, incl_bouts
-    else:
-        return incl_bouts
+#def filter_bouts_by_frame_duration(consec_bouts, min_bout_len, fps=60, return_indices=False):
+#    min_bout_len_frames = min_bout_len*fps # corresponds to 0.25s at 60Hz
+#    incl_bouts = [c for i, c in enumerate(consec_bouts) if c[1]-c[0]>=min_bout_len_frames]
+#    incl_ixs = [i for i, c in enumerate(consec_bouts) if c[1]-c[0]>=min_bout_len_frames]
+#    #print("{} of {} bouts pass min dur {}sec".format(len(incl_bouts), len(consec_bouts), min_bout_len))
+#
+#    if return_indices:
+#        return incl_ixs, incl_bouts
+#    else:
+#        return incl_bouts
 
 # plotting 
 def plot_bout_of_two_flies(df_, curr_frames, ax=None):
@@ -275,12 +275,12 @@ def main():
                 & (df_['facing_angle']<=max_facing_angle)]
 
     # get start/stop indices of consecutive rows
-    consec_bouts = get_indices_of_consecutive_rows(passdf)
+    consec_bouts = util.get_indices_of_consecutive_rows(passdf)
 
     #%% Filter bouts based on duration
     min_bout_len = 0.25
     fps = 60.
-    incl_bouts = filter_bouts_by_frame_duration(consec_bouts, min_bout_len, fps)
+    incl_bouts = util.filter_bouts_by_frame_duration(consec_bouts, min_bout_len, fps)
     print("{} of {} bouts pass min dur {}sec".format(len(incl_bouts), len(consec_bouts), min_bout_len))
 
     #%% Plot several bouts
@@ -838,12 +838,12 @@ def main():
                 & (df_['facing_angle']<=max_facing_angle)]
 
     # get start/stop indices of consecutive rows
-    consec_bouts = get_indices_of_consecutive_rows(passdf)
+    consec_bouts = util.get_indices_of_consecutive_rows(passdf)
     consec_bouts[0]
 
     min_bout_len = 0.25
     fps = 60.
-    incl_bouts = filter_bouts_by_frame_duration(consec_bouts, min_bout_len, fps)
+    incl_bouts = util.filter_bouts_by_frame_duration(consec_bouts, min_bout_len, fps)
     print("{} of {} bouts pass min dur {}sec".format(len(incl_bouts), len(consec_bouts), min_bout_len))
 
     # %%
