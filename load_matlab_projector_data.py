@@ -43,11 +43,20 @@ def aggr_matstruct_to_df(mstruct, structname='feat_fly'):
 
 mat_fpath = '/Volumes/Giacomo/MATLAB/projector_data_elegans_all_20240325.mat'
 # Load the .mat file
+
+mat_fpath = '/Volumes/Giacomo/MATLAB/free_behavior_data_mel_yak_20240403.mat'
 mat = mat73.loadmat(mat_fpath)
 
 #%%
-destdir = '/Volumes/Julie/2d-projector-analysis/processed'
-alt_destdir = '/Users/julianarhee/Documents/rutalab/projects/courtship/2d-projector/JAABA'
+assay = '38mm-dyad'
+
+if assay == '2d-projector':
+    destdir = '/Volumes/Julie/2d-projector-analysis/processed'
+    alt_destdir = '/Users/julianarhee/Documents/rutalab/projects/courtship/2d-projector/JAABA'
+else:
+    assert assay == '38mm-dyad'
+    destdir = '/Volumes/Julie/free-behavior-analysis/38mm_dyad'
+    alt_destdir = '/Users/julianarhee/Documents/rutalab/projects/courtship/38mm-dyad'
 if not os.path.exists(destdir):
     os.makedirs(destdir)
 
@@ -66,6 +75,7 @@ for i, fn in enumerate(file_names):
     df_ = pd.DataFrame(data=mstruct['data'][i], 
                  columns=names)
     df_['filename'] = fn
+    df_['acquisition'] = fn
 
     # Add single val variables
     single_vars = dict((k, mstruct[k][i])\
@@ -82,23 +92,31 @@ for i, fn in enumerate(file_names):
     df_ = df_.assign(**single_vars)
 
     df_['frame'] = np.arange(len(df_))
-
+    if 'mel' in df_['species'].unique()[0]:
+        df_['strain'] = df_['species'].copy()
+        df_['species'] = 'Dmel'
+    else:
+        df_['strain'] = df_['species'].copy()
+        df_['species'] = 'Dyak'
     d_list.append(df_)
    
 df = pd.concat(d_list)
 
 #%%
-outfile = os.path.join(destdir, 'jaaba_transformed_data.pkl')
-if '20240321' in mat_fpath:
-    outfile = os.path.join(destdir, 'jaaba_transformed_data_transf.pkl')
-elif 'elegans' in mat_fpath:
-    outfile = os.path.join(destdir, 'jaaba_transformed_data_elegans.pkl')
+#outfile = os.path.join(destdir, 'jaaba_transformed_data.pkl')
+
+fname = os.path.splitext(os.path.split(mat_fpath)[-1])[0]
+outfile = os.path.join(destdir, '{}_jaaba.pkl'.format(fname)) # os.path.splitext(os.path.split(mat_fpath)[-1])[0])
+
+#if '20240321' in mat_fpath:
+#    outfile = os.path.join(destdir, 'jaaba_transformed_data_transf.pkl')
+#elif 'elegans' in mat_fpath:
+#    outfile = os.path.join(destdir, 'jaaba_transformed_data_elegans.pkl')
 print("Saved: {}".format(outfile))
 
 df.to_pickle(outfile)
 
 df.to_pickle(os.path.join(alt_destdir, os.path.split(outfile)[1]))
-
 
 # %% FEAT
 feat = aggr_matstruct_to_df(mstruct, structname='feat_fly')
@@ -114,20 +132,19 @@ with open(units_fpath, 'w') as f:
     yaml.dump(unit_dict, f)
 
 # save df
-if 'elegans' in mat_fpath:
-    feat_outfile = os.path.join(destdir, 'feat_elegans.pkl')
-else:
-    feat_outfile = os.path.join(destdir, 'feat.pkl')
+feat_outfile = os.path.join(destdir, '{}_feat.pkl'.format(fname))
+
 feat.to_pickle(feat_outfile)
 print("Saved: {}".format(feat_outfile))
 
 # %% TRK
 trk = aggr_matstruct_to_df(mstruct, structname='track_fly')
 
-if 'elegans' in mat_fpath:
-    trk_outfile = os.path.join(destdir, 'trk_elegans.pkl')
-else:
-    trk_outfile = os.path.join(destdir, 'trk.pkl')
+#if 'elegans' in mat_fpath:
+#    trk_outfile = os.path.join(destdir, 'trk_elegans.pkl')
+#else:
+trk_outfile = os.path.join(destdir, '{}_trk.pkl'.format(fname))
+
 
 trk.to_pickle(trk_outfile)
 print("Saved: {}".format(trk_outfile))
@@ -153,10 +170,11 @@ ftdf = pd.concat([feat, trk[trk_cols]], axis=1)
 print(trk.shape, ftdf.shape)
 
 #%%
-if 'elegans' in mat_fpath:
-    ftdf_outfile = os.path.join(destdir, 'ft_elegans.pkl')
-else:
-    ftdf_outfile = os.path.join(destdir, 'flytracker.pkl')
+#if 'elegans' in mat_fpath:
+#    ftdf_outfile = os.path.join(destdir, 'ft_elegans.pkl')
+#else:
+ftdf_outfile = os.path.join(destdir, '{}_flytracker.pkl'.format(fname))
+
 ftdf.to_pickle(ftdf_outfile)
 print("Saved: {}".format(ftdf_outfile))
 
