@@ -252,13 +252,13 @@ def get_target_sizes_df(fly1, fly2, xvar='pos_x', yvar='pos_y'):
         fem_sz_deg = np.max([fem_sz_deg_maj, fem_sz_deg_min])
         fem_sizes.append(fem_sz_deg)
 
-    fly2['targ_ang_size'] = fem_sizes
-    fly2['targ_ang_size_deg'] = np.rad2deg(fly2['targ_ang_size'])
+    #fly2['targ_ang_size'] = fem_sizes
+    #fly2['targ_ang_size_deg'] = np.rad2deg(fly2['targ_ang_size'])
     # copy same info for f1
     fly1['targ_ang_size'] = fem_sizes
-    fly1['targ_ang_size_deg'] = np.rad2deg(fly2['targ_ang_size'])
+    fly1['targ_ang_size_deg'] = np.rad2deg(fly1['targ_ang_size'])
 
-    return fly1, fly2
+    return fly1 #, fly2
 
 
 def get_relative_velocity(df_, win=1, 
@@ -291,14 +291,20 @@ def get_copulation_ix(acq):
     cop_ele = {
         '20231213-1103_fly1_eleWT_5do_sh_eleWT_5do_gh': 52267,
         '20231213-1154_fly3_eleWT_6do_sh_eleWT_5do_gh': 17243,
-        '20231214-1051_fly2_eleWT_3do_sh_eleWT_3do_gh': 61541,
+        '20231214-1051_fly2_eleWT_3do_sh_eleWT_3do_gh': 61512,
         '20231223-1117_fly1_eleWT_5do_sh_eleWT_5do_gh': 55582,
         '20231226-1137_fly2_eleWT_4do_sh_eleWT_4do_gh': 13740,
         '20240105-1007_fly1_eleWT_3do_sh_eleWT_3do_gh': 5051, 
-        '20240109-1039_fly1_eleWT_4do_sh_eleWT_4do_gh': 177300
+        '20240109-1039_fly1_eleWT_4do_sh_eleWT_4do_gh': 177100,
+        '20240322-1001_f1_eleWT_4do_gh': 5474,
+        '20240322-1045_f4_eleWT_4do_gh': 54842,
+        '20240322-1143_f6_eelWT_4do_gh': 1356,
+        '20240322-1146_f7_eleWT_4do_gh': 12190,
+        '20240322-1152_f8_eleWT_4do_gh': 7620,
+        '20240322-1156_f9_eleWT_4do_gh': 92680
     }
 
-    local_dir = '/Users/julianarhee/Documents/rutalab/projects/courtship'
+    local_dir = '/Users/julianarhee/Documents/rutalab/projects/courtship/38mm-dyad'
     fname = 'courtship-free-behavior (Responses) - Form Responses 1.csv'
     meta_fpath = os.path.join(local_dir, fname)
     meta = pd.read_csv(meta_fpath)
@@ -349,6 +355,7 @@ def do_transformations_on_df(trk_, frame_width, frame_height,
     fly1 = trk_[trk_['id']==flyid1].copy().reset_index(drop=True)
     fly2 = trk_[trk_['id']==flyid2].copy().reset_index(drop=True)
 
+    # FIRST, do fly1: -------------------------------------------------
     # translate coordinates so that focal fly is at origin
     fly1, fly2 = util.translate_coordinates_to_focal_fly(fly1, fly2)
 
@@ -362,13 +369,25 @@ def do_transformations_on_df(trk_, frame_width, frame_height,
     polarcoords = util.cart2pol(fly2['rot_x'], fly2['rot_y']) 
     fly1['targ_pos_radius'] = polarcoords[0]
     fly1['targ_pos_theta'] = polarcoords[1]
-    fly2['targ_pos_radius'] = polarcoords[0]
-    fly2['targ_pos_theta'] = polarcoords[1]
-
     fly1['targ_rel_pos_x'] = fly2['rot_x']
     fly1['targ_rel_pos_y'] = fly2['rot_y']
-    fly2['targ_rel_pos_x'] = fly2['rot_x']
-    fly2['targ_rel_pos_y'] = fly2['rot_y']
+
+    # NOW, do fly2: ----------------------------------------------------
+    # translate coordinates so that focal fly is at origin
+    fly2, fly1 = util.translate_coordinates_to_focal_fly(fly2, fly1)
+
+    # rotate coordinates so that fly1 is facing 0 degrees (East)
+    # Assumes fly1 ORI goes from 0 to pi CCW, with y-axis NOT-inverted.
+    # if using FlyTracker, trk_['ori'] = -1*trk_['ori']
+    fly2, fly1 = util.rotate_coordinates_to_focal_fly(fly2, fly1)
+
+    # add polar conversion
+    # FLIP y-axis? TODO check this
+    polarcoords = util.cart2pol(fly1['rot_x'], fly1['rot_y']) 
+    fly2['targ_pos_radius'] = polarcoords[0]
+    fly2['targ_pos_theta'] = polarcoords[1]
+    fly2['targ_rel_pos_x'] = fly1['rot_x']
+    fly2['targ_rel_pos_y'] = fly1['rot_y']
 
     #% copulation index - TMP: fix this!
     if cop_ix is None or np.isnan(cop_ix):
@@ -379,7 +398,9 @@ def do_transformations_on_df(trk_, frame_width, frame_height,
     cop_ix = int(cop_ix)
 
     #% Get all sizes and aggregate trk df
-    fly1, fly2 = get_target_sizes_df(fly1, fly2, xvar='pos_x', yvar='pos_y')
+    fly1 = get_target_sizes_df(fly1, fly2, xvar='pos_x', yvar='pos_y')
+    # Repeat for fly2:
+    fly2 = get_target_sizes_df(fly2, fly1, xvar='pos_x', yvar='pos_y')
 
     # recombine trk df
     trk = pd.concat([fly1.iloc[:cop_ix], fly2.iloc[:cop_ix]], axis=0).reset_index(drop=True)#.sort_index()
@@ -467,6 +488,7 @@ def get_metrics_relative_to_focal_fly(acqdir, fps=60, cop_ix=None,
     if savedir is not None:
         if not os.path.exists(savedir):
             os.makedirs(savedir)
+        acq = os.path.split(acqdir)[-1]
         df_fpath = os.path.join(savedir, '{}_df.pkl'.format(acq))
         with open(df_fpath, 'wb') as f: 
             pkl.dump(df_, f)
@@ -593,6 +615,8 @@ if __name__ == '__main__':
 
     for fp in found_mats:
         acq = os.path.split(os.path.split(fp.split(viddir+'/')[-1])[0])[0]
+        if "BADTRACKING" in fp:
+            continue
         #acq = os.path.split(acq_viddir)[0]
         acqdir = os.path.join(viddir, acq)
         print(acq)
@@ -604,12 +628,12 @@ if __name__ == '__main__':
 
         if create_new:
             cop_ix = get_copulation_ix(acq)
-            get_metrics_relative_to_focal_fly(acqdir,
+            df_ = get_metrics_relative_to_focal_fly(acqdir,
                                         savedir=savedir,
                                         movie_fmt=movie_fmt, 
                                         flyid1=flyid1, flyid2=flyid2,
                                         plot_checks=False)
-
+            #assert len(df_['id'].unique()
 #%%
 #            get_metrics_relative_to_focal_fly(acqdir,
 #                                        savedir=savedir,
