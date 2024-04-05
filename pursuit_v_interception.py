@@ -36,31 +36,40 @@ import importlib
 #%%
 import scipy
 
-def ft_actions_to_bout_df(action_fpath):
-    # mat['bouts'] is (n_flies, action_types)
-    # mat['bouts'][0, 10] gets bout start/end/likelihood for fly1, action #10
-    # mat['behs'] are the behavior names
-
-    # load mat
-    mat = scipy.io.loadmat(action_fpath)
-
-    # behavior names
-    behs = [i[0][0] for i in mat['behs']]
-
-    # aggregate into list
-    b_list = []
-    for i, beh in enumerate(behs):
-        # get male action's 
-        if mat['bouts'][0, i].shape[1]==3:
-            b = mat['bouts'][0, i]
-            b_df = pd.DataFrame(data=b, columns=['start', 'end', 'likelihood'])
-            b_df['action'] = beh
-            b_df['id'] = 0
-            b_list.append(b_df)
-
-    boutdf = pd.concat(b_list)
-
-    return boutdf
+#def ft_actions_to_bout_df(action_fpath):
+#    '''
+#    Take manually annoted bouts from FlyTracker -actions.mat file and convert to a pandas df
+#
+#    Arguments:
+#        action_fpath -- _description_
+#
+#    Returns:
+#        _description_
+#    '''
+#    # mat['bouts'] is (n_flies, action_types)
+#    # mat['bouts'][0, 10] gets bout start/end/likelihood for fly1, action #10
+#    # mat['behs'] are the behavior names
+#
+#    # load mat
+#    mat = scipy.io.loadmat(action_fpath)
+#
+#    # behavior names
+#    behs = [i[0][0] for i in mat['behs']]
+#
+#    # aggregate into list
+#    b_list = []
+#    for i, beh in enumerate(behs):
+#        # get male action's 
+#        if mat['bouts'][0, i].shape[1]==3:
+#            b = mat['bouts'][0, i]
+#            b_df = pd.DataFrame(data=b, columns=['start', 'end', 'likelihood'])
+#            b_df['action'] = beh
+#            b_df['id'] = 0
+#            b_list.append(b_df)
+#
+#    boutdf = pd.concat(b_list)
+#
+#    return boutdf
 
 def plot_heading_vs_travelingdir_frames(curr_frames, f1, f2, cap=None, ax=None,
                                      var1='ori', var2='traveling_dir', plot_interval=2,
@@ -175,14 +184,14 @@ else:
     #% get src paths
     localroot = '/Users/julianarhee/DeepLabCut' # all these functions assume this is the local rootdir
     #% Look at 1 data file
-    analyzed_dir = pdlc.get_dlc_analysis_dir(projectname=projectname)
+    analyzed_dir = dlc.get_dlc_analysis_dir(projectname=projectname)
     #acq_prefix = '20240214-1025_f1_*sz10x10'
     #acq_prefix = '20240216-*fly3*6x6'
     #acq_prefix = '20240222-*fly7_Dmel*8x8'
     # acq_prefix = '20240216-*fly3_Dmel*4x4'
     acq_prefix = '20240214-1025_f1_Dele-wt_5do_sh_prj10_sz10x10'
 
-    fpath = pdlc.get_fpath_from_acq_prefix(analyzed_dir, acq_prefix)
+    fpath = dlc.get_fpath_from_acq_prefix(analyzed_dir, acq_prefix)
 
     flyid = 'fly' # double check in the plots for abdomen lengths
     dotid = 'single'
@@ -200,8 +209,8 @@ stimhz_dict = dict((k, v) for k, v in zip(np.arange(0, len(stimhz_vals)), stimhz
 df_['stim_hz'] = [stimhz_dict[v] if v in stimhz_dict.keys() else None for v in df_['epoch']]
 
 #%%
-
-cap = util.get_video_cap_check_multidir(acq, assay=assay)
+importlib.reload(util)
+cap, viddir = util.get_video_cap_check_multidir(acq, assay=assay, return_viddir=True)
 
 # get frame info
 n_frames = cap.get(cv2.CAP_PROP_FRAME_COUNT)
@@ -285,11 +294,12 @@ print(figdir)
 # %% Get manually annotated actions -- annoted with FlyTracker
 
 # get path to actions file for current acquisition
+#viddir = acqdir
 action_fpaths = glob.glob(os.path.join(viddir, 'fly-tracker', '{}*'.format(acq), '*actions.mat'))
 action_fpath = action_fpaths[0]
 
 # load actions to df
-boutdf = ft_actions_to_bout_df(action_fpath)
+boutdf = util.ft_actions_to_bout_df(action_fpath)
 
 #%% assign
 #%
@@ -341,14 +351,16 @@ ax.plot(f1['theta_error_dt'], f1['traveling_dir_dt'], 'o')
 # Sanity check FACING ANGLE
 # ----
 # curr_frame = 7450 #2430 # to the left is positive?
-curr_frame = 9752
+#curr_frame = 9752
+curr_frame = 7420 
 curr_frames = [curr_frame]
-nsec_win = 0.5
-several_frames = np.arange(curr_frame - nsec_win*fps,  curr_frame + nsec_win*fps*3)[0::5]
+nsec_win = 0.75
+several_frames = np.arange(curr_frame - nsec_win*fps,  curr_frame + nsec_win*fps*3)[0::6]
 
 df_['facing_angle_deg'] = np.rad2deg(df_['facing_angle'])
 f1['ori_deg'] = np.rad2deg(f1['ori'])
 f1['traveling_deg'] = np.rad2deg(f1['traveling_dir'])
+f1['facing_angle_deg'] = np.rad2deg(f1['facing_angle'])
 
 #df_['theta_error_deg'] = np.rad2deg(df_['theta_error'])
 
@@ -367,8 +379,8 @@ gs = mpl.gridspec.GridSpec(3, 3)
 ax = pl.subplot(gs[0:2, 0:2]) 
 plot_heading_vs_travelingdir_frames(several_frames, f1, f2, cap=cap, ax=ax, plot_interval=1,
                                           var1='ori', var2='traveling_dir')
-ax.plot(df_[df_['frame'].isin(curr_frames)]['pos_x'].values,
-        df_[df_['frame'].isin(curr_frames)]['pos_y'].values, 'r')
+#ax.plot(df_[df_['frame'].isin(curr_frames)]['pos_x'].values,
+#        df_[df_['frame'].isin(curr_frames)]['pos_y'].values, 'r')
 
 # plot FACING ANGLE
 ax = pl.subplot(gs[2, 0])
@@ -413,7 +425,7 @@ ax.set_aspect(1)
 
 # plot THETA ERROR
 ax =pl.subplot(gs[2, 2]) #, projection='polar')
-sns.scatterplot(data=f1[f1['frame'].isin(several_frames)], x='sec', y='theta_error_deg', ax=ax,
+sns.scatterplot(data=f1[f1['frame'].isin(several_frames)], x='sec', y='facing_angle_deg', ax=ax,
                 hue='ang_vel', palette='magma', legend=0)
 
 pl.subplots_adjust(wspace=0.6, hspace=0.6)
