@@ -95,6 +95,52 @@ def filter_bouts_by_frame_duration(consec_bouts, min_bout_len, fps=60, return_in
     else:
         return incl_bouts
 
+def subdivide_into_bouts(filtdf, bout_dur=1.0):
+    '''
+    Subivide chunks of consecutive frames into smaller bouts of bout_dur length.
+
+    Arguments:
+        filtdf -- filtered/selected df, must contain original indices (frames) for grouping
+
+    Keyword Arguments:
+        bout_dur -- duration of each chunk in sec (default: {1.0})
+
+    Returns:
+        filtdf with columns "group" (consecutive chunks) and "boutnum" (mini bouts) added 
+    '''
+    # assign grouping based on row index -- filtdf should have the original indices (frames) as ftjaaba
+    consec_bouts = get_indices_of_consecutive_rows(filtdf)
+
+    b_list = []
+    boutnum = 0
+    for g, df_ in filtdf.groupby('group'):
+        group_dur_sec = df_.iloc[-1]['sec'] - df_.iloc[0]['sec']
+        #print(group_dur_sec)
+        if group_dur_sec / bout_dur < 2:
+            df_['boutnum'] = boutnum
+            #filtdf.loc[filtdf['group'] == g, 'boutnum'] = boutnum
+            bin_labels = [boutnum]
+        else:
+            # subdivide into mini-bouts of bout_dur length
+            group_dur_sec = df_.iloc[-1]['sec'] - df_.iloc[0]['sec']
+            #t0 = df_.iloc[0]['sec']
+            n_mini_bouts = int(group_dur_sec / bout_dur)
+            #t1_values = np.linspace(t0 + bout_dur, t0 + group_dur_sec, n_mini_bouts, endpoint=False, )
+
+            bins = np.linspace(df_.iloc[0]['sec'], df_.iloc[-1]['sec'], n_mini_bouts, endpoint=False)
+            bin_labels = np.arange(boutnum, boutnum + len(bins)-1)
+            #print(bin_labels)
+            df_['boutnum'] = pd.cut(df_['sec'], bins=bins, labels=bin_labels)
+
+            #filtdf.loc[filtdf['group']==g, 'boutnum'] = df_['bin_sec']
+
+        boutnum += len(bin_labels)
+        b_list.append(df_)
+    filtdf = pd.concat(b_list)
+
+    return filtdf
+
+
 
 # processing
 
@@ -361,7 +407,91 @@ def pol2cart(rho, phi):
 # Data loading and formatting
 # ---------------------------------------------------------------------
 
-def load_jaaba(assay):
+def load_aggregate_data_pkl(savedir, mat_type='df', included_species=None):
+    '''
+    Find all *feat.pkl (or *trk.pkl) files in savedir and load them into a single dataframe.
+
+    Arguments:
+        savedir -- Full path to dir containing processed *feat.pkl files.
+
+    Keyword Arguments:
+        mat_type -- feat or trk (default: {'feat'})
+
+    Returns:
+        feat -- pandas dataframe containing all processed data.
+    '''
+    found_fns = glob.glob(os.path.join(savedir, '*{}.pkl'.format(mat_type)))
+    print("Found {} processed *_{}.pkl files".format(len(found_fns), mat_type))
+    f_list=[]
+    for fp in found_fns:
+        if 'BADTRACKING' in fp:
+            continue
+        acq = os.path.split(fp)[1].split('_{}'.format(mat_type))[0] 
+
+        if 'yak' in acq:
+            sp = 'Dyak'
+        elif 'mel' in acq:
+            sp = 'Dmel'
+        elif 'ele' in acq:
+            sp = 'Dele'
+        if included_species is not None:
+            if sp not in included_species:
+                continue
+
+        #if 'ele' in fp: # ignore ele for now
+        #    continue
+        #fp = found_fns[0]
+        #acq = os.path.split(acq_viddir)[0]
+        print(os.path.split(fp)[-1])
+        #with open(fp, 'rb') as f:
+        #    feat_ = pkl.load(f)
+        feat_ = pd.read_pickle(fp)
+        feat_['acquisition'] = acq 
+
+        feat_['species'] = sp
+
+        f_list.append(feat_)
+
+    feat = pd.concat(f_list, axis=0).reset_index(drop=True) 
+
+    return feat
+
+def ft_actions_to_bout_df(action_fpath):
+    '''
+    Take manually annoted bouts from FlyTracker -actions.mat file and convert to a pandas df
+
+    Arguments:
+        action_fpath -- _description_
+
+    Returns:
+        _description_
+    '''
+    # mat['bouts'] is (n_flies, action_types)
+    # mat['bouts'][0, 10] gets bout start/end/likelihood for fly1, action #10
+    # mat['behs'] are the behavior names
+
+    # load mat
+    mat = scipy.io.loadmat(action_fpath)
+
+    # behavior names
+    behs = [i[0][0] for i in mat['behs']]
+
+    # aggregate into list
+    b_list = []
+    for i, beh in enumerate(behs):
+        # get male action's 
+        if mat['bouts'][0, i].shape[1]==3:
+            b = mat['bouts'][0, i]
+            b_df = pd.DataFrame(data=b, columns=['start', 'end', 'likelihood'])
+            b_df['action'] = beh
+            b_df['id'] = 0
+            b_list.append(b_df)
+
+    boutdf = pd.concat(b_list)
+
+    return boutdf
+
+def load_jaaba(assay, fname=None):
     '''
     Assay can be '2d-projector' or '38mm-dyad' -- uses hard-coded local paths for faster loading.
 
@@ -381,8 +511,12 @@ def load_jaaba(assay):
         print(jaaba['species'].unique())
     elif assay=='38mm-dyad':
         #jaaba_file = '/Volumes/Julie/free-behavior-analysis/38mm-dyad/jaaba.pkl'
-        srcdir = '//Users/julianarhee/Documents/rutalab/projects/courtship/38mm-dyad'
-        jaab_fpath = os.path.join(srcdir, 'jaaba.pkl')
+        srcdir = '/Users/julianarhee/Documents/rutalab/projects/courtship/38mm-dyad'
+        if fname is not None:
+            jaaba_fpath = os.path.join(srcdir, '{}_jaaba.pkl'.format(fname))
+        else:
+            jaaba_fpath = os.path.join(srcdir, 'jaaba.pkl')
+        print("loading: {}".format(jaaba_fpath))
         jaaba = pd.read_pickle(jaaba_fpath)
         #with open(jaaba_fpath, 'rb') as f:
         #    jaaba = pkl.load(f)
@@ -423,7 +557,7 @@ def assign_jaaba_behaviors(plotdf, courtvar='courting', jaaba_thresh_dict=None, 
     return plotdf
 
 
-def get_video_cap_check_multidir(acq, assay='2d-projector'):
+def get_video_cap_check_multidir(acq, assay='2d-projector', return_viddir=False):
     '''
     Specific issue where multiple vid sources are possible (e.g., Minerva and Giacomo's drives).
 
@@ -456,7 +590,10 @@ def get_video_cap_check_multidir(acq, assay='2d-projector'):
 
     cap = cv2.VideoCapture(video_fpath)
 
-    return cap
+    if return_viddir:
+        return cap, viddir
+    else:
+        return cap
 
 def get_acq_from_ftpath(fp, viddir):     
     '''
@@ -480,12 +617,13 @@ def get_videos(folder, vid_type='.avi'):
         folder -- parent dir containing video files
 
     Keyword Arguments:
-        vid_type -- _description_ (default: {'.avi'})
+        vid_type -- _description_ (default: {'.avi'
+    })
 
     Returns:
         returns list of video file paths
     '''
-    found_vidpaths = glob.glob(os.path.join(folder, '*{}*'.format(vid_type)))
+    found_vidpaths = glob.glob(os.path.join(folder, '*{}'.format(vid_type)))
 
     return found_vidpaths
 
@@ -1042,9 +1180,9 @@ def aggr_feat_mats(found_sessionpaths):
         cop_ix = calib_['cop_ind'] if calib_['cop_ind']>=1 else feat_['frame'].iloc[-1]
         #ix_male = trk_.groupby('id').mean()['body_area'].idxmax() #.unique()
         #ix_female = trk_.groupby('id')['body_area'].mean().idxmax()
-        if acq in ['20231222-1149_fly2_eleWT_4do_sh_eleWT_4do_gh', '20231223-1212_fly3_eleWT_5do_sh_eleWT_5do_gh']:
-            ix_male = 1
-        elif float(trk_[trk_['frame']<=cop_ix].groupby('id')['body_area'].mean().round(1).diff().abs().dropna()) == 0: 
+        #if acq in ['20231222-1149_fly2_eleWT_4do_sh_eleWT_4do_gh', '20231223-1212_fly3_eleWT_5do_sh_eleWT_5do_gh']:
+        #    ix_male = 1
+        if float(trk_[trk_['frame']<=cop_ix].groupby('id')['body_area'].mean().round(1).diff().abs().dropna()) == 0: 
             #float(feat_[feat_['frame']<=cop_ix].groupby('id')['max_wing_ang'].mean().round(1).diff().abs().dropna()) == 0: # difference is super tiny
             #ix_male = trk_[trk_['frame']<=cop_ix].groupby('id')['body_area'].mean().idxmin() # use body size
             ix_male = feat_[feat_['frame']<=cop_ix].groupby('id')['max_wing_ang'].mean().idxmax()
