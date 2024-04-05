@@ -109,9 +109,9 @@ def plot_example_bouts(nr, nc, incl_bouts, df_, title=''):
 def plot_allo_vs_egocentric_pos(plotdf, axn, 
                         xvar='targ_pos_theta', yvar='targ_pos_radius',
                         huevar='stimhz', palette_dict=None,
-                        hue_norm=None,
+                        hue_norm=None, alpha=0.75,
                         cmap='viridis', bg_color='w',
-                        plot_com=True, markersize=5):
+                        plot_com=True, markersize=5, com_markersize=30, com_lw=0.5):
 
     if palette_dict is None:
         huevals = plotdf[huevar].unique()
@@ -130,14 +130,14 @@ def plot_allo_vs_egocentric_pos(plotdf, axn,
                     x=xvar, y=yvar, s=markersize,
                     hue=huevar, palette=palette_dict, 
                     hue_norm=hue_norm,
-                    edgecolor='none', legend=0, alpha=0.7)
+                    edgecolor='none', legend=0, alpha=alpha)
     if plot_com:
         # plot Center of Mass
         for hueval, f_ in plotdf.groupby(huevar):
             cm_theta = pd.Series(np.unwrap(f_[xvar])).mean()
             cm_radius = f_[yvar].mean()
-            ax.scatter(cm_theta, cm_radius, s=30, c=palette_dict[hueval],
-                    marker='o', edgecolor='k', lw=0.5,
+            ax.scatter(cm_theta, cm_radius, s=com_markersize, c=palette_dict[hueval],
+                    marker='o', edgecolor='k', lw=com_lw,
                     label='COM: {:.2f}'.format(hueval))
 
     #  plot allocentric - get polar coords from transformed
@@ -151,7 +151,7 @@ def plot_allo_vs_egocentric_pos(plotdf, axn,
                     x='pos_theta', y='pos_radius', s=markersize,
                     hue=huevar, palette=palette_dict,
                     hue_norm=hue_norm,
-                    edgecolor='none', legend=0, alpha=0.7) 
+                    edgecolor='none', legend=0, alpha=alpha) 
     # colorbar
     if hue_norm is None:
         hue_norm = mpl.colors.Normalize(vmin=huevals.min(), vmax=huevals.max())
