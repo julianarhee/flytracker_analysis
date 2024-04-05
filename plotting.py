@@ -328,7 +328,7 @@ def get_palette_dict(df, huevar, cmap='viridis'):
     Returns:
         _description_
     '''
-    bin_vals = df[huevar].unique()
+    bin_vals = sorted(df[huevar].unique())
     return dict((k, v) for k, v in zip(bin_vals, 
                         sns.color_palette(cmap, n_colors=len(bin_vals))) )
 
