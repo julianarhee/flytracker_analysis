@@ -166,30 +166,30 @@ def plot_allo_vs_egocentric_pos(plotdf, axn,
 
     return
 
-def load_flytracker_data(acq, viddir, subfolder='fly-tracker/*', fps=60):
-    # load flytracker .mat as df
-    calib_, trk_, feat_ = util.load_flytracker_data(viddir, 
-                                    subfolder=subfolder,
-                                    fps=fps)
-    # TODO:  fix frame numbering in util.
-    featpath = [f for f in feat_['fpath'].unique() if acq in f][0] 
-    trkpath = [f for f in trk_['fpath'].unique() if acq in f][0]
-    trk_cols = [c for c in trk_.columns if c not in feat_.columns]
-    trk_ = trk_[trk_['fpath']==trkpath]
-    feat_ = feat_[feat_['fpath']==featpath]
-    for i, t_ in trk_.groupby('id'):
-        trk_.loc[t_.index, 'frame'] = np.arange(0, len(t_))
-    for i, f_ in feat_.groupby('id'):
-        feat_.loc[f_.index, 'frame'] = np.arange(0, len(f_))
-
-    # find where we have no wing info, bec ori can't be trusted
-    # find where any of the wing columns are NaN:
-    no_wing_info = trk_[trk_[['wing_l_x', 'wing_l_y', 'wing_r_x', 'wing_r_y']].isna().sum(axis=1) == 4 ].index
-    trk_.loc[no_wing_info, 'ori'] = np.nan
-
-    df_ = pd.concat([trk_[trk_cols], feat_], axis=1).reset_index(drop=True)
-
-    return df_
+#def load_flytracker_data(acq, viddir, subfolder='fly-tracker/*', fps=60):
+#    # load flytracker .mat as df
+#    calib_, trk_, feat_ = util.load_flytracker_data(viddir, 
+#                                    subfolder=subfolder,
+#                                    fps=fps)
+#    # TODO:  fix frame numbering in util.
+#    featpath = [f for f in feat_['fpath'].unique() if acq in f][0] 
+#    trkpath = [f for f in trk_['fpath'].unique() if acq in f][0]
+#    trk_cols = [c for c in trk_.columns if c not in feat_.columns]
+#    trk_ = trk_[trk_['fpath']==trkpath]
+#    feat_ = feat_[feat_['fpath']==featpath]
+#    for i, t_ in trk_.groupby('id'):
+#        trk_.loc[t_.index, 'frame'] = np.arange(0, len(t_))
+#    for i, f_ in feat_.groupby('id'):
+#        feat_.loc[f_.index, 'frame'] = np.arange(0, len(f_))
+#
+#    # find where we have no wing info, bec ori can't be trusted
+#    # find where any of the wing columns are NaN:
+#    no_wing_info = trk_[trk_[['wing_l_x', 'wing_l_y', 'wing_r_x', 'wing_r_y']].isna().sum(axis=1) == 4 ].index
+#    trk_.loc[no_wing_info, 'ori'] = np.nan
+#
+#    df_ = pd.concat([trk_[trk_cols], feat_], axis=1).reset_index(drop=True)
+#
+#    return df_
 
 #%%
 def main():
@@ -236,7 +236,7 @@ def main():
     except FileNotFoundError:
         print("creating feat/trk df.")
         subfolder = 'fly-tracker/*'
-        df_ = load_flytracker_data(acq, viddir, subfolder=subfolder, fps=fps)
+        df_ = util.combine_flytracker_data(acq, viddir, subfolder=subfolder, fps=fps) #load_flytracker_data(acq, viddir, subfolder=subfolder, fps=fps)
 
 #%%         
     if subfolder=='fly-tracker/*':
