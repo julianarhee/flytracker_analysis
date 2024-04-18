@@ -456,7 +456,7 @@ def get_metrics_relative_to_focal_fly(acqdir, fps=60, cop_ix=None,
         print("No save directory provided. Saving to acquisition directory.")
         savedir = acqdir
     # load flyracker data
-    calib_, trk_, feat_ = util.load_flytracker_data(acqdir, fps=fps)
+    calib_, trk_, feat_ = util.load_flytracker_data(acqdir, fps=fps, filter_ori=True)
 
     # get video file for plotting/sanity checks
 #    vids = util.get_videos(acqdir, vid_type=movie_fmt)
