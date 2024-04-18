@@ -76,6 +76,11 @@ def set_sns_style(style='dark', min_fontsize=6):
 
 
 # ticks
+def change_spine_color(ax, color, spine='left'):
+    ax.spines[spine].set_color(color)
+    ax.yaxis.label.set_color(color)
+    ax.tick_params(axis='y', colors=color)
+
 def set_outward_spines(ax):
     ax.tick_params(which='both', axis='both', length=2, width=0.5, color='w',
                direction='out', left=True)
