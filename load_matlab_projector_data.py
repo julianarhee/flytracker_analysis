@@ -41,14 +41,18 @@ def aggr_matstruct_to_df(mstruct, structname='feat_fly'):
 
 #mat_fpath = '/Volumes/Giacomo/MATLAB/projector_data_single_20240320.mat'
 
-mat_fpath = '/Volumes/Giacomo/MATLAB/projector_data_elegans_all_20240325.mat'
-# Load the .mat file
+#mat_fpath = '/Volumes/Giacomo/MATLAB/projector_data_elegans_all_20240325.mat'
 
-mat_fpath = '/Volumes/Giacomo/MATLAB/free_behavior_data_mel_yak_20240403.mat'
+# Load the .mat file
+#mat_fpath = '/Volumes/Giacomo/MATLAB/free_behavior_data_mel_yak_20240403.mat'
+minerva_base = '/Volumes/Giacomo/MATLAB'
+fn = 'projector_data_mel_yak_20240330'
+mat_fpath = os.path.join(minerva_base, '{}.mat'.format(fn))
 mat = mat73.loadmat(mat_fpath)
 
 #%%
-assay = '38mm-dyad'
+#assay = '38mm-dyad'
+assay = '2d-projector' 
 
 if assay == '2d-projector':
     destdir = '/Volumes/Julie/2d-projector-analysis/processed'
