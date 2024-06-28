@@ -121,7 +121,31 @@ def custom_legend(labels, colors, use_line=True, lw=4, markersize=10):
                     markerfacecolor=c, markersize=markersize) for c, l in zip(colors, labels)]
 
     return legh
-##
+
+#%% Stats-related functions for plotting
+
+def annotate_regr(data, ax, x='facing_angle', y='ang_vel', fontsize=8, **kws):
+    '''
+    Do pearson corr and annotate plot in upper left with p and r values.
+
+    Arguments:
+        data -- _description_
+        ax -- _description_
+
+    Keyword Arguments:
+        x -- _description_ (default: {'facing_angle'})
+        y -- _description_ (default: {'ang_vel'})
+        fontsize -- _description_ (default: {8})
+    '''
+    import scipy.stats as spstats
+
+    r, p = spstats.pearsonr(data[x].interpolate().ffill().bfill(), 
+                            data[y].interpolate().ffill().bfill())
+    ax.text(.05, .8, 'r={:.2f}, p={:.2g}'.format(r, p),
+            transform=ax.transAxes, fontsize=fontsize)
+
+
+#%%
 
 def plot_array_of_trajectories(trajdf, sorted_eff=[], nr=5, nc=7, 
                             aspect_ratio=0.5, sharey=True,
@@ -215,7 +239,8 @@ def add_colorwheel(fig, cmap='hsv', axes=[0.8, 0.8, 0.1, 0.1],
     return display_axes
 
 def circular_hist(ax, x, bins=16, density=True, offset=0, gaps=True, 
-                    edgecolor='w', facecolor=[0.7]*3, alpha=0.7, lw=0.5):
+                    edgecolor='w', facecolor=[0.7]*3, alpha=0.7, lw=0.5,
+                    theta_zero_location='N', theta_direction=-1):
     """
     Produce a circular histogram of angles on ax.
     From: https://stackoverflow.com/questions/22562364/circular-polar-histogram-in-python
@@ -284,8 +309,8 @@ def circular_hist(ax, x, bins=16, density=True, offset=0, gaps=True,
     if density:
         ax.set_yticks([])
         #ax.tick_params(which='both', axis='both', size=0)
-    ax.set_theta_zero_location('N')
-    ax.set_theta_direction(-1)  # theta increasing clockwise
+    ax.set_theta_zero_location(theta_zero_location) #'N')
+    ax.set_theta_direction(theta_direction)  # theta increasing clockwise
      
     return n, bins, patches
 
