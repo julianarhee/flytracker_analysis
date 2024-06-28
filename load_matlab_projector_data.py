@@ -11,8 +11,10 @@ import os
 import yaml
 import re
 
+import utils as util
+
 #%%
-def aggr_matstruct_to_df(mstruct, structname='feat_fly'):
+def aggr_matstruct_to_df(mstruct, structname='feat_fly', fps=60):
     d_list = []
     for i, fn in enumerate(file_names):
 
@@ -31,6 +33,10 @@ def aggr_matstruct_to_df(mstruct, structname='feat_fly'):
         d_list.append(feat_)
 
     feat = pd.concat(d_list).reset_index(drop=True)
+    feat = util.add_frame_nums(feat, fps=fps)
+
+    cols = ['_'.join(f.split(' ')) if len(f.split(' '))>0 else f for f in feat.columns]
+    feat.columns = cols
 
     return feat
 
@@ -45,8 +51,9 @@ def aggr_matstruct_to_df(mstruct, structname='feat_fly'):
 
 # Load the .mat file
 #mat_fpath = '/Volumes/Giacomo/MATLAB/free_behavior_data_mel_yak_20240403.mat'
-minerva_base = '/Volumes/Giacomo/MATLAB'
-fn = 'projector_data_mel_yak_20240330'
+minerva_base = '/Volumes/Giacomo/MATLAB Data'
+#fn = 'projector_data_mel_yak_20240330'
+fn = 'projector_data_elegans_all_20240325'
 mat_fpath = os.path.join(minerva_base, '{}.mat'.format(fn))
 mat = mat73.loadmat(mat_fpath)
 
@@ -56,11 +63,11 @@ assay = '2d-projector'
 
 if assay == '2d-projector':
     destdir = '/Volumes/Julie/2d-projector-analysis/processed'
-    alt_destdir = '/Users/julianarhee/Documents/rutalab/projects/courtship/2d-projector/JAABA'
+    alt_destdir = '/Users/julianarhee/Documents/rutalab/projects/courtship/data/2d-projector/JAABA'
 else:
     assert assay == '38mm-dyad'
     destdir = '/Volumes/Julie/free-behavior-analysis/38mm_dyad'
-    alt_destdir = '/Users/julianarhee/Documents/rutalab/projects/courtship/38mm-dyad'
+    alt_destdir = '/Users/julianarhee/Documents/rutalab/projects/courtship/data/38mm-dyad-ft-jaaba'
 if not os.path.exists(destdir):
     os.makedirs(destdir)
 
@@ -170,7 +177,7 @@ trk_cols = [c for c in trk.columns if c not in feat.columns]
 print(trk_cols)
 
 #%%
-ftdf = pd.concat([feat, trk[trk_cols]], axis=1)
+ftdf = pd.concat([trk[trk_cols], feat], axis=1)
 print(trk.shape, ftdf.shape)
 
 #%%
