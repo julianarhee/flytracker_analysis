@@ -65,6 +65,15 @@ def CoM(df, xvar='pos_x', yvar='pos_y'):
 
     return cgx, cgy
 
+def circular_distance(ang1, ang2):
+    # efficiently computes the circular distance between two angles (Tom/Rufei)
+
+    circdist = np.angle(np.exp(1j * ang1) / np.exp(1j * ang2))
+
+    return circdist
+
+
+
 #%% bouts
 def get_indices_of_consecutive_rows(passdf):
     '''
@@ -95,10 +104,28 @@ def filter_bouts_by_frame_duration(consec_bouts, min_bout_len, fps=60, return_in
     else:
         return incl_bouts
 
-def subdivide_into_bouts(filtdf, bout_dur=1.0):
+def subdivide_into_subbouts(ftjaaba, bout_dur=0.2):
+    d_list = []
+    for acq, df_ in ftjaaba.groupby('acquisition'):
+        sec_min, sec_max = df_['sec'].min(), df_['sec'].max()
+
+        group_dur_sec = sec_max - sec_min #df_['sec'].max() - df_['sec'].min()
+        n_mini_bouts = int(group_dur_sec / bout_dur)
+        #print(n_mini_bouts)
+        bins = np.linspace(sec_min, sec_max, n_mini_bouts, endpoint=False)
+        bin_labels = np.arange(0, len(bins)-1)
+        #print(bin_labels)
+        df_['subboutnum'] = pd.cut(df_['sec'], bins=bins, labels=bin_labels)
+        d_list.append(df_)
+
+    ftjaaba = pd.concat(d_list)
+
+    return ftjaaba
+
+def subdivide_bouts_into_subbouts(filtdf, bout_dur=1.0):
     '''
     Subivide chunks of consecutive frames into smaller bouts of bout_dur length.
-
+    Takes larger BOUTS (courting or not courting) 
     Arguments:
         filtdf -- filtered/selected df, must contain original indices (frames) for grouping
 
@@ -116,7 +143,7 @@ def subdivide_into_bouts(filtdf, bout_dur=1.0):
     for g, df_ in filtdf.groupby('group'):
         group_dur_sec = df_.iloc[-1]['sec'] - df_.iloc[0]['sec']
         #print(group_dur_sec)
-        if group_dur_sec / bout_dur < 2:
+        if group_dur_sec / bout_dur < 2: #bout_dur: #2:
             df_['boutnum'] = boutnum
             #filtdf.loc[filtdf['group'] == g, 'boutnum'] = boutnum
             bin_labels = [boutnum]
@@ -143,6 +170,12 @@ def subdivide_into_bouts(filtdf, bout_dur=1.0):
 
 
 # processing
+
+def circmedian(angs):
+    pdists = angs[np.newaxis, :] - angs[:, np.newaxis]
+    pdists = (pdists + np.pi) % (2 * np.pi) - np.pi
+    pdists = np.abs(pdists).sum(1)
+    return angs[np.argmin(pdists)]
 
 def smooth_orientations(y, winsize=5):
     yy = np.concatenate((y, y))
@@ -193,23 +226,27 @@ def smooth_and_calculate_velocity_circvar(df, smooth_var='ori', vel_var='ang_vel
         # smooth with rolling()
         smoothed = smooth_orientations_pandas(oris, winsize=winsize) #smoothed = smooth_orientations(df_['ori'], winsize=3)
         # unwrap again to take difference between oris -- should look similar to ORIS
-        smoothed_wrap = pd.Series(np.unwrap([set_angle_range_to_neg_pos_pi(i) \
-                                            for i in smoothed]), index=df_.index)
+        smoothed_wrap = pd.Series([set_angle_range_to_neg_pos_pi(i) for i in smoothed])
+        #smoothed_wrap_unwrap = pd.Series(np.unwrap(smoothed_wrap), index=df_.index)
         # take difference
         smoothed_diff = smoothed_wrap.diff()
+        smoothed_diff_range = [set_angle_range_to_neg_pos_pi(i) for i in smoothed_diff]
         #smoothed_diff = np.concatenate([[0], smoothed_diff])
-
+        ori_diff_range = [set_angle_range_to_neg_pos_pi(i) for i in oris.diff()]
         # get angular velocity
-        ang_vel_smoothed = smoothed_diff / df_[time_var].diff().mean()
-        ang_vel = oris.diff() / df_[time_var].diff().mean() 
-        df.loc[df_.index, vel_var] = ang_vel
-        df.loc[df_.index, '{}_smoothed'.format(vel_var)] = ang_vel_smoothed
-        df.loc[df_.index, '{}_smoothed'.format(smooth_var)] = smoothed_wrap
-        df.loc[df_.index, '{}_smoothed_range'.format(smooth_var)] = [set_angle_range_to_neg_pos_pi(i) for i in smoothed_wrap]
+        ang_vel_smoothed = smoothed_diff_range / df_[time_var].diff().mean()
+        ang_vel = ori_diff_range / df_[time_var].diff().mean() 
+
+        df.loc[df['id']==i, vel_var] = ang_vel
+        df.loc[df['id']==i, '{}_diff'.format(smooth_var)] = ori_diff_range
+
+        df.loc[df['id']==i, '{}_smoothed'.format(vel_var)] = ang_vel_smoothed
+        df.loc[df['id']==i, '{}_smoothed'.format(smooth_var)] = smoothed_wrap
+        df.loc[df['id']==i, '{}_smoothed_range'.format(smooth_var)] = [set_angle_range_to_neg_pos_pi(i) for i in smoothed_wrap]
 
     #df.loc[df[df[smooth_var].isna()].index, :] = np.nan
     bad_ixs = df[df[smooth_var].isna()]['frame'].dropna().index.tolist()
-    cols = [c for c in df.columns if c not in ['frame', 'id']]
+    cols = [c for c in df.columns if c not in ['frame', 'id', 'acquisition', 'species']]
     df.loc[bad_ixs, cols] = np.nan
 
     df['{}_abs'.format(vel_var)] = np.abs(df[vel_var])
@@ -407,6 +444,44 @@ def pol2cart(rho, phi):
 # Data loading and formatting
 # ---------------------------------------------------------------------
 
+def combine_jaaba_and_processed_df(df, jaaba):
+    '''
+    Combines processed df (containing feat, trk data, or equivalent) with jaaba data.
+
+    Arguments:
+        df -- _description_
+        jaaba -- _description_
+
+    Returns:
+        _description_
+    '''
+    c_list = []
+    no_dfs = []
+    for acq, ja_ in jaaba.groupby('acquisition'):
+        df_ = df[(df['acquisition']==acq) & (df['id']==0)].reset_index(drop=True)
+        try:
+            if len(df_)>0:
+                if ja_.shape[0] < df_.shape[0]:
+                    last_frame = ja_['frame'].max()
+                    df_ = df_[df_['frame']<=last_frame]
+                else:
+                    assert ja_.shape[0] == df_.shape[0], "Mismatch in number of flies between jaaba {} and processed data {}.".format(ja_.shape, df_.shape) 
+                drop_cols = [c for c in ja_.columns if c in df_.columns]
+                combined_ = pd.concat([df_, ja_.drop(columns=drop_cols)], axis=1)
+                assert combined_.shape[0] == df_.shape[0], "Bad merge: {}".format(acq)
+                c_list.append(combined_)
+            else:
+                no_dfs.append(acq)
+        except Exception as e:
+            print(acq)
+            print(e)
+            continue
+
+    ftjaaba = pd.concat(c_list, axis=0).reset_index(drop=True)
+
+    return ftjaaba
+
+
 def load_aggregate_data_pkl(savedir, mat_type='df', included_species=None):
     '''
     Find all *feat.pkl (or *trk.pkl) files in savedir and load them into a single dataframe.
@@ -491,7 +566,7 @@ def ft_actions_to_bout_df(action_fpath):
 
     return boutdf
 
-def load_jaaba(assay, fname=None):
+def load_jaaba(assay='2d-projector', experiment='circle_diffspeeds', fname=None):
     '''
     Assay can be '2d-projector' or '38mm-dyad' -- uses hard-coded local paths for faster loading.
 
@@ -501,17 +576,25 @@ def load_jaaba(assay, fname=None):
     Returns:
         _description_
     '''
-
+    local_basedir = '/Users/julianarhee/Documents/rutalab/projects/courtship/data'
     if assay=='2d-projector':
-        srcdir = '/Users/julianarhee/Documents/rutalab/projects/courtship/2d-projector/JAABA'
+        srcdir =  os.path.join(local_basedir, assay, experiment, 'JAABA')
         #% Load jaaba-traansformed data
-        jaaba_fpath = os.path.join(srcdir, 'jaaba_transformed_data_transf.pkl')
+        #jaaba_fpath = os.path.join(srcdir, 'jaaba_transformed_data_transf.pkl')
+        if fname is None:
+            jaaba_fpath = os.path.join(srcdir, 'projector_data_mel_yak_20240330_jaaba.pkl')
+        else:
+            if 'jaaba' in fname:
+                jaaba_fpath = os.path.join(srcdir, '{}.pkl'.format(fname))
+            else:
+                jaaba_fpath = glob.glob(os.path.join(srcdir, '*{}*jaaba.pkl'.format(fname)))[0]
+
         assert os.path.exists(jaaba_fpath), "File not found: {}".format(jaaba_fpath)
         jaaba = pd.read_pickle(jaaba_fpath)   
         print(jaaba['species'].unique())
-    elif assay=='38mm-dyad':
+    elif assay=='MF': #'38mm-dyad':
         #jaaba_file = '/Volumes/Julie/free-behavior-analysis/38mm-dyad/jaaba.pkl'
-        srcdir = '/Users/julianarhee/Documents/rutalab/projects/courtship/38mm-dyad'
+        srcdir = os.path.join(local_basedir, assay, '38mm-dyad') #'38mm-dyad-ft-jaaba'
         if fname is not None:
             jaaba_fpath = os.path.join(srcdir, '{}_jaaba.pkl'.format(fname))
         else:
@@ -521,6 +604,7 @@ def load_jaaba(assay, fname=None):
         #with open(jaaba_fpath, 'rb') as f:
         #    jaaba = pkl.load(f)
         #jaaba.head()
+    print("Loaded: {}".format(jaaba_fpath))
 
     return jaaba
 
@@ -608,6 +692,13 @@ def get_acq_from_ftpath(fp, viddir):
     '''
     acq = os.path.split(os.path.split(fp.split(viddir+'/')[-1])[0])[0]
     return acq
+
+def get_video_by_ft_name(viddir, ftname, vid_type='.avi'):
+
+    found_vidpaths = glob.glob(os.path.join(viddir, '*{}*{}'.format(ftname, vid_type)))
+
+    return found_vidpaths
+
 
 def get_videos(folder, vid_type='.avi'):
     '''
@@ -855,7 +946,7 @@ def get_feature_units(mat_fpath):
     
     return unit_lut
 
-def load_calibration(curr_acq):
+def load_calibration(curr_acq, calib_is_upstream=False):
     '''
     Load calibration.mat from FlyTracker
 
@@ -870,8 +961,13 @@ def load_calibration(curr_acq):
     '''
     fieldnames = ['n_chambers', 'n_rows', 'n_cols', 'FPS', 'PPM', 'w', 'h', 
                   'centroids', 'rois', 'n_flies', 'cop_ind']
+    if calib_is_upstream:
+        # assumes flyracker folders were saved in a subdir, and that calibration.mat is in the parent dir, same level as subdir
+        basedir = os.path.split(os.path.split(curr_acq)[0])[0]
+    else:
+        basedir = curr_acq
+    calib_fpath = os.path.join(basedir, 'calibration.mat')
 
-    calib_fpath = os.path.join(curr_acq, 'calibration.mat')
     assert os.path.exists(calib_fpath), "No calibration found: %s" % curr_acq
 
     try:
@@ -1062,32 +1158,64 @@ def add_bout_durations(df):
 
     return df
 
-def load_flytracker_data(acq_dir, fps=60, subfolder='*'):
+def load_flytracker_data(acq_dir, calib_is_upstream=False, fps=60, subfolder='*', filter_ori=True):
     '''
     Get calibration info, -feat.mat and -track.mat as DFs.
+    If calib_is_upstream, subfolder should be '' -- load_feat and load_trk looks into os.path.join(acq_dir, subfolder, *.mat)
+
     Returns:
         calib: 
         trackdf: raw tracking data (e.g., position, orientation, left wing ang)
         featdf: features derived from tracking data (e.g., velocity, dist to x)
     '''
-    #%% Get corresponding calibration file
+    #% Get corresponding calibration file
     calib=None; trackdf=None; featdf=None;
     try:
-        calib = load_calibration(acq_dir)
+        calib = load_calibration(acq_dir, calib_is_upstream=calib_is_upstream)
     except Exception as e:
         print("No calibration!")
         calib={}
         calib['FPS'] = fps
 
     #% Load feature mat
-    featdf = load_feat(acq_dir, subfolder=subfolder)
-    trackdf = load_tracks(acq_dir, subfolder=subfolder)
+    feat_ = load_feat(acq_dir, subfolder=subfolder)
+    trk_ = load_tracks(acq_dir, subfolder=subfolder)
 
-    trackdf = add_frame_nums(trackdf, fps=calib['FPS'])
-    featdf = add_frame_nums(featdf, fps=calib['FPS'])
+    trackdf = add_frame_nums(trk_, fps=calib['FPS'])
+    featdf = add_frame_nums(feat_, fps=calib['FPS'])
 
-    return calib, trackdf, featdf
+    if filter_ori:
+        # find locs where ORI info can't be trusted
+        no_wing_info = trk_[trk_[['wing_l_x', 'wing_l_y', 'wing_r_x', 'wing_r_y']].isna().sum(axis=1) == 4 ].index
+        trk_.loc[no_wing_info, 'ori'] = np.nan
 
+    return calib, trk_, feat_
+
+
+def combine_flytracker_data(acq, viddir, subfolder='fly-tracker/*', fps=60):
+    # load flytracker .mat as df
+    calib_, trk_, feat_ = load_flytracker_data(viddir, 
+                                    subfolder=subfolder,
+                                    fps=fps)
+    # TODO:  fix frame numbering in util.
+    featpath = [f for f in feat_['fpath'].unique() if acq in f][0] 
+    trkpath = [f for f in trk_['fpath'].unique() if acq in f][0]
+    trk_cols = [c for c in trk_.columns if c not in feat_.columns]
+    trk_ = trk_[trk_['fpath']==trkpath]
+    feat_ = feat_[feat_['fpath']==featpath]
+    for i, t_ in trk_.groupby('id'):
+        trk_.loc[t_.index, 'frame'] = np.arange(0, len(t_))
+    for i, f_ in feat_.groupby('id'):
+        feat_.loc[f_.index, 'frame'] = np.arange(0, len(f_))
+
+    # find where we have no wing info, bec ori can't be trusted
+    # find where any of the wing columns are NaN:
+    no_wing_info = trk_[trk_[['wing_l_x', 'wing_l_y', 'wing_r_x', 'wing_r_y']].isna().sum(axis=1) == 4 ].index
+    trk_.loc[no_wing_info, 'ori'] = np.nan
+
+    df_ = pd.concat([trk_[trk_cols], feat_], axis=1).reset_index(drop=True)
+
+    return df_
 
 ## aggregate funcs
 def aggr_load_feat(savedir, found_sessionpaths=[], create_new=False):
