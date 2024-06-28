@@ -327,17 +327,29 @@ def get_copulation_ix(acq):
 
     return cop_ix
 
-def get_video_cap(acqdir, movie_fmt='avi'):
-    vids = util.get_videos(acqdir, vid_type=movie_fmt)
+def get_video_cap(acqdir, ftname=None, movie_fmt='avi'):
+    if ftname is None:
+        vids = util.get_videos(acqdir, vid_type=movie_fmt)
+    else:
+        vids = util.get_video_by_ft_name(viddir, ftname, vid_type=movie_fmt)
+
     alt_movie_fmt = 'mp4' if movie_fmt=='avi' else 'avi'
+
+    # try alt movie fmt
     try:
         assert len(vids)>0, "Found no video in directory: {}".format(vids)
         vids = [vids[-1]]
     except AssertionError as e:
-        vids = util.get_videos(acqdir, vid_type=alt_movie_fmt)
+        if ftname is None:
+            vids = util.get_videos(acqdir, vid_type=alt_movie_fmt)
+        else:
+            vids = util.get_video_by_ft_name(acqdir, ftname, vid_type=alt_movie_fmt)
+        #vids = util.get_videos(acqdir, vid_type=alt_movie_fmt)
         assert len(vids)==1, "Found more than one video in directory: {}".format(vids)  
 
     vidpath = vids[0]
+    print(vidpath)
+
     cap = cv2.VideoCapture(vidpath)
     return cap
 
@@ -432,7 +444,7 @@ def do_transformations_on_df(trk_, frame_width, frame_height,
 
     return df
 
-def get_metrics_relative_to_focal_fly(acqdir, fps=60, cop_ix=None,
+def get_metrics_relative_to_focal_fly(acqdir, mov_is_upstream=False, fps=60, cop_ix=None,
                                       movie_fmt='avi', flyid1=0, flyid2=1,
                                       plot_checks=False,
                                       savedir=None):
@@ -456,7 +468,14 @@ def get_metrics_relative_to_focal_fly(acqdir, fps=60, cop_ix=None,
         print("No save directory provided. Saving to acquisition directory.")
         savedir = acqdir
     # load flyracker data
-    calib_, trk_, feat_ = util.load_flytracker_data(acqdir, fps=fps, filter_ori=True)
+    if mov_is_upstream:
+        subfolder = ''
+    else:
+        subfolder = '*'
+    calib_, trk_, feat_ = util.load_flytracker_data(acqdir, fps=fps, 
+                                                    calib_is_upstream=mov_is_upstream,
+                                                    subfolder=subfolder,
+                                                    filter_ori=True)
 
     # get video file for plotting/sanity checks
 #    vids = util.get_videos(acqdir, vid_type=movie_fmt)
@@ -470,7 +489,12 @@ def get_metrics_relative_to_focal_fly(acqdir, fps=60, cop_ix=None,
 #
 #    vidpath = vids[0]
 #    cap = cv2.VideoCapture(vidpath)
-    cap = get_video_cap(acqdir, movie_fmt=movie_fmt)
+    if mov_is_upstream:
+        parentdir, ftname = os.path.split(acqdir)
+        viddir = os.path.split(parentdir)[0]
+        cap = get_video_cap(viddir, ftname=ftname, movie_fmt=movie_fmt) 
+    else:
+        cap = get_video_cap(acqdir, movie_fmt=movie_fmt)
 
     # N frames should equal size of DCL df
     n_frames = cap.get(cv2.CAP_PROP_FRAME_COUNT)
@@ -568,7 +592,8 @@ if __name__ == '__main__':
     parser.add_argument('--plot_checks', type=bool, default=False, help='Plot checks (default: False).')    
     parser.add_argument('--viddir', type=str, default='/Volumes/Julie/38mm_dyad/courtship-videos/38mm_dyad', help='Root directory of videos (default: /Volumes/Julie/38mm_dyad/courtship-videos/38mm_dyad).')   
     parser.add_argument('--new', type=bool, default=False, help='Create new processed data (default: False).')
-     
+    parser.add_argument('--subdir', type=str, default=None, help='subdir of tracked folders, e.g., fly-tracker (default: None).')
+    
     args = parser.parse_args()
     
     #rootdir = '/Volumes/Julie'
@@ -608,29 +633,62 @@ if __name__ == '__main__':
     flyid1 = args.flyid1
     flyid2 = args.flyid2
 
-    found_mats = glob.glob(os.path.join(viddir,  '20*', '*', '*feat.mat'))
+    subdir = args.subdir
+
+    create_new = args.new
+
+#%%
+
+    viddir = '/Volumes/Julie/2d-projector'
+    savedir = '/Volumes/Julie/2d-projector-analysis/FlyTracker/processed_mats'
+    subdir = 'fly-tracker'
+    flyid1 = 0
+    flyid2 = 1
+
+    movie_fmt = '.avi'
+    create_new=True
+
+#%%
+    if subdir is not None:
+        found_mats = glob.glob(os.path.join(viddir,  '20*', '*{}*'.format(subdir), '*', '*feat.mat'))
+    else:
+        found_mats = glob.glob(os.path.join(viddir,  '20*', '*', '*feat.mat'))
     print('Found {} processed videos.'.format(len(found_mats)))
+
     #%%
     #fp = found_mats[0]
 
     for fp in found_mats:
-        acq = os.path.split(os.path.split(fp.split(viddir+'/')[-1])[0])[0]
+        if subdir is not None:
+            # FT output dir is parent dir
+            ftdir = os.path.split(fp)[0]
+            # video dir is upstream
+            viddir = os.path.split(ftdir)[0]
+            # acq name is FT name
+            acq = os.path.split(ftdir)[-1]
+        else:
+            acq = os.path.split(os.path.split(fp.split(viddir+'/')[-1])[0])[0]
+
         if "BADTRACKING" in fp:
             continue
         #acq = os.path.split(acq_viddir)[0]
+
         acqdir = os.path.join(viddir, acq)
         print(acq)
-        create_new = args.new
         if not create_new:
             df_ = load_processed_data(acqdir, load=False, savedir=savedir)
             if df_ is False: 
                 create_new=True #assert ft is True, "No feat df found, creating now."
 
         if create_new:
-            cop_ix = get_copulation_ix(acq)
+            if '2d-projector' not in viddir:
+                cop_ix = get_copulation_ix(acq)
+            else:
+                cop_ix = None
             df_ = get_metrics_relative_to_focal_fly(acqdir,
                                         savedir=savedir,
                                         movie_fmt=movie_fmt, 
+                                        mov_is_upstream=subdir is not None,
                                         flyid1=flyid1, flyid2=flyid2,
                                         plot_checks=False)
             #assert len(df_['id'].unique()
