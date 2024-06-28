@@ -612,7 +612,7 @@ def get_all_h5_files(analyzed_dir):
 
 def load_and_transform_dlc(fpath, localroot='/Users/julianarhee/DeepLabCut',
                            projectname='projector-1dot-jyr-2024-02-18',
-                           assay='2d-projector',
+                           assay='2d-projector', heading_var='ori',
                            flyid='fly', dotid='single', fps=60, max_jump=6, pcutoff=0.8, winsize=10):
 
     import relative_metrics as rem
@@ -704,8 +704,8 @@ def load_and_transform_dlc(fpath, localroot='/Users/julianarhee/DeepLabCut',
     # calculate theta_error
     f1 = df_[df_['id']==0].copy().reset_index(drop=True)
     f2 = df_[df_['id']==1].copy().reset_index(drop=True)
-    f1 = pp.calculate_theta_error(f1, f2)
-    f2 = pp.calculate_theta_error(f2, f1)
+    f1 = pp.calculate_theta_error(f1, f2, heading_var=heading_var)
+    f2 = pp.calculate_theta_error(f2, f1, heading_var=heading_var)
     df_.loc[df_['id']==0, 'theta_error'] = f1['theta_error']
     df_.loc[df_['id']==1, 'theta_error'] = f2['theta_error']
 
