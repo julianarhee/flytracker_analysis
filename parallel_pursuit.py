@@ -25,17 +25,31 @@ import dlc as dlc
 
 from relative_metrics import load_processed_data, get_video_cap
 #%% FUNCTIONS 
-def calculate_theta_error(f1, f2, xvar='pos_x', yvar='pos_y'):
+def calculate_theta_error(f1, f2, xvar='pos_x', yvar='pos_y', heading_var='ori'):
     vec_between = f2[[xvar, yvar]] - f1[[xvar, yvar]]
     abs_ang = np.arctan2(vec_between[yvar], vec_between[xvar])
-    th_err = dlc.circular_distance(abs_ang, f1['traveling_dir']) # already bw -np.pi, pi
+    th_err = dlc.circular_distance(abs_ang, f1[heading_var]) # already bw -np.pi, pi
     #th_err = [util.set_angle_range_to_neg_pos_pi(v) for v in th_err]
+    print(th_err)
     th_err[0] = th_err[1]
     f1['theta_error'] = th_err
     f1['theta_error_dt'] = pd.Series(np.unwrap(f1['theta_error'].interpolate().ffill().bfill())).diff() / f1['sec_diff'].mean()
     f1['theta_error_deg'] = np.rad2deg(f1['theta_error'])
 
     return f1
+
+#def calculate_theta_error(f1, f2, xvar='pos_x', yvar='pos_y'):
+#    vec_between = f2[[xvar, yvar]] - f1[[xvar, yvar]]
+#    abs_ang = np.arctan2(vec_between[yvar], vec_between[xvar])
+#    th_err = circular_distance(abs_ang, f1['ori']) # already bw -np.pi, pi
+#    #th_err = [util.set_angle_range_to_neg_pos_pi(v) for v in th_err]
+#    #th_err[0] = th_err[1]
+#    f1['abs_ang_between'] = abs_ang
+#    f1['theta_error'] = th_err
+#    f1['theta_error_dt'] = pd.Series(np.unwrap(f1['theta_error'].interpolate().ffill().bfill())).diff() / f1['sec_diff'].mean()
+#    f1['theta_error_deg'] = np.rad2deg(f1['theta_error'])
+#
+#    return f1
 
 #def get_indices_of_consecutive_rows(passdf):
 #    '''
@@ -654,6 +668,8 @@ def main():
     #%% -----------------------------------------
     # Range Vector Correlation
     # ------------------------------------------
+    # NOTE: MOVED TO interceptions.py
+
     # Line-of-sight (LoS) vector -> facing_angle
     
     # Get angle difference between successive LoS vectors,
