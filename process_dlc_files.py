@@ -1,5 +1,11 @@
 #!/usr/bin/env python3 
 # -*- coding: utf-8 -*-
+"""
+Procsses all dlc .h5 files and runs dlc.load_and_transform_dlc() on each.
+Saves individual .pkl files to ./2d-projector-analysis/DeepLabCut/processed directory
+Saves aggregate processed.pkl file to ./2d-projector-analysis/DeepLabCut directory
+Saves a copy to local directory /Users/julianarhee/Documents/rutalab/projects/courtship/data/2d-projector/DLC
+"""
 #%%
 import os
 import sys
