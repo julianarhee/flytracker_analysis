@@ -128,7 +128,7 @@ def plot_heading_vs_travelingdir_frames(curr_frames, f1, f2, cap=None, ax=None,
 
 #%%
 plot_style='dark'
-putil.set_sns_style(style=plot_style, min_fontsize=12)
+putil.set_sns_style(style=plot_style, min_fontsize=18)
 bg_color='w' if plot_style=='dark' else 'k'
 
 
@@ -189,8 +189,9 @@ else:
     #acq_prefix = '20240216-*fly3*6x6'
     #acq_prefix = '20240222-*fly7_Dmel*8x8'
     # acq_prefix = '20240216-*fly3_Dmel*4x4'
-    acq_prefix = '20240214-1025_f1_Dele-wt_5do_sh_prj10_sz10x10'
+    # acq_prefix = '20240214-1025_f1_Dele-wt_5do_sh_prj10_sz10x10'
 
+    acq_prefix = '20240214-1002_f1_Dele-wt_5do_sh_prj10_sz8x8'
     fpath = dlc.get_fpath_from_acq_prefix(analyzed_dir, acq_prefix)
 
     flyid = 'fly' # double check in the plots for abdomen lengths
@@ -199,9 +200,11 @@ else:
     max_jump = 6
     pcutoff=0.8 #0.99
 
+    # includes calc theta error
     df_ = dlc.load_and_transform_dlc(fpath, winsize=10,
                                      localroot=localroot, projectname=projectname,
-                                     assay=assay, flyid=flyid, dotid=dotid, fps=fps, max_jump=max_jump, pcutoff=pcutoff)
+                                     assay=assay, flyid=flyid, dotid=dotid, fps=fps, max_jump=max_jump, pcutoff=pcutoff,
+                                     heading_var='ori')
 
 # Create colormap for velocities
 stimhz_vals = np.array([0.0, 0.025, 0.05, 0.1, 0.2, 0.4, 0.5, 0.625, 0.8, 1])
@@ -281,11 +284,14 @@ df_['stim_hz'] = [stimhz_dict[v] if v in stimhz_dict.keys() else None for v in d
 stimhz_palette = putil.get_palette_dict(df_, 'stim_hz', cmap='viridis')
 
 #%% output dir
-destdir = os.path.join(os.path.split(procdir)[0], 'predictive_coding')
-figdir = os.path.join(destdir, acq)
+destdir = os.path.join(os.path.split(procdir)[0], 'pursuit_v_interception')
+figdir = os.path.join(destdir, acq_prefix)
 if not os.path.exists(figdir):
     os.makedirs(figdir)
 print(figdir)
+
+acq = acq_prefix
+print(acq_prefix)
 
 
 #%% ------------------------------------------
@@ -293,10 +299,23 @@ print(figdir)
 # --------------------------------------------
 # %% Get manually annotated actions -- annoted with FlyTracker
 
+all_action_paths = glob.glob(os.path.join(viddir, 'fly-tracker', '20*', '*actions.mat'))
+
+a_list = []
+for fp in all_action_paths:
+    # load actions to df
+    actions_ = util.ft_actions_to_bout_df(fp)
+    acqname = '_'.join(os.path.split(fp)[1].split('_')[0:-1])
+    actions_['acquisition'] = acqname
+    a_list.append(actions_)
+actions = pd.concat(a_list)
+
+#%%
 # get path to actions file for current acquisition
 #viddir = acqdir
 action_fpaths = glob.glob(os.path.join(viddir, 'fly-tracker', '{}*'.format(acq), '*actions.mat'))
 action_fpath = action_fpaths[0]
+print(action_fpath)
 
 # load actions to df
 boutdf = util.ft_actions_to_bout_df(action_fpath)
@@ -315,16 +334,17 @@ action_palette={None: bg_color,
                 'interception': 'red', 
                 'pursuit': 'cornflowerblue'}
 
+
 #%% Add actions 
 f1 = df_[df_['id']==0].copy().reset_index(drop=True)
 f2 = df_[df_['id']==1].copy().reset_index(drop=True)
 
 #%% 
-
+importlib.reload(pp)
+import theta_error as the
 # Is theta error same as targ_pos_theta??
 #th_err = f2['pos_theta'].values - f1['traveling_dir'].values
-f1 = pp.calculate_theta_error(f1, f2)
-
+f1 = the.calculate_theta_error(f1, f2) #, heading_var='ori')
 
 fig, axn =pl.subplots(1, 2, sharex=True, sharey=True)
 ax=axn[0]
@@ -352,12 +372,19 @@ ax.plot(f1['theta_error_dt'], f1['traveling_dir_dt'], 'o')
 # ----
 # curr_frame = 7450 #2430 # to the left is positive?
 #curr_frame = 9752
-curr_frame = 7420 
+curr_frame = 7470 #7420 # INTERCEPTION EX.
+#curr_frame = 10150 # TRACKING EX.
 curr_frames = [curr_frame]
-nsec_win = 0.75
+nsec_win = 0.4
+plot_frame = True
+
+error_var = 'theta_error_deg'
+
 several_frames = np.arange(curr_frame - nsec_win*fps,  curr_frame + nsec_win*fps*3)[0::6]
 
 df_['facing_angle_deg'] = np.rad2deg(df_['facing_angle'])
+df_['theta_error_deg'] = np.rad2deg(df_['theta_error'])
+
 f1['ori_deg'] = np.rad2deg(f1['ori'])
 f1['traveling_deg'] = np.rad2deg(f1['traveling_dir'])
 f1['facing_angle_deg'] = np.rad2deg(f1['facing_angle'])
@@ -377,16 +404,17 @@ fig = pl.figure(figsize=(12, 8))
 gs = mpl.gridspec.GridSpec(3, 3)
 
 ax = pl.subplot(gs[0:2, 0:2]) 
-plot_heading_vs_travelingdir_frames(several_frames, f1, f2, cap=cap, ax=ax, plot_interval=1,
+curr_cap = cap if plot_frame else None
+plot_heading_vs_travelingdir_frames(several_frames, f1, f2, cap=curr_cap, ax=ax, plot_interval=1,
                                           var1='ori', var2='traveling_dir')
 #ax.plot(df_[df_['frame'].isin(curr_frames)]['pos_x'].values,
 #        df_[df_['frame'].isin(curr_frames)]['pos_y'].values, 'r')
-
+ax.set_xticks([0, 200, 400, 600, 800])
 # plot FACING ANGLE
 ax = pl.subplot(gs[2, 0])
 ax.plot([0, float(normPos['pos_x'])], [0, float(normPos['pos_y'])], 'g')
-fA = f_.iloc[0]['facing_angle_deg']
-ax.set_title('facing angle:\nmale ori vs. position = {:.1f} deg'.format(float(fA)), loc='left')
+fA = f_.iloc[0][error_var]
+ax.set_title('{}:\nmale ori vs. position = {:.1f} deg'.format(error_var, float(fA)), loc='left')
 
 ax.plot(f_[f_['id']==0]['pos_x'], f_[f_['id']==0]['pos_y'], 'ro')
 ax.plot(f_[f_['id']==1]['pos_x'], f_[f_['id']==1]['pos_y'], 'bo')
@@ -425,18 +453,27 @@ ax.set_aspect(1)
 
 # plot THETA ERROR
 ax =pl.subplot(gs[2, 2]) #, projection='polar')
-sns.scatterplot(data=f1[f1['frame'].isin(several_frames)], x='sec', y='facing_angle_deg', ax=ax,
+sns.scatterplot(data=f1[f1['frame'].isin(several_frames)], x='sec', y=error_var, ax=ax,
                 hue='ang_vel', palette='magma', legend=0)
 
 pl.subplots_adjust(wspace=0.6, hspace=0.6)
 
 
+figname = 'vecs_heading_traveldir_theta_error_frame{}-{}_{}'.format(several_frames[0], several_frames[-1], acq)
+print(figname)
+
+putil.label_figure(fig, acq)
+pl.savefig(os.path.join(figdir, '{}.png'.format(figname)))
+pl.savefig(os.path.join(figdir, '{}.svg'.format(figname)))
+print(figdir, figname)
+
 #%% Compare TRAVEL vs. HEADING
 import scipy.stats as spstats
 #curr_frame = 7446 # interception example
-curr_frame = 9752  # pursuit example
+curr_frame = 9720 # 9752  # pursuit example
 
-curr_frames = np.arange(curr_frame, curr_frame+40)[0::2]
+nframes_add = 1.5 * fps
+curr_frames = np.arange(curr_frame, curr_frame+nframes_add)[0::2]
 #curr_frames = [curr_frame]
 
 mean_heading = spstats.circmean(f1[f1['frame'].isin(curr_frames)]['ori'], low=-np.pi, high=np.pi)
@@ -452,8 +489,9 @@ ax=axn[0]
 plot_heading_vs_travelingdir_frames(curr_frames, f1, f2, ax=ax, cap=cap,
                                           var1='ori', var2='traveling_dir'
                                           )
-ax.plot(df_[df_['frame'].isin(curr_frames)]['pos_x'].values,
-        df_[df_['frame'].isin(curr_frames)]['pos_y'].values, 'r')
+ax.set_xticks([0, 200, 400, 600, 800])
+#ax.plot(df_[df_['frame'].isin(curr_frames)]['pos_x'].values,
+#        df_[df_['frame'].isin(curr_frames)]['pos_y'].values, 'r')
 
 ax=axn[1]
 ax.plot(f1[f1['frame'].isin(curr_frames)]['sec'], 
@@ -469,6 +507,42 @@ pl.subplots_adjust(wspace=0.5)
 putil.label_figure(fig, acq)
 figname = 'heading_vs_travelingdir_frames_{}'.format(curr_frames[0], curr_frames[-1])
 pl.savefig(os.path.join(figdir, '{}.png'.format(figname)))
+print(os.path.join(figdir, figname))
+
+#%%
+
+
+
+# plot ------------------------------------------------
+fig, axn = pl.subplots(1, 2, sharex=True, sharey=True, figsize=(12, 5))
+
+# interception ex
+curr_frame = 7470 #7420 # INTERCEPTION EX.
+nsec_win = 0.4
+interception_frames = np.arange(curr_frame - nsec_win*fps,  curr_frame + nsec_win*fps*3)[0::6]
+# tracking ex
+curr_frame = 10150 #7420 # INTERCEPTION EX.
+nsec_win = 0.4
+tracking_frames = np.arange(curr_frame - nsec_win*fps,  curr_frame + nsec_win*fps*3)[0::6]
+
+plot_frame = True
+
+ax=axn[0]
+curr_cap = cap if plot_frame else None
+plot_heading_vs_travelingdir_frames(tracking_frames, f1, f2, cap=curr_cap, ax=ax, plot_interval=1,
+                                          var1='ori', var2='traveling_dir')
+ax.legend_.remove()
+ax.set_xticks([0, 200, 400, 600, 800])
+
+ax=axn[1]
+plot_heading_vs_travelingdir_frames(interception_frames, f1, f2, cap=curr_cap, ax=ax, plot_interval=1,
+                                          var1='ori', var2='traveling_dir')
+
+putil.label_figure(fig, acq)
+figname = 'interception_v_tracking_ex_{}'.format(acq)
+pl.savefig(os.path.join(figdir, '{}.png'.format(figname)))
+pl.savefig(os.path.join(figdir, '{}.svg'.format(figname)))
+
 print(os.path.join(figdir, figname))
 
 
@@ -573,9 +647,9 @@ ax2.plot(f1[f1['frame'].isin(curr_frames)]['sec'],
 #%% ASSIGN ACTIONS TO DF
 # ----------------------------------------------
 
-srcdir = '/Users/julianarhee/Documents/rutalab/projects/courtship/2d-projector/JAABA'
+srcdir = '/Users/julianarhee/Documents/rutalab/projects/courtship/data/2d-projector/JAABA'
 #% Load jaaba-traansformed data
-jaaba_fpath = os.path.join(srcdir, 'jaaba_transformed_data_transf.pkl')
+jaaba_fpath = os.path.join(srcdir, 'jaaba_transformed_data_elegans.pkl')
 assert os.path.exists(jaaba_fpath), "File not found: {}".format(jaaba_fpath)
 jaaba = pd.read_pickle(jaaba_fpath)   
 
@@ -610,32 +684,56 @@ possible_chasing.groupby('action').count()
 #%%
 ## Look at a bunch of vars across time, color code events
 
-plot_vars = ['pos_x', 'vel', 'ang_vel', 'dist_to_other', 'facing_angle', 'targ_pos_theta', 'theta_error',
+plot_vars = ['pos_x', 'vel', 'ang_vel', 'dist_to_other',
+             # 'facing_angle', 'targ_pos_theta', 'theta_error',
+             'theta_error',
              'theta_error_dt', 'targ_ang_vel']
 
-t1 = 120
-t2 = 160 
+t1 = 120 #150 # 120
+t2 = 160 #180 #160 
 plotdf = f1[(f1['sec']>t1) & (f1['sec']<t2)]
-fig, axn = pl.subplots(len(plot_vars), 1, figsize=(10,2*len(plot_vars)), sharex=True)
+
+plotdf2 = f2[(f2['sec']>t1) & (f2['sec']<t2)]
+fig, axn = pl.subplots(len(plot_vars)+1, 1, figsize=(10,2*len(plot_vars)), sharex=True)
+ax=axn[0]
+ax.plot(plotdf2['sec'], plotdf2['pos_x'], color=bg_color, alpha=0.5)
+ax.set_ylabel('target pos x')
+
 for i, yvar in enumerate(plot_vars):
-    ax = axn[i]
+    ax = axn[i+1]
     ax.plot(plotdf['sec'], plotdf[yvar], color=bg_color, alpha=0.5)
     sns.scatterplot(data=plotdf, x='sec', y=yvar, ax=ax,
                     hue='action', palette=action_palette,
                     edgecolor='none', s=10, alpha=0.5, legend=i==0)
     if i==0:
-        sns.move_legend(ax, loc='upper left', bbox_to_anchor=(1,1))
+        sns.move_legend(ax, loc='upper left', bbox_to_anchor=(1,1), frameon=False)
     if yvar=='targ_pos_theta':
         ax.axhline(y=0, color='w', linestyle=':')
     if yvar in ['ang_vel', 'ang_vel_abs', 'theta_error_dt', 'targ_ang_vel']:
         ax.set_ylim([-30, 30])
+    if yvar == 'theta_error':
+        ax.axhline(y=0, color='w', linestyle=':', lw=0.5)
+
+for ax in axn:
+    putil.remove_spines(ax)
+    sns.despine(bottom=True)
+pl.subplots_adjust(wspace=0.5)
 
 # save
 putil.label_figure(fig, acq)
-figname = 'pursuit_interception_bouts_by_time_t{}-{}.png'.format(t1, t2) #plotdf['sec'].min(), plotdf['sec'].max())
+figname = 'pursuit_interception_bouts_by_time_t{}-{}'.format(t1, t2) #plotdf['sec'].min(), plotdf['sec'].max())
 pl.savefig(os.path.join(figdir, '{}.png'.format(figname)))
 print(os.path.join(figdir, figname))
+#%%
+fig, ax = pl.subplots(figsize=(8,4))
+yvar = 'theta_error'
+ax.plot(plotdf['sec'], plotdf[yvar], color=bg_color, alpha=0.5)
+sns.scatterplot(data=plotdf, x='sec', y=yvar, ax=ax,
+                hue='action', palette=action_palette,
+                edgecolor='none', s=10, alpha=0.5, legend=i==0)
 
+ax.axhline(y=0, color='w', linestyle=':', lw=0.5)
+ax.set_ylim([-1, 1])
 
 # %% ------------------------------------------
 # Separate bouts
@@ -799,6 +897,8 @@ for r, (stim, b_) in enumerate(interceptions.groupby('stim_hz')):
 
         ax.set_aspect(1)
         ax.set_title('Frame: {}'.format(curr_frames[0]), loc='left')
+
+pl.savefig(os.path.join(figdir, 'interception_bouts_traveling-v-ori.png'))
 
 #%%
 

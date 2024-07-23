@@ -25,56 +25,12 @@ plot_style='dark'
 putil.set_sns_style(plot_style, min_fontsize=24)
 bg_color = [0.7]*3 if plot_style=='dark' else 'w'
 
-
-#%%
-#def load_aggregate_data_pkl(savedir, mat_type='df'):
-#    '''
-#    Find all *feat.pkl (or *trk.pkl) files in savedir and load them into a single dataframe.
-#
-#    Arguments:
-#        savedir -- Full path to dir containing processed *feat.pkl files.
-#
-#    Keyword Arguments:
-#        mat_type -- feat or trk (default: {'feat'})
-#
-#    Returns:
-#        feat -- pandas dataframe containing all processed data.
-#    '''
-#    found_fns = glob.glob(os.path.join(savedir, '*{}.pkl'.format(mat_type)))
-#    print("Found {} processed *_{}.pkl files".format(len(found_fns), mat_type))
-#    f_list=[]
-#    for fp in found_fns:
-#        if 'BADTRACKING' in fp:
-#            continue
-#        if 'ele' in fp: # ignore ele for now
-#            continue
-#        #fp = found_fns[0]
-#        #acq = os.path.split(acq_viddir)[0]
-#        print(os.path.split(fp)[-1])
-#        with open(fp, 'rb') as f:
-#            feat_ = pkl.load(f)
-#        acq = os.path.split(fp)[1].split('_{}'.format(mat_type))[0] 
-#        feat_['acquisition'] = acq 
-#
-#        if 'yak' in acq:
-#            feat_['species'] = 'Dyak'
-#        elif 'mel' in acq:
-#            feat_['species'] = 'Dmel'
-#        else:
-#            feat_['species'] = 'Dele'
-#
-#        f_list.append(feat_)
-#
-#    feat = pd.concat(f_list, axis=0).reset_index(drop=True) 
-#
-#    return feat
-
 #%% LOAD ALL THE DATA
 #savedir = '/Volumes/Julie/free-behavior-analysis/FlyTracker/38mm_dyad/processed'
 #figdir = os.path.join(os.path.split(savedir)[0], 'figures', 'relative_metrics')
 importlib.reload(util)
 
-assay = '38mm-dyad'
+assay = '2d-projector' # '38mm-dyad'
 create_new = False
 
 minerva_base = '/Volumes/Julie'
@@ -125,6 +81,7 @@ if create_new:
     # save local, too
     df.to_pickle(out_fpath_local)
 
+df['acquisition'] = ['_'.join(f.split('_')[0:-1]) for f in df['acquisition']]
 # summary of what we've got
 print(df[['species', 'acquisition']].drop_duplicates().groupby('species').count())
 
@@ -142,7 +99,7 @@ figid = srcdir
 #%% load jaaba data
 importlib.reload(util)
 
-fname = 'free_behavior_data_mel_yak_20240403'
+fname = 'free_behavior_data_mel_yak_20240403' if assay=='38mm-dyad' else None
 jaaba = util.load_jaaba(assay, fname=fname)
 
 #%%
@@ -174,8 +131,6 @@ for acq, ja_ in jaaba.groupby('acquisition'):
 ftjaaba = pd.concat(c_list, axis=0).reset_index(drop=True)
 # summarize what we got
 ftjaaba[['species', 'acquisition']].drop_duplicates().groupby('species').count()
-
-
 
 #%%
 if 'courtship' in ftjaaba.columns:
@@ -532,7 +487,7 @@ def plot_2d_hist_by_behavior_subplots(plotdf,
     return fig
 
 
-def plot_2d_hist(plotdf, xvar='targ_rel_pos_x', yvar='targ_rel_pos_y', ax=ax,
+def plot_2d_hist(plotdf, xvar='targ_rel_pos_x', yvar='targ_rel_pos_y', ax=None,
                  color='b', nbins=25, xlim=[-100, 600], ylim=[250, 250], stat='count'):
     if ax is None:
         fig, ax =pl.subplots()
@@ -837,9 +792,18 @@ importlib.reload(util)
 # --------------------------------------------------------
 # split into small bouts
 # --------------------------------------------------------
-bout_dur = 1.0
-min_bout_dur = 0.25
+bout_dur = 0.25 
+min_boutdur = 0.25
 min_dist_to_other = 2
+
+if filtdf['chasing'].max() == 1:
+    jaaba_thresh_dict = {'orienting': 0, 
+                        'chasing': 0,
+                        'singing': 0}
+else:
+    jaaba_thresh_dict = {'orienting': 10,
+                        'chasing': 10,
+                        'singing': 5}
 
 filtdf = ftjaaba[(ftjaaba['id']==0)
                 #& (ftjaaba['targ_pos_theta']>=min_pos_theta) 
@@ -854,7 +818,7 @@ filtdf = ftjaaba[(ftjaaba['id']==0)
 filtdf = util.binarize_behaviors(filtdf, jaaba_thresh_dict=jaaba_thresh_dict)
 
 # subdivide into smaller boutsa
-bout_dur = 0.5
+# bout_dur = 0.5
 filtdf = util.subdivide_into_bouts(filtdf, bout_dur=bout_dur)
 
 #%% Get mean value of small bouts
@@ -868,68 +832,12 @@ stimhz_palette = putil.get_palette_dict(ftjaaba[ftjaaba['stim_hz']>=0], 'stim_hz
 # find the closest matching value to one of the keys in stimhz_palette:
 meanbouts['stim_hz'] = meanbouts['stim_hz'].apply(lambda x: min(stimhz_palette.keys(), key=lambda y:abs(y-x)))
 
-#%% IS THIS FAKE?
-# 
-
-acqs = meanbouts['acquisition'].unique()
-acq = acqs[6] #'20240212-1215_fly3_Dmel_sP1-ChR_3do_sh_8x8'
-frames_ = filtdf[filtdf['acquisition']==acq].copy()
-mean_ = frames_.groupby(['species', 'acquisition', 'boutnum']).mean().reset_index()
-mean_['stim_hz'] = mean_['stim_hz'].apply(lambda x: min(stimhz_palette.keys(), key=lambda y:abs(y-x)))
-mean1 = meanbouts[meanbouts['acquisition']==acq]
-
-fig, axn =pl.subplots(1, 2, figsize=(10,4))
-
-ax=axn[0]
-sns.scatterplot(data=mean_, x='facing_angle', y='ang_vel_abs', ax=ax, hue='stim_hz', palette=stimhz_palette,
-                legend=0)
-ax.set_title('{:.2f}s bouts'.format(bout_dur))
-ax=axn[1]
-sns.scatterplot(data=frames_, x='facing_angle', y='ang_vel_abs', ax=ax, hue='stim_hz', palette=stimhz_palette,
-                legend=0)
-ax.set_title('frames')
-
-pl.subplots_adjust(wspace=0.5)
-
-
-#%%
-xvar = 'facing_angle'
-yvar = 'ang_vel_abs'
-n_stim = filtdf['stim_hz'].nunique() # no zero
-
-do_bouts = False 
-
-plotd_ = mean1.copy() if do_bouts else frames_.copy()
-data_type = 'BOUTS' if do_bouts else 'FRAMES'
-
-if 'vel' in xvar:
-    xlabel = r'$\omega_{\theta}$'
-else:
-    xlabel = r'$\theta_{E}$'
-ylabel = '$\omega_{f}$'
-
-fig, axn = pl.subplots(n_stim, 1, sharex=True, sharey=True, figsize=(4, n_stim*3))
-all_stims = sorted(list(stimhz_palette.keys()))
-start_i = all_stims.index(plotd_['stim_hz'].min())
-
-for i, (stim, sd_) in enumerate(plotd_.groupby('stim_hz')):  
-    ax=axn[i+start_i]
-    ax.set_title(stim, loc='left', fontsize=12)
-    sns.scatterplot(data=sd_, x=xvar, y=yvar, ax=ax, hue='stim_hz', palette=stimhz_palette,
-                legend=0)
-    ax.set_ylabel(ylabel)
-
-ax.set_xlabel(xlabel)
-putil.label_figure(fig, acq)
-
-fig.suptitle('{:.2f}s {}'.format(bout_dur, data_type), fontsize=24)
-
 #%%
 #xvar = 'facing_angle_deg'
 #yvar = 'abs_rel_ang_vel'
 
-yvar = 'dovas'
-xvar = 'abs_rel_vel' #'abs_rel_ang_vel'
+yvar = 'abs_rel_ang_vel'
+xvar = 'dovas'
 xmin, xmax = meanbouts[xvar].min(), meanbouts[xvar].max()
 ymin, ymax = meanbouts[yvar].min(), meanbouts[yvar].max()
 
@@ -991,12 +899,27 @@ print(os.path.join(figdir, figname+'.png'))
 # -----------------------------------------------
 putil.set_sns_style(plot_style, min_fontsize=24)
 
-xvar = 'rel_vel_abs' # 'abs_rel_vel'
-yvar = 'dovas_deg'
+#xvar = 'rel_vel' # 'abs_rel_vel'
+#yvar = 'dovas_deg'
+xvar = 'dovas'
+yvar = 'abs_rel_ang_vel'
 
 joint_type='kde'
+
+xlabel = xvar
+ylabel = yvar
+if xvar == 'rel_vel':
+    xlim = [-50, 50]
+elif xvar == 'dovas':
+    xlim = [-0.1, 2]
+    xlabel = 'relative size (deg.vis.ang.)'
+if yvar == 'dovas_deg':
+    ylim = [-50, 100]
+elif yvar == 'abs_rel_ang_vel':
+    ylim = [-5, 300]
+
 if joint_type=='kde':
-    joint_kws={'bw_adjust': 0.7, 'levels': 20}
+    joint_kws={'bw_adjust': 1, 'levels': 20}
 else:
     joint_kws={}
 plot_str = '-'.join(['-'.join([str(i), str(v)]) for i, v in joint_kws.items()])
@@ -1006,12 +929,15 @@ min_frac_bout = 0.5
 for behav in ['chasing',  'singing']:
     g = sns.jointplot(data=meanbouts[meanbouts['{}_binary'.format(behav)]>min_frac_bout], ax=ax,
                 x = xvar, y = yvar, hue='species', palette=species_palette,
-            kind=joint_type, joint_kws=joint_kws, legend=0) 
+            kind=joint_type, joint_kws=joint_kws, legend=1) 
+    sns.move_legend(g.ax_joint, bbox_to_anchor=(1,1), loc='upper left', frameon=False)
     g.fig.suptitle('{}: min frac of bout={:.2f}'.format(behav, min_frac_bout))
     pl.subplots_adjust(wspace=0.5, hspace=0.5, top=0.9)
-    pl.xlim([-10, 50])
-    pl.ylim([-10, 100])
+    pl.xlim(xlim)
+    pl.ylim(ylim)
     putil.label_figure(g.fig, figid)
+    pl.xlabel(xlabel)
+    pl.ylabel(ylabel)
 
     figname = 'joint-{}_{}_{}-v-{}_min-frac-bout-{}_mel-v-yak_{}'.format(joint_type, behav, xvar, yvar, min_frac_bout, plot_str)
     pl.savefig(os.path.join(figdir, figname+'.png'), dpi=300)
@@ -1026,8 +952,7 @@ min_frac_bout=0.5
 dist_bins =  np.linspace(meanbouts['dist_to_other'].min(), meanbouts['dist_to_other'].max(), nbins, endpoint=False)
 meanbouts['dist_bin'] = pd.cut(meanbouts['dist_to_other'], bins=dist_bins, labels=dist_bins[0:-1])
 
-
-#%%
+#%
 # Plot BAR 
 fig, ax = pl.subplots() #1, 2, figsize=(10,4))
 behav = 'singing'
@@ -1048,18 +973,20 @@ fig, ax = pl.subplots()
 sns.histplot(data=meanbouts[meanbouts['{}_binary'.format(behav)]>min_frac_bout], x='dist_to_other', ax=ax,
             hue='species', palette=species_palette, fill=False, element='poly',
             common_norm=False, stat='probability')
-
-for ax in axn:
-    ax.set_box_aspect(1)
-
+sns.move_legend(ax, bbox_to_anchor=(1,1), loc='upper left', frameon=False)
+ax.set_box_aspect(1)
 fig.suptitle('Prob of singing, min frac of bout > {:.2f}'.format(min_frac_bout))
 
 putil.label_figure(fig, figid)
 figname = 'prob-singing_v-dist-to-other_min-frac-bout-{}_mel-v-yak'.format(min_frac_bout)
 pl.savefig(os.path.join(figdir, figname+'.png'), dpi=300)
 
-#%% ANG_VEL vs. THETA_ERROR
-# ------------------------------------------------  
+#%% ------------------------------------------------
+# ANG_VEL vs. THETA_ERROR
+# -------------------------------------------------
+cmap='viridis'
+stimhz_palette = putil.get_palette_dict(ftjaaba[ftjaaba['stim_hz']>=0], 'stim_hz', cmap=cmap)
+
 # Compare ang vel vs. theta-error? Plot as REGR.
 
 behav = 'chasing'
@@ -1087,7 +1014,8 @@ chase_ = meanbouts[meanbouts['{}_binary'.format(behav)]>min_frac_bout].copy()
 
 cmap='viridis'
 # stimhz_palette = putil.get_palette_dict(chase_[chase_['stim_hz']>0], 'stim_hz', cmap=cmap)
-stimhz_palette = putil.get_palette_dict(ftjaaba[ftjaaba['stim_hz']>0], 'stim_hz', cmap=cmap)
+#stimhz_palette = putil.get_palette_dict(ftjaaba[ftjaaba['stim_hz']>0], 'stim_hz', cmap=cmap)
+stimhz_palette = putil.get_palette_dict(ftjaaba[ftjaaba['stim_hz']>=0], 'stim_hz', cmap=cmap)
 
 vmin = min(list(stimhz_palette.keys()))
 vmax = max(list(stimhz_palette.keys()))
@@ -1098,6 +1026,8 @@ for ai, (sp, df_) in enumerate(chase_[chase_['stim_hz']>0].groupby('species')):
     sns.scatterplot(data=df_, x='facing_angle_deg', y='ang_vel_abs', ax=ax,
                  hue='stim_hz', palette=stimhz_palette, legend=0, edgecolor='none', alpha=0.7)
     ax.set_title(sp)
+    sns.regplot(data=df_, x='facing_angle_deg', y='ang_vel_abs', ax=ax,
+                color='w', scatter=False)
     ax.set_box_aspect(1)
     
     # set xlabel to be theta subscript E
@@ -1113,7 +1043,7 @@ figname = 'sct_angvel_v_thetaerr_stimhz_mel-v-yak_min-frac-bout-{}'.format(min_f
 pl.savefig(os.path.join(figdir, '{}.png'.format(figname)))
 print(figdir, figname)
 
-#%% try plotting as regplots
+#%% Fit REGR to each stim_hz level
 
 behav = 'chasing'
 min_frac_bout = 0.5
@@ -1132,9 +1062,77 @@ for ai, (sp, df_) in enumerate(chase_[chase_['stim_hz']>0].groupby('species')):
 
     pl.xlim([0, 80])
     pl.ylim([0, 10])
-    
-putil.colorbar_from_mappable(ax, cmap=cmap, norm = mpl.colors.Normalize(vmin=vmin, vmax=vmax),
+
+    putil.colorbar_from_mappable(g.fig.axes[0], cmap=cmap, norm = mpl.colors.Normalize(vmin=vmin, vmax=vmax),
                              axes=[0.92, 0.3, 0.01, 0.4])
+    pl.subplots_adjust(top=0.9)
+
+    putil.label_figure(g.fig, figid)
+    figname = 'sct-regr_angvel_v_thetaerr_stimhz_{}_min-frac-bout-{}'.format(sp, min_frac_bout)
+    pl.savefig(os.path.join(figdir, '{}.png'.format(figname)))
+    print(figdir, figname)
+
+
+#%% IS THIS FAKE? look at 1 animal
+# 
+
+acqs = meanbouts['acquisition'].unique()
+acq = acqs[20] #'20240212-1215_fly3_Dmel_sP1-ChR_3do_sh_8x8'a
+behav = 'chasing'
+frames_ = filtdf[ (filtdf['acquisition']==acq) & (filtdf['{}_binary'.format(behav)]>0)].copy()
+
+mean_ = frames_.groupby(['species', 'acquisition', 'boutnum']).mean().reset_index()
+mean_['stim_hz'] = mean_['stim_hz'].apply(lambda x: min(stimhz_palette.keys(), key=lambda y:abs(y-x)))
+mean1 = meanbouts[ (meanbouts['acquisition']==acq) & (meanbouts['{}_binary'.format(behav)]>0)].copy()
+
+fig, axn =pl.subplots(1, 2, figsize=(10,4))
+
+ax=axn[0]
+sns.scatterplot(data=mean_, x='facing_angle', y='ang_vel_abs', ax=ax, hue='stim_hz', palette=stimhz_palette,
+                legend=0)
+ax.set_title('{:.2f}s bouts'.format(bout_dur))
+ax=axn[1]
+sns.scatterplot(data=frames_, x='facing_angle', y='ang_vel_abs', ax=ax, hue='stim_hz', palette=stimhz_palette,
+                legend=0)
+ax.set_title('frames')
+
+pl.subplots_adjust(top=0.8)
+fig.suptitle(acq, fontsize=18)
+
+pl.subplots_adjust(wspace=0.5)
+
+#%%
+xvar = 'facing_angle'
+yvar = 'ang_vel_abs'
+n_stim = filtdf['stim_hz'].nunique() # no zero
+
+do_bouts = False
+
+plotd_ = mean1.copy() if do_bouts else frames_.copy()
+data_type = 'BOUTS' if do_bouts else 'FRAMES'
+
+if 'vel' in xvar:
+    xlabel = r'$\omega_{\theta}$'
+else:
+    xlabel = r'$\theta_{E}$'
+ylabel = '$\omega_{f}$'
+
+fig, axn = pl.subplots(n_stim, 1, sharex=True, sharey=True, figsize=(4, n_stim*3))
+all_stims = sorted(list(stimhz_palette.keys()))
+start_i = all_stims.index(plotd_['stim_hz'].min())
+
+for i, (stim, sd_) in enumerate(plotd_.groupby('stim_hz')):  
+    ax=axn[i+start_i]
+    ax.set_title(stim, loc='left', fontsize=12)
+    sns.scatterplot(data=sd_, x=xvar, y=yvar, ax=ax, hue='stim_hz', palette=stimhz_palette,
+                legend=0)
+    ax.set_ylabel(ylabel)
+
+ax.set_xlabel(xlabel)
+putil.label_figure(fig, acq)
+
+fig.suptitle('{:.2f}s {}'.format(bout_dur, data_type), fontsize=24)
+
 
 #%% delta theta-error?
 
