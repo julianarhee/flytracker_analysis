@@ -563,6 +563,7 @@ def ft_actions_to_bout_df(action_fpath):
             b_list.append(b_df)
 
     boutdf = pd.concat(b_list)
+    boutdf['boutnum'] = boutdf.index.tolist()
 
     return boutdf
 
