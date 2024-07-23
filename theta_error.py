@@ -254,7 +254,7 @@ def calculate_theta_error(f1, f2, xvar='pos_x', yvar='pos_y'):
     th_err = util.circular_distance(abs_ang, f1['ori']) # already bw -np.pi, pi
     #th_err = [util.set_angle_range_to_neg_pos_pi(v) for v in th_err]
     #th_err[0] = th_err[1]
-    f1['abs_ang_between'] = abs_ang
+    f1['abs_ang_between'] = abs_ang # this is the line-of-sigh, line btween pursuer and target
     f1['theta_error'] = th_err
     f1['theta_error_dt'] = pd.Series(np.unwrap(f1['theta_error'].interpolate().ffill().bfill())).diff() / f1['sec_diff'].mean()
     f1['theta_error_deg'] = np.rad2deg(f1['theta_error'])
