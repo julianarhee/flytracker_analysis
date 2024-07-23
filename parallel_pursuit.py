@@ -68,9 +68,9 @@ def calculate_theta_error(f1, f2, xvar='pos_x', yvar='pos_y', heading_var='ori')
 #
 #    return passdf.groupby('group').apply(lambda x: (x.index[0], x.index[-1]))
 
-def get_vector_between_flies(f1, f2, curr_frames):
-    f1_pos = f1[f1['frame'].isin(curr_frames)][['pos_x', 'pos_y']].values
-    f2_pos = f2[f2['frame'].isin(curr_frames)][['pos_x', 'pos_y']].values
+def get_vector_between_flies(f1, f2, curr_frames, xvar='pos_x', yvar='pos_y'):
+    f1_pos = f1[f1['frame'].isin(curr_frames)][[xvar, yvar]].values
+    f2_pos = f2[f2['frame'].isin(curr_frames)][[xvar, yvar]].values
     vecs = [(i[0]-j[0], i[1]-j[1]) for i, j in zip(f2_pos, f1_pos)]
     return vecs
 
