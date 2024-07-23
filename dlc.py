@@ -587,7 +587,7 @@ import glob
 def get_dlc_analysis_dir(projectname = 'projector-1dot-jyr-2024-02-18', 
                              rootdir='/Volumes/Julie'):
     # analyzed files directory
-    minerva_base = os.path.join(rootdir, '2d-projector-analysis')
+    minerva_base = os.path.join(rootdir, '2d-projector-analysis', 'circle_diffspeeds')
     analyzed_dir = os.path.join(minerva_base, 'DeepLabCut', projectname) #'analyzed')
     #analyzed_files = glob.glob(os.path.join(analyzed_dir, '*_el.h5'))
     #print("Found {} analyzed files".format(len(analyzed_files)))
