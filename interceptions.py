@@ -1087,6 +1087,11 @@ ax.set_aspect(1)
 # negative theta_error_dt means target is moving to fly's right (negative, CW)
 # positive theta_error_dt means target is moving to fly's left (positive, CCW)
 
+# Land & Collett, 1978
+# The course angle Beta (Figure 6) is the angle between the course and
+# the direction of first sighting. 
+# This is distinct from the "angle through which the fly has to turn" (delta-phi)
+# 
 pre_acc = 0.03 #0.03
 post_acc = 0.9
 win = 5
