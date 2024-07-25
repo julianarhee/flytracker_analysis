@@ -21,9 +21,9 @@ import utils as util
 import plotting as putil
 
 #%%
-plot_style='dark'
+plot_style='white'
 putil.set_sns_style(plot_style, min_fontsize=24)
-bg_color = [0.7]*3 if plot_style=='dark' else 'w'
+bg_color = [0.7]*3 if plot_style=='dark' else 'k'
 
 #%% LOAD ALL THE DATA
 #savedir = '/Volumes/Julie/free-behavior-analysis/FlyTracker/38mm_dyad/processed'
@@ -33,14 +33,14 @@ importlib.reload(util)
 assay = '2d-projector' # '38mm-dyad'
 create_new = False
 
-minerva_base = '/Volumes/Julie'
+minerva_base = '/Volumes/Juliana'
 
 #%%
 if assay == '2d-projector':
     # Set sourcedirs
-    srcdir = os.path.join(minerva_base, '2d-projector-analysis/FlyTracker/processed_mats') #relative_metrics'
+    srcdir = os.path.join(minerva_base, '2d-projector-analysis/circle_diffspeeds/FlyTracker/processed_mats') #relative_metrics'
     # LOCAL savedir 
-    localdir = '/Users/julianarhee/Documents/rutalab/projects/courtship/2d-projector/FlyTracker'
+    localdir = '/Users/julianarhee/Documents/rutalab/projects/courtship/data/2d-projector/circle_diffspeeds/FlyTracker'
 elif assay == '38mm-dyad':
     # src dir of processed .dfs from feat/trk.mat files (from relative_metrics.py)
     srcdir = os.path.join(minerva_base, 'free-behavior-analysis/FlyTracker/38mm_dyad/processed')
@@ -48,13 +48,16 @@ elif assay == '38mm-dyad':
     localdir = '/Users/julianarhee/Documents/rutalab/projects/courtship/38mm-dyad/FlyTracker'
 
 # set figdir
-figdir = os.path.join(os.path.split(srcdir)[0], 'relative_metrics', 'figures')
+if plot_style == 'white':
+    figdir = os.path.join(os.path.split(srcdir)[0], 'relative_metrics', 'figures', 'white')
+else: 
+    figdir = os.path.join(os.path.split(srcdir)[0], 'relative_metrics', 'figures')
 if not os.path.exists(figdir):
     os.makedirs(figdir)
 print(figdir)
 
 # get local file for aggregated data
-out_fpath_local = os.path.join(localdir, 'processed.pkl')
+out_fpath_local = os.path.join(localdir, 'relative_metrics.pkl') #'processed.pkl')
 print(out_fpath_local)
 
 # try reading if we don't want to create a new one
@@ -81,7 +84,7 @@ if create_new:
     # save local, too
     df.to_pickle(out_fpath_local)
 
-df['acquisition'] = ['_'.join(f.split('_')[0:-1]) for f in df['acquisition']]
+# df['acquisition'] = ['_'.join(f.split('_')[0:-1]) for f in df['acquisition']]
 # summary of what we've got
 print(df[['species', 'acquisition']].drop_duplicates().groupby('species').count())
 
@@ -269,7 +272,7 @@ for ax in axn:
 
 fig.text(0.05, 0.9, '{} (min bout dur: {:.2f}s)'.format(xvar, min_boutdur), fontsize=12)
 
-pl.subplots_adjust(wspace=0.5)
+pl.subplots_adjust(wspace=0.75)
 putil.label_figure(fig, figid) 
 
 figname = 'hist_{}_nocourt-v-court-v-{}bouts_minboutdur-{}_mel-v-yak'.format(xvar, varname, min_boutdur)
@@ -819,9 +822,14 @@ filtdf = util.binarize_behaviors(filtdf, jaaba_thresh_dict=jaaba_thresh_dict)
 
 # subdivide into smaller boutsa
 # bout_dur = 0.5
-filtdf = util.subdivide_into_bouts(filtdf, bout_dur=bout_dur)
+filtdf = util.subdivide_into_subbouts(filtdf, bout_dur=bout_dur)
 
 #%% Get mean value of small bouts
+
+if 'filename' in filtdf.columns:
+    filtdf.drop('filename', axis=1, inplace=True)
+if 'strain' in filtdf.columns:
+    filtdf.drop('strain', axis=1, inplace=True)
 
 meanbouts = filtdf.groupby(['species', 'acquisition', 'boutnum']).mean().reset_index()
 meanbouts.head()
@@ -979,7 +987,7 @@ fig.suptitle('Prob of singing, min frac of bout > {:.2f}'.format(min_frac_bout))
 
 putil.label_figure(fig, figid)
 figname = 'prob-singing_v-dist-to-other_min-frac-bout-{}_mel-v-yak'.format(min_frac_bout)
-pl.savefig(os.path.join(figdir, figname+'.png'), dpi=300)
+#pl.savefig(os.path.join(figdir, figname+'.png'), dpi=300)
 
 #%% ------------------------------------------------
 # ANG_VEL vs. THETA_ERROR
@@ -1005,9 +1013,19 @@ fig.suptitle('{} bouts, where min fract of bout >= {:.2f}'.format(behav, min_fra
 
 putil.label_figure(fig, figid)
 
+
+#%%
+
+import regplot as rpl
+
 #%% 
 # Scatterplot:  ANG_VEL vs. THETA_ERROR -- color coded by STIM_HZ
-# 
+xvar = 'facing_angle_deg'
+yvar = 'ang_vel_abs_deg'
+
+meanbouts['ang_vel_deg'] = np.rad2deg(meanbouts['ang_vel'])
+meanbouts['ang_vel_abs_deg'] = np.rad2deg(meanbouts['ang_vel_abs'])
+
 #importlib.reload(putil)
 min_frac_bout = 0.5
 chase_ = meanbouts[meanbouts['{}_binary'.format(behav)]>min_frac_bout].copy()
@@ -1023,16 +1041,30 @@ vmax = max(list(stimhz_palette.keys()))
 fig, axn = pl.subplots(1, 2, sharex=True, sharey=True)
 for ai, (sp, df_) in enumerate(chase_[chase_['stim_hz']>0].groupby('species')):
     ax = axn[ai]
-    sns.scatterplot(data=df_, x='facing_angle_deg', y='ang_vel_abs', ax=ax,
+    sns.scatterplot(data=df_, x=xvar, y=yvar, ax=ax,
                  hue='stim_hz', palette=stimhz_palette, legend=0, edgecolor='none', alpha=0.7)
     ax.set_title(sp)
-    sns.regplot(data=df_, x='facing_angle_deg', y='ang_vel_abs', ax=ax,
-                color='w', scatter=False)
+    sns.regplot(data=df_, x=xvar, y=yvar, ax=ax,
+                color=bg_color, scatter=False)
     ax.set_box_aspect(1)
     
     # set xlabel to be theta subscript E
     ax.set_xlabel(r'$\theta_{E}$')
     ax.set_ylabel('$\omega_{f}$ (deg/s)')
+
+    # annotate regr
+    putil.annotate_regr(df_, ax, x=xvar, y=yvar, 
+                        xloc=0.05, yloc=0.9, fontsize=8)
+    # Do fit
+    res = rpl.regplot(data=df_, ax=ax, x=xvar, y=yvar,
+                color=bg_color, scatter=False) #, ax=ax)
+    # res.params: [intercept, slope]
+    ax.set_box_aspect(1)
+    fit_str = 'OLS: y = {:.2f}x + {:.2f}'.format(res.params[1], 
+                                                 res.params[0])
+    ax.text(0.05, 0.95, fit_str, fontsize=8, 
+            transform=ax.transAxes)
+
 putil.colorbar_from_mappable(ax, cmap=cmap, norm = mpl.colors.Normalize(vmin=vmin, vmax=vmax),
                              axes=[0.92, 0.3, 0.01, 0.4], hue_title='stim. freq. (Hz)', fontsize=18)
 
@@ -1040,7 +1072,7 @@ fig.suptitle('{} bouts, where min fract of bout >= {:.2f}'.format(behav, min_fra
 
 putil.label_figure(fig, figid)
 figname = 'sct_angvel_v_thetaerr_stimhz_mel-v-yak_min-frac-bout-{}'.format(min_frac_bout)
-pl.savefig(os.path.join(figdir, '{}.png'.format(figname)))
+#pl.savefig(os.path.join(figdir, '{}.png'.format(figname)))
 print(figdir, figname)
 
 #%% Fit REGR to each stim_hz level
