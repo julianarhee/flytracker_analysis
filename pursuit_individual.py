@@ -18,23 +18,34 @@ import utils as util
 import plotting as putil
 import theta_error as the
 
+import statsmodels.api as sm
+import regplot as rpl
+import scipy.stats as spstats
+
+
 #%%
 # Set plotting
-plot_style='dark'
+plot_style='white'
 putil.set_sns_style(plot_style, min_fontsize=24)
-bg_color = [0.7]*3 if plot_style=='dark' else 'w'
+bg_color = [0.7]*3 if plot_style=='dark' else 'k'
 
 
 #%%
 assay = '2d-projector'
+experiment = 'circle_diffspeeds'
 
 # local savedir for giant pkl
-localdir = '/Users/julianarhee/Documents/rutalab/projects/courtship/data/{}/FlyTracker'.format(assay)
+localdir = '/Users/julianarhee/Documents/rutalab/projects/courtship/data/{}/{}/FlyTracker'.format(assay, experiment)
 
-minerva_base = '/Volumes/Julie'
-experiment = 'circle_diffspeeds2'
+minerva_base = '/Volumes/Juliana'
+
 # set figdir
-figdir = os.path.join(minerva_base, '2d-projector-analysis', experiment, 'FlyTracker', 'theta_error')
+if plot_style == 'white':
+    figdir = os.path.join(minerva_base, '2d-projector-analysis', \
+                experiment, 'FlyTracker', 'theta_error', 'white')
+else:
+    figdir = os.path.join(minerva_base, '2d-projector-analysis', \
+                experiment, 'FlyTracker', 'theta_error')
 if not os.path.exists(figdir):
     os.makedirs(figdir)
 print("Saving figs to: ", figdir)
@@ -76,7 +87,7 @@ if __name__ == '__main__':
     # =======================================================
     #%
     # acq = '20240216-1434_fly3_Dmel_sP1-ChR_2do_sh_4x4'
-    # acq = '20240222-1611_fly7_Dmel_sP1-ChR_2do_sh_8x8'
+    acq = '20240222-1611_fly7_Dmel_sP1-ChR_2do_sh_8x8'
     # acq = '20240216-1434_fly3_Dmel_sP1-ChR_2do_sh_4x4'
     # acq = '20240212-1215_fly3_Dmel_sP1-ChR_3do_sh_8x8'
 
@@ -97,7 +108,8 @@ if __name__ == '__main__':
     #'20240227-1811_fly2_Dyak_sP1-ChR_3do_gh_6x6',
     #'20240301-1504_fly1_Dyak_sP1-ChR_3do_gh_6x6']
 
-    acq = '20240301-1504_fly1_Dyak_sP1-ChR_3do_gh_6x6'
+    # acq = '20240301-1504_fly1_Dyak_sP1-ChR_3do_gh_6x6'
+
     df_ = ftjaaba[ftjaaba['acquisition']==acq].copy()
 
     curr_figdir = os.path.join(figdir, acq)
@@ -121,7 +133,43 @@ if __name__ == '__main__':
         pl.savefig(os.path.join(curr_figdir, '{}.png'.format(figname)))
 
     #%% THETA_ERROR vs. ANG_VEL
-    
+
+    # subdivide into smaller boutsa
+    bout_dur = 0.20
+    ftjaaba = util.subdivide_into_subbouts(ftjaaba, bout_dur=bout_dur)
+
+    min_boutdur = 0.05
+    min_dist_to_other = 2
+
+    filtdf = ftjaaba[(ftjaaba['id']==0)
+                    #& (ftjaaba['targ_pos_theta']>=min_pos_theta) 
+                    #& (ftjaaba['targ_pos_theta']<=max_pos_theta)
+                    & (ftjaaba['dist_to_other']>=min_dist_to_other)
+                    & (ftjaaba['boutdur']>=min_boutdur)
+                    & (ftjaaba['good_frames']==1)
+                    & (ftjaaba['led_level']>0)
+                    ].copy() #.reset_index(drop=True)
+
+    # drop rows with only 1 instance of a given subboutnum
+    min_nframes = min_boutdur * 60
+    filtdf = filtdf[filtdf.groupby(['species', 'acquisition', 'subboutnum'])['subboutnum'].transform('count')>min_nframes]
+
+    #%%
+    # Get mean value of small bouts
+    if 'strain' in filtdf.columns:
+        filtdf = filtdf.drop(columns=['strain'])
+    #%
+    meanbouts = filtdf.groupby(['species', 'acquisition', 'subboutnum']).mean().reset_index()
+    meanbouts.head()
+
+    cmap='viridis'
+    stimhz_palette = putil.get_palette_dict(ftjaaba[ftjaaba['stim_hz']>=0], 'stim_hz', cmap=cmap)
+
+    # find the closest matching value to one of the keys in stimhz_palette:
+    meanbouts['stim_hz'] = meanbouts['stim_hz'].apply(lambda x: min(stimhz_palette.keys(), key=lambda y:abs(y-x)))   
+
+
+    #%%
     # compare SUBBOUTS vs. FRAMES
     xvar = 'theta_error'
     yvar = 'ang_vel_fly_shifted'
@@ -151,7 +199,7 @@ if __name__ == '__main__':
 
     #%% same, but split by stim_Hz
 
-    n_stim = filtdf['stim_hz'].nunique() # no zero
+    n_stim = frames_['stim_hz'].nunique() # no zero
 
     min_nframes = 10
 
@@ -206,6 +254,7 @@ if __name__ == '__main__':
 
     #%%
     import parallel_pursuit as pp
+    import matplotlib as mpl
 
     do_bouts=False
     fig, axn = pl.subplots(1, 2, figsize=(10,5), sharex=True, sharey=False,
@@ -260,17 +309,20 @@ if __name__ == '__main__':
     # Does angular vel. INCREASE with stim_hz? with theta-error?
     # ----------------------------
     # Look at moments of high ang vel.
+
+    import theta_error as the
+
     fps = 60.
     min_vel = 15
     min_dist_to_other = 25
     min_facing_angle = np.deg2rad(90)
     min_ang_acc = 120
 
-    turn_bout_starts, high_ang_start_frames = select_turn_bouts_for_plotting(flydf,
+    turn_bout_starts, high_ang_start_frames = the.select_turn_bouts_for_plotting(flydf,
                                             min_ang_acc=min_ang_acc, min_dist_to_other=min_dist_to_other,
                                             min_facing_angle=min_facing_angle, min_vel=min_vel)
     #%
-    turn_counts = count_n_turns_in_window(flydf, turn_bout_starts, high_ang_start_frames, fps=fps)
+    turn_counts = the.count_n_turns_in_window(flydf, turn_bout_starts, high_ang_start_frames, fps=fps)
     print(turn_counts.sort_values(by='n_turns', ascending=False))
     #%
     # PLOT TIME COURSES
@@ -285,13 +337,13 @@ if __name__ == '__main__':
     accel_color = [0.6]*3
 
     xvar = 'sec'
-    varset = 'varset2_smoothed'
+    varset = 'varset1' #_smoothed'
     yvar1 = 'theta_error' if 'varset2' in varset else 'facing_angle'
     yvar2 = 'ang_vel_fly' if 'varset2' in varset else 'ang_vel'
     # varset1 = facing_angle, ang_vel
     # varset2 = theta_error, ang_vel_fly
     # varset2_smoothed = theta_error_smoothed, ang_vel_fly_smoothed
-    fig = plot_timecourses_for_turn_bouts(plotdf, high_ang_start_frames, xvar=xvar, varset=varset, 
+    fig = the.plot_timecourses_for_turn_bouts(plotdf, high_ang_start_frames, xvar=xvar, varset=varset, 
                                           targ_color=col1, fly_color=col2)
     fig.axes[0].set_title('{}, frames: {}-{}'.format(acq, start_ix, stop_ix), loc='left', 
                     fontsize=8)
@@ -300,25 +352,86 @@ if __name__ == '__main__':
     figname = 'time-courses_{}_{}_frames-{}-{}'.format(yvar1, yvar2, start_ix, stop_ix)
     pl.savefig(os.path.join(curr_figdir, '{}.png'.format(figname)))
 
+
+#%% Only plot theta error and ang vel
+
+#   #kPlot top plot only
+
+    plotdf = flydf.loc[start_ix:stop_ix]
+
+    if 'varset2' in varset:
+        smooth_sfx = '_smoothed' if 'smoothed' in varset else ''
+        var1 = 'theta_error{}'.format(smooth_sfx) #'facing_angle'
+        vel_var1 = 'theta_error_dt{}'.format(smooth_sfx) #'facing_angle_vel'
+        var2 = 'ang_vel_fly{}'.format(smooth_sfx) #'ang_vel'
+        acc_var2 = 'ang_acc_fly{}'.format(smooth_sfx) #'ang_acc'
+        center_yaxis = True
+    else:
+        var1 = 'facing_angle'
+        vel_var1 = 'facing_angle_vel'
+        var2 = 'ang_vel'
+        acc_var2 = 'ang_acc'
+        center_yaxis=False
+
+    targ_color='r'
+    fly_color='cornflowerblue'
+    accel_color=bg_color
+
+    fig, ax = pl.subplots(1,1,figsize=(6, 1.5), sharex=True)
+
+    # Plot theta_error and fly's angular velocity
+    ax.plot(plotdf[xvar], plotdf[var1], targ_color)
+    # color y-axis spine and ticks red
+    ax.set_ylabel(r'$\theta_{E}$' + '\n{}'.format(var1)) #, color=targ_color) #r'$\theta_{E}$'
+    putil.change_spine_color(ax, targ_color, 'left')
+    ax.axhline(y=0, color=targ_color, linestyle='--', lw=0.5)
+
+    ax.set_xlabel('time (sec)')
+
+    ax2 = ax.twinx()
+    ax2.plot(plotdf[xvar], plotdf[var2], fly_color)
+    # Color y-axis spine and ticks blue
+    ax2.set_ylabel(r'$\omega_{f}$' + '\n{}'.format(var2)) #, color=fly_color)
+    putil.change_spine_color(ax2, fly_color, 'right')
+    # Center around 0
+    if center_yaxis:
+        curr_ylim = np.round(plotdf[var2].abs().max(), 0)
+        ax2.set_ylim(-curr_ylim, curr_ylim)
+
+    pl.subplots_adjust(bottom=0.2, top=0.8)
+
+    putil.label_figure(fig, '{}\n{}'.format(figid, acq))
+
+    ax.set_title('{}, frames: {}-{}'.format(acq, start_ix, stop_ix), loc='left', 
+                    fontsize=8)
+
+    figname = 'time-courses_single_{}_{}_frames-{}-{}'.format(yvar1, yvar2, start_ix, stop_ix)
+    pl.savefig(os.path.join(curr_figdir, '{}.png'.format(figname)))
+    pl.savefig(os.path.join(curr_figdir, '{}.svg'.format(figname)))
+
+
+
+
+
     #%% PSTH of turn bouts:  FACING_ANGLE and ANG_VEL
     #del mean_v1, mean_v2
     fps = 60.
     nframes_win = 0.1*fps
 
-    yvar1 = 'theta_error' #'facing_angle' #'facing_angle'
-    yvar2 = 'ang_vel_fly' #'ang_vel' #'ang_vel'
+    yvar1 = 'facing_angle' #'theta_error' #'facing_angle' #'facing_angle'
+    yvar2 = 'ang_vel' #'ang_vel_fly' #'ang_vel' #'ang_vel'
 
     #plotdf = flydf.copy()
     curr_high_ang_start_frames = [f for f in high_ang_start_frames if f in plotdf['frame']]
     print(len(curr_high_ang_start_frames))
 
-    turns_, t_lags = get_turn_psth_values(plotdf, curr_high_ang_start_frames, interval=1,
+    turns_, t_lags = the.get_turn_psth_values(plotdf, curr_high_ang_start_frames, interval=1,
                                                   yvar1=yvar1, yvar2=yvar2, nframes_win=nframes_win, fps=fps)
     # Get mean 
     mean_turns_ = turns_.groupby(['rel_sec']).mean().reset_index() #rop=True)
 
     # Plot PSTH all turns
-    fig = plot_psth_all_turns(turns_, yvar1=yvar1, yvar2=yvar2, col1=col1, col2=col2, lw_all=1, lw_mean=2)
+    fig = the.plot_psth_all_turns(turns_, yvar1=yvar1, yvar2=yvar2, col1=col1, col2=col2, lw_all=1, lw_mean=2)
 
     fig.axes[0].set_title('{}, frames: {}-{}'.format(acq, start_ix, stop_ix), loc='left', 
                     fontsize=8)
@@ -329,9 +442,9 @@ if __name__ == '__main__':
     pl.savefig(os.path.join(curr_figdir, '{}.png'.format(figname)))
 
     #%%  Cross Correlate vars
-    correlation, lags, lag_frames, t_lag = cross_correlation_lag(mean_turns_[yvar2], mean_turns_[yvar1], fps=60)
+    correlation, lags, lag_frames, t_lag = the.cross_correlation_lag(mean_turns_[yvar2], mean_turns_[yvar1], fps=60)
 
-    fig = plot_mean_cross_corr_results(mean_turns_, correlation, lags, t_lags, 
+    fig = the.plot_mean_cross_corr_results(mean_turns_, correlation, lags, t_lags, t_lag=t_lag,
                                   yvar1=yvar1, yvar2=yvar2, col1=col1, col2=col2, bg_color=bg_color)
     #pl.subplots_adjust(wspace=1)
 
@@ -357,16 +470,16 @@ if __name__ == '__main__':
     min_facing_angle = np.deg2rad(90)
     nframes_win = 0.1*fps
 
-    turnbouts = get_turn_bouts(flydf, min_ang_acc=min_ang_acc, #min_ang_vel=min_ang_vel, 
+    turnbouts = the.get_turn_bouts(flydf, min_ang_acc=min_ang_acc, #min_ang_vel=min_ang_vel, 
                             min_vel=min_vel, min_dist_to_other=min_dist_to_other,
                             min_facing_angle=min_facing_angle, 
                             nframes_win=nframes_win)
     turnbouts = turnbouts.reset_index(drop=True)
 
     #%% 
-    v1 = 'theta_error' #'theta_error'
-    v2 = 'ang_vel_fly' #'ang_vel_fly'
-    xcorr, lags, t_lags = cross_corr_each_bout(turnbouts, v1=v1, v2=v2)
+    v1 = 'facing_angle' #'theta_error' #'theta_error'
+    v2 = 'ang_vel' #'ang_vel_fly' #'ang_vel_fly'
+    xcorr, lags, t_lags = the.cross_corr_each_bout(turnbouts, v1=v1, v2=v2)
 
     #%% Add delta t to turnbouts DF
     for ((turn_ix, t), l) in zip(turnbouts.groupby('turn_bout_num'), t_lags):
@@ -381,7 +494,7 @@ if __name__ == '__main__':
     # Trio: Average aligned turn bouts, cross-correlation, distribution of time lags
     v1_label = r'$\theta_{E}$' + '\n{}'.format(v1)
     v2_label = r'$\omega_{f}$' + '\n{}'.format(v2)
-    fig = plot_cross_corr_results(turnbouts, xcorr, lags, t_lags, v1=v1, v2=v2, 
+    fig = the.plot_cross_corr_results(turnbouts, xcorr, lags, t_lags, v1=v1, v2=v2, 
                                   col1=col1, col2=col2, v1_label=v1_label, v2_label=v2_label)
 
     fig.text(0.1, 0.95,  '{}, all turns ang_acc > {:.2f}'.format(acq, min_ang_acc), 
@@ -390,10 +503,12 @@ if __name__ == '__main__':
     figname = 'mean-turn-bouts-xcorr-tlags_acc-thr-{}_{}'.format(min_ang_vel, acq)
     putil.label_figure(fig, acq)
     pl.savefig(os.path.join(curr_figdir, '{}.png'.format(figname)))
+    pl.savefig(os.path.join(curr_figdir, '{}.png'.format(figname)))
+
     print(curr_figdir, figname)
 
     #% Aligned INDIVIUAL TURNS, 2 subplots of theta_error and ang_vel
-    fig = plot_individual_turns(turnbouts, v1=v1, v2=v2)
+    fig = the.plot_individual_turns(turnbouts, v1=v1, v2=v2)
     fig.text(0.1, 0.95,  '{}, all turns ang_acc > {:.2f}'.format(acq, min_ang_acc), 
                     fontsize=8)
 
