@@ -24,17 +24,21 @@ import utils as util
 import plotting as putil
 
 #%%
-plot_style='dark'
+plot_style='white'
 putil.set_sns_style(plot_style, min_fontsize=12)
-bg_color = [0.7]*3 if plot_style=='dark' else 'w'
+bg_color = [0.7]*3 if plot_style=='dark' else 'k'
 
 #%%
 create_new = False
 
 # Set sourcedirs
-# srcdir = '/Volumes/Julie/2d-projector-analysis/FlyTracker/processed_mats' #relative_metrics'
-srcdir = '/Volumes/Julie/free-behavior-analysis/FlyTracker/38mm_dyad/processed'
-figdir = os.path.join(os.path.split(srcdir)[0], 'relative_metrics', 'figures')
+# srcdir = '/Volumes/Juliana/2d-projector-analysis/FlyTracker/processed_mats' #relative_metrics'
+srcdir = '/Volumes/Juliana/free-behavior-analysis/MF/FlyTracker/38mm_dyad/processed'
+
+if plot_style == 'white':
+    figdir = os.path.join(os.path.split(srcdir)[0], 'relative_metrics', 'figures', 'white')
+else:
+    figdir = os.path.join(os.path.split(srcdir)[0], 'relative_metrics', 'figures')
 
 if not os.path.exists(figdir):
     os.makedirs(figdir)
@@ -42,7 +46,7 @@ print(figdir)
 
 # LOCAL savedir 
 #localdir = '/Users/julianarhee/Documents/rutalab/projects/courtship/2d-projector/FlyTracker'
-localdir = '/Users/julianarhee/Documents/rutalab/projects/courtship/38mm-dyad/FlyTracker'
+localdir = '/Users/julianarhee/Documents/rutalab/projects/courtship/data/MF/38mm-dyad/FlyTracker'
 out_fpath_local = os.path.join(localdir, 'processed.pkl')
 print(out_fpath_local)
 
@@ -98,7 +102,8 @@ acq = '20240118-1425-fly3-melWT_3do_sh_melWT_3do_gh'
 
 mat_type = 'df'
 
-found_fns = glob.glob(os.path.join(srcdir, '{}*{}.pkl'.format(acq, mat_type)))
+single_fly_srcdir = os.path.join(os.path.split(srcdir)[0], 'processed_mats')
+found_fns = glob.glob(os.path.join(single_fly_srcdir, '{}*{}.pkl'.format(acq, mat_type)))
 print(found_fns)
 fp = found_fns[0]
 df_ = pd.read_pickle(fp)
@@ -121,7 +126,7 @@ df_['id'].unique()
 # %% Get manually annotated actions -- annoted with FlyTracker
 
 if acq == '20240322-1105_f5_eleWT_4do_gh':
-    vidbase = '/Volumes/Julie/courtship-videos/38mm_dyad'
+    vidbase = '/Volumes/Juliana/courtship-videos/38mm_dyad'
     viddir = glob.glob(os.path.join(vidbase, '{}*'.format(acq)))[0]
 
     # get path to actions file for current acquisition
@@ -187,9 +192,13 @@ ax.set_ylim([-800, 800])
 
 # %%
 
+# =============================================================================
+# AGGREGATE DATA
+# =============================================================================
+
 #wing_ext = df_[df_['min_wing_ang'] >= min_wing_ang].copy()
 
-min_vel = 5
+min_vel = 10
 max_facing_angle = np.deg2rad(20)
 max_dist_to_other = 20
 max_targ_pos_theta = np.deg2rad(160)
@@ -231,10 +240,15 @@ f2 = pd.concat(f_list)
 #    f_list.append(f2_)
 #f2_sing = pd.concat(f_list)
 #
-#%%
+#%% 
 
-cmap = 'magma'
-stat = 'count'
+# Plot ALL data -- SPATIAL OCUPANCY
+
+putil.set_sns_style('white', min_fontsize=18)
+bg_color='k'
+
+cmap = 'YlOrBr'
+stat = 'probability' #'count' #count'
 vmax=0.0015 if stat=='probability' else 250
 
 norm = mpl.colors.Normalize(vmin=0, vmax=vmax)
@@ -244,7 +258,7 @@ for ai, sp in enumerate(['Dmel', 'Dyak', 'Dele']): #(sp, df_) in enumerate(f2_.g
     ax=axn[ai]
     df_ = f2[f2['species']==sp].copy().reset_index(drop=True)
     sns.histplot(data=df_, x='targ_rel_pos_x', y='targ_rel_pos_y', ax=ax, 
-             cmap='magma', vmin=0, vmax=vmax, stat=stat) # %%
+             cmap=cmap, vmin=0, vmax=vmax, stat=stat) # %%
     ax.plot(0, 0, 'w', markersize=1, marker='o')
     ax.set_title(sp)
     # ax.set_xlim([])
@@ -255,15 +269,24 @@ for ai, sp in enumerate(['Dmel', 'Dyak', 'Dele']): #(sp, df_) in enumerate(f2_.g
     else:
         ax.set_xlim([-1000, 1000])
         ax.set_ylim([-1000, 1000])
-putil.colorbar_from_mappable(ax, norm=norm, cmap=cmap, axes=[0.92, 0.3, 0.01, 0.4])
 
-pl.subplots_adjust(wspace=0.6)
+    ax.axvline(0, color=bg_color, linestyle=':', lw=0.5)
+    ax.axhline(0, color=bg_color, linestyle=':', lw=0.5)
+
+    ax.set_xlabel('x-pos (pix)')
+    ax.set_ylabel('y-pos (pix)')
+
+putil.colorbar_from_mappable(ax, norm=norm, cmap=cmap, axes=[0.92, 0.3, 0.01, 0.4],
+                             hue_title=stat)
+
+pl.subplots_adjust(wspace=0.65)
 fig.suptitle('Courting frames')
 
 
-figname = 'male-pos-relative-to-fem_{}-vmax{:.3f}_all-frames_min-wing-ang-{}_zoom'.format(stat, vmax, np.rad2deg(min_wing_ang))
+figname = 'male-pos-relative-to-fem_{}-vmax{:.3f}_all-frames_min-wing-ang-{}_zoom_{}'.format(stat, vmax, np.rad2deg(min_wing_ang), cmap)
 print(figname)
 pl.savefig(os.path.join(figdir, '{}.png'.format(figname)), dpi=300, bbox_inches='tight')
+pl.savefig(os.path.join(figdir, '{}.svg'.format(figname))) #, dpi=300, bbox_inches='tight')
 
 print(figdir, figname)
 
