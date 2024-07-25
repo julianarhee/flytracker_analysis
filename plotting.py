@@ -124,7 +124,8 @@ def custom_legend(labels, colors, use_line=True, lw=4, markersize=10):
 
 #%% Stats-related functions for plotting
 
-def annotate_regr(data, ax, x='facing_angle', y='ang_vel', fontsize=8, **kws):
+def annotate_regr(data, ax, x='facing_angle', y='ang_vel', 
+                  fontsize=8, xloc=.05, yloc=.8, **kws):
     '''
     Do pearson corr and annotate plot in upper left with p and r values.
 
@@ -141,7 +142,7 @@ def annotate_regr(data, ax, x='facing_angle', y='ang_vel', fontsize=8, **kws):
 
     r, p = spstats.pearsonr(data[x].interpolate().ffill().bfill(), 
                             data[y].interpolate().ffill().bfill())
-    ax.text(.05, .8, 'r={:.2f}, p={:.2g}'.format(r, p),
+    ax.text(xloc, yloc, 'r={:.2f}, p={:.2g}'.format(r, p),
             transform=ax.transAxes, fontsize=fontsize)
 
 
