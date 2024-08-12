@@ -26,7 +26,7 @@ import scipy.stats as spstats
 #%%
 # Set plotting
 plot_style='white'
-putil.set_sns_style(plot_style, min_fontsize=24)
+putil.set_sns_style(plot_style, min_fontsize=18)
 bg_color = [0.7]*3 if plot_style=='dark' else 'k'
 
 
@@ -119,7 +119,6 @@ if __name__ == '__main__':
 
 
     #%% PAIRPLOT
-
     vars_to_compare = ['theta_error', 'theta_error_heading', 'facing_angle', 'facing_angle_vel', 'theta_error_dt', 
                        'turn_size', 'ang_vel', 'ang_vel_fly']
 
@@ -357,7 +356,7 @@ if __name__ == '__main__':
 
 #   #kPlot top plot only
 
-    plotdf = flydf.loc[start_ix:stop_ix]
+    plotdf = flydf.loc[start_ix+100:stop_ix]
 
     if 'varset2' in varset:
         smooth_sfx = '_smoothed' if 'smoothed' in varset else ''
@@ -377,21 +376,21 @@ if __name__ == '__main__':
     fly_color='cornflowerblue'
     accel_color=bg_color
 
-    fig, ax = pl.subplots(1,1,figsize=(6, 1.5), sharex=True)
+    fig, ax = pl.subplots(1,1,figsize=(4, 2), sharex=True)
 
     # Plot theta_error and fly's angular velocity
     ax.plot(plotdf[xvar], plotdf[var1], targ_color)
     # color y-axis spine and ticks red
-    ax.set_ylabel(r'$\theta_{E}$' + '\n{}'.format(var1)) #, color=targ_color) #r'$\theta_{E}$'
+    ax.set_ylabel(r'$\theta_{E}$ (rad)' + '\n{}'.format(var1)) #, color=targ_color) #r'$\theta_{E}$'
     putil.change_spine_color(ax, targ_color, 'left')
     ax.axhline(y=0, color=targ_color, linestyle='--', lw=0.5)
 
-    ax.set_xlabel('time (sec)')
+    ax.set_xlabel('time (s)')
 
     ax2 = ax.twinx()
     ax2.plot(plotdf[xvar], plotdf[var2], fly_color)
     # Color y-axis spine and ticks blue
-    ax2.set_ylabel(r'$\omega_{f}$' + '\n{}'.format(var2)) #, color=fly_color)
+    ax2.set_ylabel(r'$\omega_{f}$ (rad/s)' + '\n{}'.format(var2)) #, color=fly_color)
     putil.change_spine_color(ax2, fly_color, 'right')
     # Center around 0
     if center_yaxis:
@@ -495,7 +494,8 @@ if __name__ == '__main__':
     v1_label = r'$\theta_{E}$' + '\n{}'.format(v1)
     v2_label = r'$\omega_{f}$' + '\n{}'.format(v2)
     fig = the.plot_cross_corr_results(turnbouts, xcorr, lags, t_lags, v1=v1, v2=v2, 
-                                  col1=col1, col2=col2, v1_label=v1_label, v2_label=v2_label)
+                                  col1=col1, col2=col2, v1_label=v1_label, v2_label=v2_label,
+                                  fig_h=4, fig_w=14)
 
     fig.text(0.1, 0.95,  '{}, all turns ang_acc > {:.2f}'.format(acq, min_ang_acc), 
                         fontsize=8)
@@ -503,7 +503,7 @@ if __name__ == '__main__':
     figname = 'mean-turn-bouts-xcorr-tlags_acc-thr-{}_{}'.format(min_ang_vel, acq)
     putil.label_figure(fig, acq)
     pl.savefig(os.path.join(curr_figdir, '{}.png'.format(figname)))
-    pl.savefig(os.path.join(curr_figdir, '{}.png'.format(figname)))
+    pl.savefig(os.path.join(curr_figdir, '{}.svg'.format(figname)))
 
     print(curr_figdir, figname)
 
@@ -522,7 +522,7 @@ if __name__ == '__main__':
     # shift target variables by lag_frames, compare with flydf on current frames
     # of high_ang_start_frames
     med_lag = np.median(np.array(t_lags))
-    shifted, unshifted = shift_vars_by_lag(flydf, high_ang_start_frames, med_lag, fps=fps)
+    shifted, unshifted = the.shift_vars_by_lag(flydf, high_ang_start_frames, med_lag, fps=fps)
 
     #%% Plot correlations between theta_error and ang_vel for same frame and lagged frame
     col = bg_color
@@ -537,7 +537,7 @@ if __name__ == '__main__':
         x = 'facing_angle'
         y = 'ang_vel'
         x1 = 'facing_angle_vel'
-    fig = compare_regr_pre_post_shift(flydf, shifted, x=x, y=y, x1=x1, col=col, markersize=markersize)
+    fig = the.compare_regr_pre_post_shift(flydf, shifted, x=x, y=y, x1=x1, col=col, markersize=markersize)
     pl.subplots_adjust(bottom=0.2, wspace=0.6, hspace=0.6, left=0.1, right=0.9)
 
     # save

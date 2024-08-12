@@ -647,7 +647,8 @@ def plot_individual_turns(turnbouts, v1='facing_angle', v2='ang_vel'):
 
 def plot_cross_corr_results(turnbouts, xcorr, lags, t_lags, v1='facing_angle', v2='ang_vel',
                             v1_label = None, v2_label = None,
-                            col1='r', col2='dodgerblue', bg_color=[0.7]*3):
+                            col1='r', col2='dodgerblue', bg_color=[0.7]*3,
+                            fig_w=10, fig_h=5):
 
     if v1_label is None:
         v1_label = r'$\theta_{E}$' + '\n{}'.format(v1)
@@ -655,7 +656,7 @@ def plot_cross_corr_results(turnbouts, xcorr, lags, t_lags, v1='facing_angle', v
         v2_label = r'$\omega_{f}$' + '\n{}'.format(v2)
 
     # PLOT MEAN + SEM of aligned turn bout traces
-    fig, axn =pl.subplots(1, 3, figsize=(17, 4))
+    fig, axn =pl.subplots(1, 3, figsize=(fig_w, fig_h))
     ax1 = axn[0]
     ax2 = ax1.twinx()
     sns.lineplot(data=turnbouts, x='rel_sec', y=v1, ax=ax1, lw=0.5, color=col1)
@@ -1546,7 +1547,7 @@ if __name__ == '__main__':
     
     for sp, p_ in plotdf.groupby('species'):
 
-        fig = plot_allo_ego_frames_by_species(p_, xvar=xvar, yvar=yvar,
+        fig = plot_allo_ego_frames_by_species(p_.iloc[0::4], xvar=xvar, yvar=yvar,
                                           markersize=markersize, huevar=huevar, cmap=cmap, plot_com=plot_com,
                                           stimhz_palette=stimhz_palette)
         putil.label_figure(fig, figid)
