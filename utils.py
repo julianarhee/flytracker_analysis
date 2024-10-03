@@ -443,6 +443,19 @@ def pol2cart(rho, phi):
 # ---------------------------------------------------------------------
 # Data loading and formatting
 # ---------------------------------------------------------------------
+def load_ft_actions(found_actions_paths):
+    a_ = []
+    for fp in found_actions_paths:
+        actions_ = ft_actions_to_bout_df(fp)
+        basename = '_'.join(os.path.split(fp)[-1].split('_')[0:-1])
+        print(basename)
+        actions_['acquisition'] = basename
+        #actions_['ction_num'] = actions_.index.tolist()
+        a_.append(actions_)
+
+    actions_df = pd.concat(a_)
+
+    return actions_df
 
 def combine_jaaba_and_processed_df(df, jaaba):
     '''
@@ -642,7 +655,8 @@ def assign_jaaba_behaviors(plotdf, courtvar='courting', jaaba_thresh_dict=None, 
     return plotdf
 
 
-def get_video_cap_check_multidir(acq, assay='2d-projector', return_viddir=False):
+def get_video_cap_check_multidir(acq, assay='2d-projector', return_viddir=False,
+                                minerva_base='/Volumes/Juliana'):
     '''
     Specific issue where multiple vid sources are possible (e.g., Minerva and Giacomo's drives).
 
@@ -652,7 +666,7 @@ def get_video_cap_check_multidir(acq, assay='2d-projector', return_viddir=False)
     Returns:
         _description_
     '''
-    minerva_base='/Volumes/Julie'
+    #minerva_base='/Volumes/Juliana'
 
     session = acq.split('-')[0]
     viddir = os.path.join(minerva_base, assay, session)
