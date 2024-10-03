@@ -51,25 +51,30 @@ def aggr_matstruct_to_df(mstruct, structname='feat_fly', fps=60):
 
 # Load the .mat file
 #mat_fpath = '/Volumes/Giacomo/MATLAB/free_behavior_data_mel_yak_20240403.mat'
-minerva_base = '/Volumes/Giacomo/MATLAB Data'
+#minerva_base = '/Volumes/Giacomo/MATLAB Data'
+minerva_base = '/Users/julianarhee/Documents/rutalab/projects/courtship/data/MF/38mm-dyad'
+fn = 'free_behavior_data_mel_yak_20240403'
 #fn = 'projector_data_mel_yak_20240330'
-fn = 'projector_data_elegans_all_20240325'
+#fn = 'projector_data_elegans_all_20240325'
 mat_fpath = os.path.join(minerva_base, '{}.mat'.format(fn))
+#mat = scipy.io.loadmat(mat_fpath)
 mat = mat73.loadmat(mat_fpath)
 
 #%%
-#assay = '38mm-dyad'
-assay = '2d-projector' 
+assay = '38mm-dyad'
+#assay = '2d-projector' 
 
 if assay == '2d-projector':
-    destdir = '/Volumes/Julie/2d-projector-analysis/processed'
+    destdir = '/Volumes/Juliana/2d-projector-analysis/processed'
     alt_destdir = '/Users/julianarhee/Documents/rutalab/projects/courtship/data/2d-projector/JAABA'
 else:
     assert assay == '38mm-dyad'
-    destdir = '/Volumes/Julie/free-behavior-analysis/38mm_dyad'
-    alt_destdir = '/Users/julianarhee/Documents/rutalab/projects/courtship/data/38mm-dyad-ft-jaaba'
+    destdir = '/Volumes/Juliana/free-behavior-analysis/MF/FlyTracker/38mm_dyad'
+    alt_destdir = '/Users/julianarhee/Documents/rutalab/projects/courtship/data/MF/38mm-dyad/giacomo'
 if not os.path.exists(destdir):
     os.makedirs(destdir)
+if not os.path.exists(alt_destdir):
+    os.makedirs(alt_destdir)
 
 #%%
 mstruct = mat['exported']
