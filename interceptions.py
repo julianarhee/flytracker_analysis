@@ -171,7 +171,7 @@ def get_targ_ang_vel_and_int_angle(boutdf, f1,
 
 # %%
 # Set plotting
-plot_style='white'
+plot_style='dark'
 putil.set_sns_style(plot_style, min_fontsize=24)
 bg_color = [0.7]*3 if plot_style=='dark' else 'k'
 
@@ -184,7 +184,7 @@ species_palette = dict((sp, col) for sp, col in zip(curr_species, species_cmap))
 # %%
 assay = '2d-projector' # '38mm-dyad'
 
-minerva_base = '/Volumes/Julie'
+minerva_base = '/Volumes/Juliana'
 procdir = os.path.join(minerva_base, '2d-projector-analysis/circle_diffspeeds/DeepLabCut/processed')
 
 # local savedir for giant pkl
@@ -341,7 +341,7 @@ keypoint = 100 #80+35 #100
 
 fps = 60
 n_pre = 2*fps
-n_post = -0*fps #-0.2*fps
+n_post = -0.5*fps #-0.2*fps
 
 curr_frames = np.arange(start_ - n_pre, end_ + n_post)
 # curr_frames = curr_frames[0:100]
@@ -351,8 +351,8 @@ accel_start = get_acceleration_start(plotdf)
 
 #% Plot
 plot_vars = ['theta_error', 'theta_error_dt', 'abs_ang_between',
-             'dist_to_other', 'vel_smoothed', 
-             'acc_smoothed', 'acc_smoothed2', 'ang_vel_smoothed']
+             'dist_to_other', 'vel_smoothed', 'acc_smoothed2']
+             #'acc_smoothed', 'acc_smoothed2', 'ang_vel_smoothed']
 
 fig, axn = pl.subplots(len(plot_vars), 1, figsize=(10,20), sharex=True)
 for var, ax in zip(plot_vars, axn):
@@ -416,6 +416,50 @@ ax.plot(f1['vel_smoothed'].loc[curr_frames])
 ax=axn[1]
 ax.plot(f1['acc_smoothed2'].loc[curr_frames])
 ax.axvline(accel_start)
+
+
+#%% 
+
+# LEAD ANGLE vs. DISTance?
+# -------------------------------
+#%
+f1['theta_error_abs'] = np.abs(f1['theta_error'])
+#%% Look at 1 bout
+ix = 0# #2
+plot_interval = 3
+action ='pursuit' # 'interception'
+# 
+start_, end_ = boutdf[boutdf['action']==action].iloc[ix][['start', 'end']]
+#print(start_, end_)
+
+curr_frames = np.arange(start_, end_+1)
+plotdf = f1[f1['frame'].isin(curr_frames)].copy()
+
+fig, ax =pl.subplots()
+sns.scatterplot(x='dist_to_other', y='theta_error', data=plotdf, ax=ax)
+#ax.set_ylim([-0.5, 0.5])
+
+#%% Look at all of the bouts
+
+action_type = 'pursuit'
+c_list = []
+for ix, bdf in boutdf[boutdf['action']==action_type].iterrows():
+    start_, end_ = bdf[['start', 'end']].values                    
+    curr_frames = np.arange(start_, end_+1)
+    plotdf = f1[f1['frame'].isin(curr_frames)].copy()
+    plotdf['boutnum'] = ix
+    c_list.append(plotdf)
+df_ = pd.concat(c_list)
+
+#%% plot
+fig, ax =pl.subplots()
+sns.scatterplot(x='dist_to_other', y='theta_error', data=df_, ax=ax,
+                hue='boutnum', palette='colorblind', alpha=0.5)
+ax.legend_.remove()
+ax.set_ylim([-2, 1]) 
+
+
+#%%
 
 #%%
 # =======================================================
@@ -592,9 +636,11 @@ def get_range_vector_corrs_all_bouts(boutdf, f1, f2, action_type='interception',
 
 
 #%%
-ix = 2#5 #7
-nsec_pre = 0.5
-nsec_post = -0.2
+#ix = 2#5 #7
+#nsec_pre = 0.5
+#nsec_post = -0.2
+nsec_pre = 0 #n_pre/fps
+nsec_post = 0# n_post/fps #-0.2*fps
 
 #xvar = 'pos_x_smoothed'
 #yvar = 'pos_y_smoothed'
@@ -756,16 +802,19 @@ found_actions_paths = glob.glob(os.path.join(basedir,
                         '20*', 'fly-tracker', '*ele*', '*actions.mat'))
 
 #%%
-a_ = []
-for fp in found_actions_paths:
-    actions_ = util.ft_actions_to_bout_df(fp)
-    basename = '_'.join(os.path.split(fp)[-1].split('_')[0:-1])
-    print(basename)
-    actions_['acquisition'] = basename
-    #actions_['ction_num'] = actions_.index.tolist()
-    a_.append(actions_)
 
-all_actions = pd.concat(a_)
+#a_ = []
+#for fp in found_actions_paths:
+#    actions_ = util.ft_actions_to_bout_df(fp)
+#    basename = '_'.join(os.path.split(fp)[-1].split('_')[0:-1])
+#    print(basename)
+#    actions_['acquisition'] = basename
+#    #actions_['ction_num'] = actions_.index.tolist()
+#    a_.append(actions_)
+#
+#all_actions = pd.concat(a_)
+all_actions = util.load_ft_actions(found_actions_paths)
+
 #%%
 actions = all_actions.copy() #all_actions[all_actions['likelihood']>2].copy()
 
@@ -801,6 +850,29 @@ else:
     flydf = pd.read_pickle(tmp_outfile)
 
 flydf.head()
+
+
+#%%
+
+# Select subset of traj for csv
+
+acq = '20240214-1025_f1_Dele-wt_5do_sh_prj10_sz10x10'
+ints = actions[(actions['acquisition']==acq) 
+             & (actions['action']=='interception')].copy()
+df_ = flydf[flydf['acquisition'] == acq].copy()
+df_
+
+currlist = []
+for (start_, end_, bnum) in ints[['start', 'end', 'boutnum']].values:
+    if bnum in [2, 5, 10]:
+        curr_frames = np.arange(start_, end_+1)
+        currdf = df_.loc[df_['frame'].isin(curr_frames)][['id', 'frame', 'pos_x', 'pos_y', 'sec']]
+        currdf['bout'] = bnum #ints[ints['start']==start_]['boutnum'].values[0]
+
+        currlist.append(currdf)
+
+examples = pd.concat(currlist)
+examples.to_csv(os.path.join(localdir, 'example_traj.csv'))
 
 #%%
 win=10
