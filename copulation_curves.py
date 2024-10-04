@@ -44,13 +44,16 @@ if not os.path.exists(figdir):
 # %%
 
 # Without food
-csv_fpath = [c for c in csv_fpaths if 'food' not in c][0]
+exp_type = '_food'
+#csv_fpath = [c for c in csv_fpaths if 'food' not in c][0]
+csv_fpath = [c for c in csv_fpaths if 'food' in c][0]
+
 print(csv_fpath)
 df0 = pd.read_csv(csv_fpath)
 df0.head()
 
 #%%a
-incl_start_ix = 20 - 2 # subtract 2 for 1-indexing + header
+incl_start_ix = 20 - 2 if exp_type=='nofood' else 0 # subtract 2 for 1-indexing + header
 df = df0[(df0['species_male']=='Dyak')
        & (df0['manipulation_male'].isin([np.nan, 'wingless']))
        & (df0['courtship']==1) 
@@ -81,7 +84,8 @@ ax.set_title("Dyak: N copulations for courting pairs",
 
 putil.label_figure(fig, csv_fpath)
 # Save
-pl.savefig(os.path.join(figdir, 'copulation_counts.png'))
+pl.savefig(os.path.join(figdir, 'copulation_counts{}.png'.format(exp_type)))
+print(os.path.join(figdir, 'copulation_counts{}.png'.format(exp_type)))
 
 #%%
 # Convert copulation_onset from MM:SS to seconds
@@ -161,7 +165,7 @@ sns.despine(offset=4, trim=True)
 putil.label_figure(fig, csv_fpath)
 
 # save
-pl.savefig(os.path.join(figdir, 'cumulative_copulations_by_minute.png'))
+pl.savefig(os.path.join(figdir, 'cumulative_copulations_by_minute{}.png'.format(exp_type)))
 
 
 #%%
