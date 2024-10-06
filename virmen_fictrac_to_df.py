@@ -15,26 +15,29 @@ import os
 import glob
 import numpy as np
 import pandas as pd
-import mat73
-
+#import mat73
+import scipy
 #%%
 
 rootdir = '/Volumes/juliana/2p-data'
 session = '20240905'
 # acq = 'example-yak-P1-1'
 acqnum = 18
-processed_mats = glob.glob(os.path.join(rootdir, session, 'processed', 
-                                        'matlab-files', '*{:03d}.mat'.format(acqnum)))
-processed_dir = os.path.join(rootdir, session, 'processed')
-
-mat_fpath = processed_mats[0]
+#processed_mats = glob.glob(os.path.join(rootdir, session, 'processed', 
+#                                        'matlab-files', '*{:03d}.mat'.format(acqnum)))
+#processed_dir = os.path.join(rootdir, session, 'processed')
+virmen_dir = os.path.join(rootdir, session, 'virmen')
+mat_files = glob.glob(os.path.join(virmen_dir, '*{:03d}.mat'.format(acqnum)))
+mat_fpath = mat_files[0]
+#mat_fpath = processed_mats[0]
 #print(mat_fpath)
 
 acq = os.path.splitext(os.path.split(mat_fpath)[1])[0]
 print(acq)
 #%%
 # Load mat
-mat = mat73.loadmat(mat_fpath)
+#mat = mat73.loadmat(mat_fpath)
+mat = scipy.io.loadmat(mat_fpath)
 mdata = mat['expr']
 
 columns = [
@@ -43,8 +46,8 @@ columns = [
     'pos_x',
     'pos_y',
     'heading', # 5
-    'dot_x',
-    'dot_y',
+    'target_x',
+    'target_y',
     'clock_H', # 8
     'clock_M',
     'clock_S',
@@ -57,9 +60,9 @@ columns = [
     'delta_rotation_vector_cam_y',
     'delta_rotation_vector_cam_z',
     'delta_rotation_error_score',     # 5 (19)
-    'delta_rotatioN_vector_lab_x',
-    'delta_rotatioN_vector_lab_y',
-    'delta_rotatioN_vector_lab_z',
+    'delta_rotation_vector_lab_x',
+    'delta_rotation_vector_lab_y',
+    'delta_rotation_vector_lab_z',
     'absolute_rotation_vector_cam_x', # 9-11
     'absolute_rotation_vector_cam_y', 
     'absolute_rotation_vector_cam_z', 
@@ -77,7 +80,7 @@ columns = [
     'sequence_counter', # 23 (# 37)
     'delta_timestamp',  # 24 (#38)
     #'alt.timestamp',   # 25
-    'dot_vel' # 39  
+    'target_vel' # 39  
     ]
 
 df = pd.DataFrame(data=mat['expr'], columns=columns)
