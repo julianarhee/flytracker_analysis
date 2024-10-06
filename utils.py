@@ -72,6 +72,22 @@ def circular_distance(ang1, ang2):
 
     return circdist
 
+def wrap_to_2pi(lambda_):
+    # Wrap angles in lambda to the interval [0, 2*pi]
+    positive_input = (lambda_ > 0)
+    lambda_ = np.mod(lambda_, 2 * np.pi)
+    lambda_[(lambda_ == 0) & positive_input] = 2 * np.pi
+    return lambda_
+
+def circ_dist(x, y):
+    # Check input dimensions
+    if x.shape != y.shape and y.size != 1:
+        raise ValueError('Input dimensions do not match.')
+    
+    # Compute pairwise circular difference
+    r = np.angle(np.exp(1j * x) / np.exp(1j * y))
+    return r
+
 
 
 #%% bouts
