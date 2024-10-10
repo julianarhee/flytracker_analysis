@@ -129,7 +129,7 @@ def annotate_regr(data, ax, x='facing_angle', y='ang_vel',
     '''
     Do pearson corr and annotate plot in upper left with p and r values.
 
-    Arguments:
+    Argum:
         data -- _description_
         ax -- _description_
 
