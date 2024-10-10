@@ -30,7 +30,7 @@ bg_color = [0.7]*3 if plot_style=='dark' else 'k'
 
 # %%
 # basedir = '/Users/julianarhee/Documents/rutalab/projects/courtship/data'
-basedir = '/Users/julianarhee/Dropbox @RU Dropbox/Juliana Rhee/ventral-analysis/MF-winged-wingless-20mm'
+basedir = '/Users/julianarhee/Dropbox @RU Dropbox/Juliana Rhee/MF-winged-wingless-20mm'
 #experiment = 'winged-wingless'
 
 csv_fpaths = glob.glob(os.path.join(basedir , '*.csv'))
@@ -52,16 +52,18 @@ print(csv_fpath)
 df0 = pd.read_csv(csv_fpath)
 df0.head()
 
+df0.loc[df0['manipulation_male'].isnull(), 'manipulation_male'] = 'winged'
+
 #%%a
 incl_start_ix = 20 - 2 if exp_type=='nofood' else 0 # subtract 2 for 1-indexing + header
 df = df0[(df0['species_male']=='Dyak')
-       & (df0['manipulation_male'].isin([np.nan, 'wingless']))
+       #& (df0['manipulation_male'].isin([np.nan, 'wingless']))
        & (df0['courtship']==1) 
        & (df0['genotype_male']=='WT')
     ].loc[incl_start_ix:].copy()
 
 # %
-df.loc[df['manipulation_male'].isnull(), 'manipulation_male'] = 'winged'
+# df.loc[df['manipulation_male'].isnull(), 'manipulation_male'] = 'winged'
 
 #%%
 cop_palette = {0: [0.3]*3, 1: [0.7]*3}
@@ -141,6 +143,7 @@ label1 = 'winged (n={})'.format(n_winged_pairs)
 label2 = 'wingless (n={})'.format(n_wingless_pairs)
 
 unit = 'min'
+
 bins = np.arange(0, 3600, 60) if unit=='sec' else np.arange(0, 60, 1)
 cum1, _ = cumulative_copulations_by_minute(df[df['manipulation_male']==cond1], 
                                            bins, normalize=normalize, unit=unit,
