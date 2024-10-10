@@ -467,6 +467,7 @@ def load_ft_actions(found_actions_paths):
         print(basename)
         actions_['acquisition'] = basename
         #actions_['ction_num'] = actions_.index.tolist()
+        actions_['species'] = actions_['acquisition'].str.extract(r'(D\w{3})')
         a_.append(actions_)
 
     actions_df = pd.concat(a_)
