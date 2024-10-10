@@ -137,29 +137,79 @@ else:
 # binarize behavs
 ftjaaba = util.binarize_behaviors(ftjaaba, jaaba_thresh_dict=jaaba_thresh_dict)
 
+ftjaaba.loc[(ftjaaba['chasing_binary']==1) | (ftjaaba['singing_binary']==1) | (ftjaaba['orienting_binary']==1), 'courtship'] = 1   
+
 #%%
 # Compare velocity during singing and chasing vs. chasing only bouts
 
-plotd = ftjaaba[(ftjaaba['chasing_binary']==1)
-                         | (ftjaaba['singing_binary']==1)].copy()
+#plotd = ftjaaba[(ftjaaba['chasing_binary']==1)
+#                         | (ftjaaba['singing_binary']==1)].copy()
+plotd = ftjaaba[ftjaaba['courtship']==1].copy()
 plotd.loc[plotd['chasing_binary']==1, 'behavior'] = 'chasing'
 plotd.loc[plotd['singing_binary']==1, 'behavior'] = 'singing'
+
 #%%
+# Plot Dmel & Dyak, compare chasing vs. singing
+
+cumhist=False
+plot_type = 'cumhist' if cumhist else 'hist'
 cmap = {'chasing': 'royalblue', 
         'singing': 'magenta'}
 fig, axn = pl.subplots(1, 2, sharex=True, sharey=True)
 sns.histplot(data=plotd[plotd['species']=='Dmel'], x='vel', ax=axn[0], 
              label='Dmel', hue='behavior', palette=cmap,
-             common_norm=False, stat='probability')
+             common_norm=False, stat='probability', cumulative=cumhist,
+             fill=not(cumhist), element='step')
 axn[0].legend_.remove()
 axn[0].set_title('Dmel')
 axn[0].set_xlim([-5, 40])
-axn[0].set_ylim([0, 0.12])
+if not cumhist:
+    axn[0].set_ylim([0, 0.12])
 
 sns.histplot(data=plotd[plotd['species']=='Dyak'], x='vel', ax=axn[1], 
              label='Dyak', hue='behavior', palette=cmap,
-             common_norm=False, stat='probability')
+             common_norm=False, stat='probability', cumulative=cumhist,
+             fill=not(cumhist), element='step')
 axn[1].set_title('Dyak')
+for ax in axn:
+    ax.set_xlabel('velocity (mm/s)')
+
+sns.move_legend(axn[1], bbox_to_anchor=(1.05, 1), loc='upper left', frameon=False)
+sns.despine(offset=4)
+
+for ax in axn:
+    ax.set_box_aspect(1)
+
+putil.label_figure(fig, figid)
+
+figname = 'compare_behaviors_vel_sing_vs_chase_{}__{}'.format(plot_type, dataid)
+pl.savefig(os.path.join(figdir, '{}.png'.format(figname)))
+print(figdir, figname)
+#%%
+
+# Plot CHASING vs. SINGING by species
+cumhist=True
+plot_type = 'cumhist' if cumhist else 'hist'
+species_palette = {'Dmel': 'lavender', 
+                   'Dyak': 'mediumorchid'}
+fig, axn = pl.subplots(1, 2, sharex=True, sharey=True)
+sns.histplot(data=plotd[plotd['behavior']=='chasing'], x='vel', ax=axn[0], 
+             hue='species', palette=species_palette,
+             common_norm=False, stat='probability', cumulative=cumhist,
+             fill=not(cumhist), element='step')
+axn[0].legend_.remove()
+axn[0].set_title('Chasing')
+axn[0].set_xlim([-5, 40])
+axn[0].set_xlabel('velocity (mm/s)')
+
+if not cumhist:
+    axn[0].set_ylim([0, 0.12])
+
+sns.histplot(data=plotd[plotd['behavior']=='singing'], x='vel', ax=axn[1], 
+             hue='species', palette=species_palette,
+             common_norm=False, stat='probability', cumulative=cumhist,
+             fill=not(cumhist), element='step')
+axn[1].set_title('Singing')
 axn[1].set_xlabel('velocity (mm/s)')
 
 sns.move_legend(axn[1], bbox_to_anchor=(1.05, 1), loc='upper left', frameon=False)
@@ -170,10 +220,9 @@ for ax in axn:
 
 putil.label_figure(fig, figid)
 
-figname = 'vel_sing_vs_chase_hist__{}'.format(dataid)
-os.path.join(figdir, '{}.png'.format(figname))
+figname = 'compare_species_vel_sing_vs_chase_{}__{}'.format(plot_type, dataid)
+pl.savefig(os.path.join(figdir, '{}.png'.format(figname)))
 print(figdir, figname)
-
 
 # %%
 #% Split into bouts of courtship
@@ -202,19 +251,35 @@ if 'strain' in ftjaaba.columns:
     ftjaaba = ftjaaba.drop(columns=['strain'])
 
 #%%
+bin_size = 5
+max_dist = np.ceil(ftjaaba['dist_to_other'].max())
+dist_bins = np.arange(0, max_dist+bin_size, bin_size)
+
+# Cut dist_to_other into bins and assign label to new columns:
+ftjaaba['binned_dist_to_other'] = pd.cut(ftjaaba['dist_to_other'], 
+                                    bins=dist_bins, 
+                                    labels=dist_bins[:-1])   
+ftjaaba['binned_dist_to_other'] = ftjaaba['binned_dist_to_other'].astype(float)
+#n_bins=5
+#max_vel = ftjaaba['female_velocity'].max()
+#vel_bins = np.linspace(0, max_vel, n_bins)
+#ftjaaba['binned_female_velocity'] =pd.cut(ftjaaba['female_velocity'], 
+#                                       bins=vel_bins, labels=vel_bins[:-1])   
+
+#%%
 #plotd = ftjaaba[(ftjaaba['chasing_binary']==1)
 #                         | (ftjaaba['singing_binary']==1)].copy()
-plotd = ftjaaba[ftjaaba['courtship']==1].copy()
-plotd.loc[plotd['chasing_binary']==1, 'behavior'] = 'chasing'
-plotd.loc[plotd['singing_binary']==1, 'behavior'] = 'singing'
-
+courting = ftjaaba[ftjaaba['courtship']==1].copy()
+#courting.loc[courting['chasing_binary']==1, 'behavior'] = 'chasing'
+#courting.loc[courting['singing_binary']==1, 'behavior'] = 'singing'
 #%%
 # average over subbout
 
 bout_type = 'subboutnum'
-meanbouts = plotd.groupby(['species', 'acquisition', 'behavior', 
-                           bout_type]).mean().reset_index()
-meanbouts.head()
+meanbouts_courting = courting.groupby(['species', 'acquisition', #'behavior', 
+                        'binned_dist_to_other',
+                         bout_type]).mean().reset_index()
+meanbouts_courting.head()
 
 if bout_type == 'subboutnum':
     bout_type = 'subboutnum-{}'.format(subbout_dur)
@@ -225,33 +290,36 @@ species_palette = {'Dmel': 'lavender',
                    'Dyak': 'mediumorchid'}
 error_type = 'ci'
 
-max_dist = np.ceil(meanbouts['dist_to_other'].max())
+max_dist = np.ceil(meanbouts_courting['dist_to_other'].max())
 bin_size=5
 bins = np.arange(0, max_dist+bin_size, bin_size)
-meanbouts['binned_dist_to_other'] = pd.cut(meanbouts['dist_to_other'], 
-                                       bins=bins, labels=bins[:-1])  
+#meanbouts_courting['binned_dist_to_other'] = pd.cut(meanbouts_courting['dist_to_other'], 
+#                                       bins=bins, labels=bins[:-1])  
 
 fig, axn = pl.subplots(1, 2, sharex=True, sharey=True)
-sns.barplot(data=meanbouts,
+sns.barplot(data=meanbouts_courting,
              x='binned_dist_to_other', 
              y='chasing_binary', ax=axn[0], 
              errorbar=error_type, errcolor=bg_color,
-             hue='species', palette=species_palette, edgecolor=bg_color)
+             hue='species', palette=species_palette, 
+             edgecolor='none')
 axn[0].legend_.remove()
 axn[0].set_ylabel("p(chasing|courtship)")
 
-sns.barplot(data=meanbouts,
+sns.barplot(data=meanbouts_courting,
              x='binned_dist_to_other', 
              y='singing_binary', ax=axn[1], 
              errorbar=error_type, errcolor=bg_color,
-             hue='species', palette=species_palette, edgecolor=bg_color)
+             hue='species', palette=species_palette, 
+             edgecolor='none')
 for ax in axn:
     ax.set_box_aspect(1)
     ax.set_xlabel('distance to other (mm)')
 # format xticks to single digit numbers:
-bin_edges = [str(int(x)) for x in bins[:-1]]
+bin_edges = [str(int(x)) for x in dist_bins[:-1]]
 bin_edges[0] = '<{}'.format(bin_size)
-bin_edges[-1] = '>{}'.format(int(bins[-2]))
+bin_edges[-1] = '>{}'.format(int(dist_bins[-2]))
+axn[0].set_xticks(range(len(bin_edges)))
 axn[0].set_xticklabels([str(x) for x in bin_edges], rotation=0)
 
 axn[1].set_ylabel("p(singing|courtship)")
@@ -266,8 +334,216 @@ fig.text(0.1, 0.85, 'Dmel (n={}), Dyak (n={})'.format(\
 
 putil.label_figure(fig, figid)
 
-figname = 'dist_to_other_frac-{}_sing_vs_chase_hist__{}'.format(bout_type, dataid)
-os.path.join(figdir, '{}.png'.format(figname))
+figname = 'dist_to_other_frac-{}_p(sing_vs_chase_if_courting)_hist__{}'.format(bout_type, dataid)
+pl.savefig(os.path.join(figdir, '{}.png'.format(figname)))
 print(figdir, figname)
+
+#%%
+
+
+# %%
+
+# Split into SUBBOUTS
+bout_type = 'boutnum'
+ftjaaba.loc[ftjaaba['chasing_binary']==1, 'behavior'] = 'chasing'
+ftjaaba.loc[ftjaaba['singing_binary']==1, 'behavior'] = 'singing'
+
+meanbouts = ftjaaba.groupby(['species', 'acquisition',
+                'subboutnum'])[['courtship', 'orienting_binary', 'chasing_binary', 'singing_binary']].mean().reset_index()
+meanbouts.head()
+#%%
+# Overall proportion of time spent singing
+#%
+err_type='se'
+fig, axn = pl.subplots(1, 3, sharex=True, sharey=True)
+ax=axn[0]
+
+#courting_or_not = ftjaaba.groupby(['species', 'acquisition'])[['courtship', 'orienting_binary', 'chasing_binary', 'singing_binary']].mean().reset_index()
+courting_or_not = meanbouts.groupby(['species', \
+                        'acquisition'])[['courtship', 'orienting_binary', 'chasing_binary', 'singing_binary']].mean().reset_index()   
+sns.barplot(data=courting_or_not, x='species', 
+            y='courtship', ax=ax, errorbar=err_type,
+            palette=species_palette, edgecolor=bg_color, 
+            errcolor=bg_color)
+
+means_by_pair = meanbouts[meanbouts['courtship']==1]\
+                .groupby(['species', 'acquisition'])[['chasing_binary', \
+                        'singing_binary']].mean().reset_index()
+ax=axn[1]
+sns.barplot(data=means_by_pair, x='species', 
+            y='chasing_binary', ax=ax, errorbar=err_type,
+            palette=species_palette, edgecolor=bg_color, errcolor=bg_color)
+ax.set_ylabel('p(chasing|courting)')
+
+ax=axn[2]
+sns.barplot(data=means_by_pair, x='species', 
+            y='singing_binary', ax=ax, errorbar=err_type,
+            palette=species_palette, edgecolor=bg_color, errcolor=bg_color)
+ax.set_ylabel('p(singing|courting)')
+
+pl.ylim([0, 1])
+pl.subplots_adjust(wspace=0.5)
+sns.despine(offset=4, bottom=True)
+pl.xlabel('')
+
+n_per_species = means_by_pair.groupby('species')['acquisition'].count()
+fig.text(0.1, 0.9, 'Frac. of time spent in each behavior (subbout={}s, mean+/-sem)\n Dyak (n={}), Dmel (n={})'.format(subbout_dur, n_per_species['Dyak'], n_per_species['Dmel']))
+
+putil.label_figure(fig, figid)
+figname = 'frac_each_behavior_subbout-{}s__{}'.format(subbout_dur, dataid)
+pl.savefig(os.path.join(figdir, '{}.png'.format(figname)))
+print(figdir)
+
+#%%
+# 
+# Average ALL FRAMES together?
+means_by_pair0 = ftjaaba[ftjaaba['courtship']>0].groupby(['species', 
+                    'acquisition'])[['courtship', 'orienting_binary', 'chasing_binary', 'singing_binary']].mean().reset_index()
+
+fig, axn = pl.subplots(1, 3, sharex=True, sharey=True)
+ax=axn[0]
+frac_courtship = ftjaaba.groupby(['species', 'acquisition'])[['courtship']].mean().reset_index()
+sns.barplot(data=frac_courtship, x='species', y='courtship', ax=ax,
+            palette=species_palette, edgecolor=bg_color, errorbar='se')
+ax.set_ylabel('p(courting)')
+ax=axn[1]
+sns.barplot(data=means_by_pair0, x='species', 
+            y='chasing_binary', ax=ax, errorbar='se',
+            palette=species_palette, edgecolor=bg_color)
+ax.set_ylabel('p(chasing|courting)')
+ax=axn[2]
+sns.barplot(data=means_by_pair0, x='species', 
+            y='singing_binary', ax=ax, errorbar='se',
+            palette=species_palette, edgecolor=bg_color)
+ax.set_ylabel('p(singing|courting)')
+
+pl.subplots_adjust(wspace=0.5)
+sns.despine(offset=4, bottom=True)
+for ax in fig.axes:
+    ax.set_xlabel('')
+
+n_per_species = frac_courtship.groupby('species')['acquisition'].count()
+fig.text(0.1, 0.9, 'Fraction of time spent in each behavior (Dyak n={}, Dmel n={})'.format(n_per_species['Dyak'], n_per_species['Dmel']))
+
+putil.label_figure(fig, figid)
+figname = 'frac_each_behavior_averge-frames__{}'.format(dataid)
+pl.savefig(os.path.join(figdir, '{}.png'.format(figname)))
+print(figdir)
+
+#%%
+# Compare FEMALE VELOCITY
+# NOTE: >40 mm/s is likely an error or fly flying around the chamber
+
+# %%
+n_bins=8
+max_vel = ftjaaba['female_velocity'].max()
+vel_bins = np.linspace(0, max_vel, n_bins)
+
+filt_ftjaaba = ftjaaba[ftjaaba['female_velocity']<=40].copy()
+
+filt_ftjaaba['binned_female_velocity'] =pd.cut(filt_ftjaaba['female_velocity'], n_bins)
+                                       #bins=n_bins, labels=vel_bins[:-1])   
+
+filt_ftjaaba['binned_female_velocity_labels'] = filt_ftjaaba['binned_female_velocity'].apply(lambda x: x.left)
+
+#%
+#plotd = ftjaaba[(ftjaaba['chasing_binary']==1)
+#                         | (ftjaaba['singing_binary']==1)].copy()
+courting = filt_ftjaaba[filt_ftjaaba['courtship']==1].copy()
+courting.loc[courting['chasing_binary']==1, 'behavior'] = 'chasing'
+courting.loc[courting['singing_binary']==1, 'behavior'] = 'singing'
+
+plot_vars = ['courtship', 'chasing_binary', 'singing_binary', 'female_velocity']
+means_ = filt_ftjaaba.groupby(['species', 'acquisition', 
+                           'subboutnum'
+                           ])[plot_vars].mean().reset_index()
+
+#%%
+fig, axn = pl.subplots(1, 3)
+
+ax=axn[0]
+sns.histplot(data=means_[means_['courtship']==0], ax=ax,
+             x='female_velocity',
+             hue='species', palette=species_palette,
+             stat='probability', common_norm=False,
+             cumulative=False, element='step',fill=False)
+ax=axn[1]
+sns.histplot(data=means_[means_['chasing_binary']>0], ax=ax,
+             x='female_velocity',
+             hue='species', palette=species_palette,
+             stat='probability', common_norm=False,
+             cumulative=False, element='step',fill=False)
+ax=axn[2]
+sns.histplot(data=means_[means_['singing_binary']>0], ax=ax,
+             x='female_velocity',
+             hue='species', palette=species_palette,
+             stat='probability', common_norm=False,
+             cumulative=False, element='step',fill=False)
+for ax in axn:
+    ax.set_xlim([0, 50])
+    ax.legend_.remove()
+    ax.set_box_aspect(1)
+pl.subplots_adjust(wspace=0.5)
+
+#%%
+#%
+# Bin female_velocity during chasing and singing
+xvar = 'female_velocity'
+means_ = courting.groupby(['species', 'acquisition', 
+                           'binned_{}'.format(xvar),
+                           ])[plot_vars].mean().reset_index()
+means_.head()
+
+#%%
+species_palette = {'Dmel': 'lavender', 
+                   'Dyak': 'mediumorchid'}
+error_type = 'se'
+
+xvar = 'female_velocity'
+max_dist = np.ceil(meanbouts_courting['dist_to_other'].max())
+#bin_size=3
+#bins = np.arange(0, max_dist+bin_size, bin_size)
+#meanbouts_courting['binned_{}'.format(xvar)] = pd.cut(meanbouts_courting[xvar], 
+#                                       bins=bins, labels=bins[:-1])  
+fig, axn = pl.subplots(1, 2, sharex=True, sharey=True)
+sns.pointplot(data=means_,
+             x='binned_{}'.format(xvar), 
+             y='chasing_binary', ax=axn[0], 
+             errorbar=error_type, #errcolor=bg_color,
+             hue='species', palette=species_palette) #, edgecolor=bg_color)
+axn[0].legend_.remove()
+axn[0].set_ylabel("p(chasing|courtship)")
+
+sns.pointplot(data=means_, #meanbouts_courting,
+             x='binned_{}'.format(xvar), 
+             y='singing_binary', ax=axn[1], 
+             errorbar=error_type, #errcolor=bg_color,
+             hue='species', palette=species_palette) #, edgecolor=bg_color)
+axn[1].set_ylabel("p(singing|courtship)")
+
+for ax in axn:
+    ax.set_box_aspect(1)
+    ax.set_xlabel('female velocity (mm/s)')
+# format xticks to single digit numbers:
+#bin_edges = [str(int(x)) for x in vel_bins[:-1]]
+bin_edges = sorted(filt_ftjaaba['binned_female_velocity_labels'].unique())
+bin_labels = [str(round(x)) if i%2==0 or i==len(bin_edges)-1 else '' for i, x in enumerate(bin_edges)]
+
+axn[0].set_xticklabels(bin_labels, rotation=0)
+
+sns.move_legend(axn[1], bbox_to_anchor=(1.05, 1), loc='upper left', frameon=False)
+sns.despine(offset=4)
+
+fig.text(0.1, 0.8, 'Behaviors split by consecutive courtship bouts ({})'.format(bout_type))
+fig.text(0.1, 0.85, 'Dmel (n={}), Dyak (n={})'.format(\
+                    plotd[plotd['species']=='Dmel']['acquisition'].nunique(),
+                    plotd[plotd['species']=='Dyak']['acquisition'].nunique()))
+
+putil.label_figure(fig, figid)
+
+figname = '{}_frac-{}_sing_vs_chase_hist__{}'.format(xvar, bout_type, dataid)
+pl.savefig(os.path.join(figdir, '{}.png'.format(figname)))
+print(figdir, figname)
+
 
 # %%
