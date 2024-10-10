@@ -15,11 +15,14 @@ import glob
 import numpy as np
 import pandas as pd
 
+import matplotlib as mpl
 import seaborn as sns
 import pylab as pl
 
 import utils as util
 import plotting as putil
+import utils_2p as util2p
+
 import mat73
 
 #%%
@@ -30,24 +33,17 @@ bg_color = [0.7]*3 if plot_style=='dark' else 'k'
 #%%
 
 rootdir = '/Volumes/juliana/2p-data'
-session = '20240905'
+session = '20240531'
 # acq = 'example-yak-P1-1'
-acqnum = 18
-processed_mats = glob.glob(os.path.join(rootdir, session, 'processed', 
-                                        'matlab-files', '*{:03d}.mat'.format(acqnum)))
+acqnum = 9
+
+#%%
 processed_dir = os.path.join(rootdir, session, 'processed')
-
-mat_fpath = processed_mats[0]
-#print(mat_fpath)
-
-acq = os.path.splitext(os.path.split(mat_fpath)[1])[0]
+acq = os.path.splitext(os.path.split(glob.glob(os.path.join(rootdir, session, 
+                'virmen', '*{:03d}.mat'.format(acqnum)))[0])[1])[0]
 print(acq)
 
-figdir = os.path.join(rootdir, session, 'processed', 'figures', acq)
-if not os.path.exists(figdir):
-    os.makedirs(figdir)
-
-# %%
+# % Output figures dir
 if plot_style == 'white':
     figdir = os.path.join( processed_dir, 'figures', acq , 'white')
 else:
@@ -57,24 +53,37 @@ if not os.path.exists(figdir):
     os.makedirs(figdir)
 print(figdir)
 
-#%%
+#%% Load behavior data
+
+# Load BEHAVIOR data
+#fname = 'virft_{}.csv'.format(acq)
+#virmen_fpath = os.path.join(processed_dir, 'matlab-files', fname)
+#assert os.path.exists(virmen_fpath)
+
+#ft = pd.read_csv(virmen_fpath)
+ft = util2p.virmen_to_df(session, acqnum, rootdir=rootdir)
+
+#%% Load ROI extracted traces
+
+processed_mats = glob.glob(os.path.join( processed_dir,
+                        'matlab-files', '*{:03d}.mat'.format(acqnum)))
+# Get matlab CAIMAN results
+mat_fpath = processed_mats[0]
+#%
 # Load mat
-mat = mat73.loadmat(mat_fpath)
-mdata = mat['plotdata']
-
-for k, v in mdata.items():
-    try:
-        print(k, v.shape)
-    except Exception as e:
-        print("Issue with {}".format(k))
+mdata = util2p.load_caimin_matlab(mat_fpath)
+#%x
+# mat = mat73.loadmat(mat_fpath)
+# mdata = mat['plotdata']
 
 #%%
+# Sort ROIs by peak response time
 
 roi_to_argmax0 = dict(mdata['roi_by_argmax'])
 roi_to_argmax = {int(k)-1: int(v) for k, v in roi_to_argmax0.items()}
 
 # Filter by responses
-min_dff = 0.
+min_dff = 0.2
 timecourse = mdata['mean_across_trials_lr']
 max_vals = np.max(timecourse, axis=1)
 incl_ixs = np.where(max_vals > min_dff)[0]
@@ -84,7 +93,6 @@ incl_rois = [r for r in sorted_by_peak if r in incl_ixs]
 
 print("There are {}/{} ROIs with dF/F > {}".format(len(incl_rois), len(max_vals), min_dff))
 # %%a
-import matplotlib as mpl
 
 # Overlay ROI positions and color by their peak resppnse time
 
@@ -97,12 +105,12 @@ unique_argmax = np.unique([roi_to_argmax[roi] for roi in incl_rois]) #np.unique(
 n_argmaxs = len(unique_argmax) #[v for k, v in roi_to_argmax.items()]).size
 
 rel_tstamps = mdata['rel_tstamps']
-color_list = cmap(np.linspace(0, 1, len(rel_tstamps))) #n_argmaxs))
+color_list = cmap(np.linspace(0, 1, n_argmaxs)) #len(rel_tstamps))) #n_argmaxs))
 cdict = dict((v, c) for v, c in zip(unique_argmax, color_list))
 colors = [cdict[roi_to_argmax[i]] for i in incl_rois]
 
 # Make continuous colorbar
-norm = pl.Normalize(min(rel_tstamps), max(rel_tstamps)) #min(unique_argmax), max(unique_argmax))
+norm = pl.Normalize(0, n_argmaxs) #min(rel_tstamps), max(rel_tstamps)) #min(unique_argmax), max(unique_argmax))
 clist = mpl.colors.LinearSegmentedColormap.from_list('jet', color_list)
 sm = pl.cm.ScalarMappable(cmap=clist, norm=norm)
 
@@ -125,11 +133,9 @@ pl.savefig(os.path.join(figdir, '{}.png'.format(figname)), bbox_inches='tight')
 # %%
 
 # Plot waterfall plot of ROI timecourses, sorted by peak response time
-
 neural_fps = 1/np.mean(np.diff((mdata['iTime'])))
 nsec_legend = 1 
 nframes_legend = nsec_legend * neural_fps
-
 
 fig, ax = pl.subplots()
 offset=0
@@ -164,134 +170,56 @@ pl.savefig(os.path.join(figdir, '{}.png'.format(figname)), bbox_inches='tight')
 #%%
 # average time course
 mean_timecourse = mdata['neural_timecourse'].mean(axis=0)
+sum_timecourse = mdata['neural_timecourse'].sum(axis=0)
+
 neural_tstamps = mdata['iTime']
 print(mean_timecourse.shape)
 
 pl.figure()
 pl.plot(neural_tstamps, mean_timecourse, lw=1, c=bg_color)
-
+#pl.plot(neural_tstamps, sum_timecourse, lw=1, c=bg_color)
 
 #%%
 
-
-import numpy as np
-import csv
-import xml.etree.ElementTree as ET
-from scipy.signal import find_peaks
-
-
-# 2p roi trace (CSV)
-tc_acquisition  = glob.glob(os.path.join(rootdir,
-                        session, 'processed', 
-                        '*{:03d}*.csv'.format(acqnum)))[0]
 # 2p meta info
 xml_fname = glob.glob(os.path.join(rootdir, session, 'raw', 
                         '*{:03d}'.format(acqnum),
-                       '*{:03d}.xml'.format(acqnum)))[0]
+                       '*-{:03d}.xml'.format(acqnum)))[0]
 # frame trigger info
 voltage_fname = glob.glob(os.path.join(rootdir, session, 
                         'raw', '*{:03d}'.format(acqnum),
                        '*{:03d}_*VoltageRecording_001.csv'.format(acqnum)))[0]
 
+# Get absolute frame times for 2p images
+absFrameTimes = util2p.get_timestamps_from_xml(xml_fname, verbose=True)
 
-# Read the XML file
-def xml_to_dict(fname):
-    tree = ET.parse(fname)
-    root = tree.getroot()
-    return root
-
-metaIm = xml_to_dict(xml_fname)
-
-#%%
-
-def print_xml_structure(element, indent=0):
-    print('  ' * indent + element.tag)
-    for child in element:
-        print_xml_structure(child, indent + 1)
-
-# Load and parse the XML
-metaIm = ET.parse(xml_fname).getroot()
-print_xml_structure(metaIm)
-
-#%%
-# Load and parse the XML file
-#tree = ET.parse(xml_fname)
-#root = tree.getroot()
-
-# Find the imaging start time in the XML structure
-sequence_element = metaIm.find(".//Sequence")
-if sequence_element is not None and 'time' in sequence_element.attrib:
-    imStart_str = sequence_element.attrib['time'].split(':')
-    imStart = [float(imStart_str[0]), float(imStart_str[1]), float(imStart_str[2])]
-else:
-    raise ValueError("Could not find the 'time' attribute in the XML structure.")
-
-#%%
-
-# Find start times of behavior and imaging
-#imStart_str = metaIm.find(".//PVScan/Sequence").attrib['time'].split(':')
-#imStart = [float(imStart_str[0]), float(imStart_str[1]), float(imStart_str[2])]
-
-# Get the number of frames and their absolute times
-nIms = len(metaIm.findall(".//Sequence/Frame"))
-#absFrameTimes = []
-#for i in range(nIms):
-#    frame = metaIm.find(f".//Sequence/Frame[{i+1}]")
-#    absFrameTimes.append(float(frame.attrib['absoluteTime']))
-absFrameTimes = [float(i.attrib['absoluteTime']) for i in metaIm.findall(".//Sequence/Frame")]
-
-# Extract behavior start time and bTime
-behStart = ft[['clock_H', 'clock_M', 'clock_S']].iloc[0] #expr[0, 7:10]
-#bTime = np.concatenate(([0], expr[1:, 0]))
-
-#%%
-# Read voltage CSV file (skipping the first row and column)
-voltage = np.genfromtxt(voltage_fname, delimiter=',', skip_header=1, usecols=1)
-
-# Find voltage peaks for syncing
-peaks, _ = find_peaks(np.diff(voltage), height=1)
-id_vals = peaks + 1  # Adjust indices to match MATLAB's 1-based indexing
-pulseRCD = id_vals / 1000  # Convert to seconds
-
-#%%
 # Find pulses sent in the experiment data
-id_ML = ft[ft['pulse_sent']==1].index #np.where(expr[:, 10] == 1)[0]
-pulseSent = ft.loc[id_ML]['toc'] #expr[id_ML, 0]
+pulseRCD = util2p.get_pulse_frames(voltage_fname)
+pulseSent = ft[ft['pulse_sent']==1]['toc'] #expr[id_ML, 0]
+mean_offset = util2p.get_pulse_offset(pulseRCD, pulseSent)
 
-# Adjust pulse lengths if they don't match
-if len(pulseRCD) > len(pulseSent):
-    pulseRCD = pulseRCD[:len(pulseSent)]
-elif len(pulseSent) > len(pulseRCD):
-    pulseSent = pulseSent[:len(pulseRCD)]
-
-# Calculate the offset
-offset = pulseSent - pulseRCD
-mean_offset = np.mean(offset)
-
-#%%
 # Align behavior and imaging
 iTime = np.array(absFrameTimes) + mean_offset
 
 #%%
+# 2p roi trace (CSV)
+try:
+    tc_acquisition  = glob.glob(os.path.join(rootdir,
+                        session, 'processed', 
+                        '*{:03d}*.csv'.format(acqnum)))[0]
 
-# Load 2p timecourse data
-tc = pd.read_csv(tc_acquisition)['Mean'].values
+    # Load 2p timecourse data
+    tc = pd.read_csv(tc_acquisition)['Mean'].values
+    #
+    # Ensure the same length vectors
+    len_tc = min(len(tc), len(iTime))
+    tc = tc[:len_tc]
+    iTime = iTime[:len_tc]
 
-#%%
-# Ensure the same length vectors
-len_tc = min(len(tc), len(iTime))
-tc = tc[:len_tc]
-iTime = iTime[:len_tc]
-
-
-# %%
-
-# Load BEHAVIOR data
-fname = 'virft_{}.csv'.format(acq)
-virmen_fpath = os.path.join(processed_dir, 'matlab-files', fname)
-assert os.path.exists(virmen_fpath)
-
-ft = pd.read_csv(virmen_fpath)
+    pl.figure()
+    pl.plot(iTime, tc, lw=1, c=bg_color)
+except IndexError:
+    pass
 
 # %%
 
@@ -303,11 +231,6 @@ ax.legend_.remove()
 #ax.plot(ft['pos_x'], ft['pos_y'], lw=1, c=bg_color)
 ax.set_aspect(1)
 
-
-# %%
-import utils_2p as util2p
-
-# Assuming expr and bTime are defined
 
 #%%
 #behav_time = [0]
@@ -379,6 +302,9 @@ mean_phase = np.reshape(heading_diff[firstID:lastID + 1], (phase_length, total_p
 stim_phase = np.reshape(ft['target_angle'][firstID:lastID + 1], (phase_length, total_phases), order='F').T
 time_phase = np.reshape(behav_time[firstID:lastID + 1], (phase_length, total_phases), order='F').T
 
+# Tracking index
+R, vigor, fidelity = util2p.compute_ti(heading_diff, ft['target_angle'], behav_time)
+
 #%% add vars to FT
 heading_diff0 = [0]
 heading_diff0.extend(heading_diff)
@@ -390,7 +316,6 @@ ti0.extend(R)
 ft['tracking_index'] = ti0
 
 #%%
-
 fig, axn =pl.subplots(1, 2, sharex=True, sharey=True)
 ax=axn[0]
 ax.imshow(mean_phase, cmap='viridis', vmin=-0.1, vmax=0.1,
@@ -409,10 +334,6 @@ figname = 'mean_phase_v_stim_phase'
 pl.savefig(os.path.join(figdir, '{}.png'.format(figname)), bbox_inches='tight')
 
 #%%
-
-R, vigor, fidelity = util2p.compute_ti(heading_diff, ft['target_angle'], behav_time)
-
-#%%
 pl.figure()
 pl.plot(R)
 
@@ -421,8 +342,8 @@ pl.plot(R)
 # %%
 
 # Plot SUMMARY of timecourse data
-zoom_pre = 50
-zoom_post = 150
+zoom_pre = 50 #25
+zoom_post = 150 #125 #100 #150
 
 # Create figure
 fig, axn = pl.subplots(4, 1, sharex=True,
@@ -449,7 +370,7 @@ ax=axn[3]
 ax.plot(neural_tstamps, mean_timecourse, lw=1, c=bg_color)
 ax.set_ylabel('dF/F')
 #
-pl.subplots_adjust(hspace=-0.05)
+pl.subplots_adjust(hspace=0.1)
 
 sns.despine(offset=0, trim=True)
 
@@ -495,7 +416,10 @@ yq3 = (yq2 - bl) / bl
 n_cycles = 3
 ft['target_angle'] = np.round(ft['target_angle'], 2)
 one_phase = phase_length / n_cycles
-pos1 = np.where(ft['target_angle'] == 0.01)[0] + int(one_phase * 0.5)
+
+close_to_zero = np.argmin(abs(ft['target_angle'] - 0))
+min_zero_val = ft['target_angle'][close_to_zero]
+pos1 = np.where(ft['target_angle'] == min_zero_val)[0] + int(one_phase * 0.5)
 trial_length = int(one_phase * n_cycles)
 trial_starts = pos1[1::2]
 trial_starts = trial_starts[0::n_cycles]
@@ -526,8 +450,8 @@ rs = np.mean(trial_TI, axis=1)
 vs = np.mean(trial_vel, axis=1)
 as_ = np.mean(np.abs(trial_headingdiff), axis=1) / 0.021
 
-crt = np.where(rs > 0.4)[0]
-moving = np.setdiff1d(np.where((vs > 5) | (as_ > 2))[0], crt)
+crt = np.where(rs > 0.3)[0]
+moving = np.setdiff1d(np.where((vs > 3) | (as_ > 2))[0], crt)
 
 # Average values for plotting
 mnTime = np.mean(np.array(trial_time), axis=0)
@@ -584,12 +508,9 @@ figname = 'averaged_neural_timecourse_{}-cycles'.format(n_cycles) #delta-heading
 fig.savefig(os.path.join(figdir, f'{figname}.png')) #, bbox_inches='tight')
 
 # %%
-import numpy as np
-import matplotlib.pyplot as plt
-import os
+# Plot MEANPHASE and DF/F as heatamps
 
-# Assuming meanPhase, nPrePhases, trialTC, and savedir are defined
-fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(12, 6))
+fig, (ax1, ax2) = pl.subplots(1, 2, figsize=(12, 6))
 
 # Plot for meanPhase (left subplot)
 cax1 = ax1.imshow(mean_phase[n_pre_phases:, :], aspect='auto', 
@@ -615,15 +536,15 @@ pl.colorbar(cax2, ax=ax2)
 ax1.get_shared_y_axes().join(ax1, ax2)
 
 putil.label_figure(fig, acq)
-
 # Save the figure
 figname = 'meanphase-heading_trialTC'
 fig.savefig(os.path.join(figdir, f'{figname}.png'), bbox_inches='tight')
 
-# Display the plot
-#plt.show()
-
 # %%
+
+
+#%%
+# Plot POSITION in VR
 
 fig, axn = pl.subplots(1, 2)
 ax=axn[0]
@@ -653,7 +574,7 @@ print(behav_time[start_ix], neural_tstamps[0])
 end_ix = abs(behav_time - neural_tstamps[-1]).argmin()
 print(behav_time[end_ix], neural_tstamps[-1])
 
-
+# Get interprolated dF/F
 interp_func = interp1d(neural_tstamps, mean_timecourse, fill_value="extrapolate")
 yq2 = interp_func(behav_time[start_ix:end_ix])
 
@@ -662,23 +583,31 @@ idx = np.where((neural_tstamps < behav_time[first_motion]) & (neural_tstamps > (
 bl = np.nanmean(yq2[idx])
 yq3 = (yq2 - bl) / bl
 
-
-fig, axn =pl.subplots(2, 1, sharex=True)
-ax=axn[0]
-ax.plot(ft['toc'].iloc[start_ix:end_ix], ft['ang_vel_fly'].iloc[start_ix:end_ix])
-ax=axn[1]
-#ax.plot(neural_tstamps, mean_timecourse)
-ax.plot(ft['toc'].iloc[start_ix:end_ix], yq3)
-#xn[1]
-
+# Add interpolated dff to FT
 ft['dff'] = None
 ixs = ft.iloc[start_ix:end_ix].index
 ft.loc[ixs, 'dff'] = yq3
 
+# PLOT --------------
+
+ft['ang_vel_fly_abs'] = np.abs(ft['ang_vel_fly'])
+fig, axn =pl.subplots(3, 1, sharex=True)
+ax=axn[0]
+ax.plot(ft['toc'].iloc[start_ix:end_ix], ft['ang_vel_fly_abs'].iloc[start_ix:end_ix])
+ax.set_ylabel('ang_vel')
+ax=axn[1]
+#ax.plot(neural_tstamps, mean_timecourse)
+ax.plot(ft['toc'].iloc[start_ix:end_ix], yq3)
+ax.set_ylabel('dF/F')
+
+ax=axn[2]
+ax.plot(ft['toc'].iloc[start_ix:end_ix], ft['male_fov_female_pos_x'].iloc[start_ix:end_ix])
+
+
 #ax.plot(ft['ang_vel_fly'])
 #%%
 
-plot_vars = ['ang_vel_fly', 'vel_fly', 'target_angle']
+plot_vars = ['ang_vel_fly_abs', 'vel_fly', 'target_angle']
 fig, axn = pl.subplots(1, len(plot_vars), sharey=True)
 
 for ax, plot_var in zip(axn, plot_vars):
@@ -689,6 +618,14 @@ for ax, plot_var in zip(axn, plot_vars):
     ax.legend_.remove()
     ax.set_box_aspect(1)
     ax.invert_yaxis()
+    if plot_var in ['ang_vel_fly', 'ang_vel_fly_abs', 'vel_fly']:
+        ax.set_xlim([0, 100])
+
+# 
+putil.label_figure(fig, acq)
+figname = 'scatter_hue-TI_dff_v_angvel'
+pl.savefig(os.path.join(figdir, '{}.png'.format(figname)), bbox_inches='tight')
+
 # %%
 
 fig, ax = pl.subplots()
@@ -714,8 +651,6 @@ fig, ax = pl.subplots()
 ax.hist([time_bins[v-1] for k, v in roi_to_argmax.items()], bins=20)
 #ax.set_xticks(np.linspace(0, len(mdata['rel_tstamps']), 5))
 ax.get_xticks()
-
-#%%
 
 #switch_left = np.where(np.diff(targ_angle) > 0)[0]
 #%%
@@ -750,15 +685,17 @@ switch_lr_onsets, switch_rl_onsets = get_switch_regions(targ_angle)
 pl.figure(figsize=(12,4))
 pl.plot(targ_angle)
 pl.plot(switch_lr_onsets, np.ones_like(switch_lr_onsets)*1.5, 'ro', markersize=1)
-pl.plot(switch_rl_onsets, np.ones_like(switch_lr_onsets)*1.5, 'go', markersize=1)
+pl.plot(switch_rl_onsets, np.ones_like(switch_rl_onsets)*1.5, 'go', markersize=1)
 
 # %%
 nsec_pre = 0.0
-nsec_post = 2
+nsec_post = 1.5
 behav_fps = 1/np.mean(np.diff(behav_time))
 print(behav_fps)
 nframes_post = int(round(nsec_post * behav_fps))
 nframes_pre = int(round(nsec_pre * behav_fps))
+
+print(nframes_post)
 
 ft['sweep_lr'] = None
 for i, sweep_start_ix in enumerate(switch_lr_onsets):
@@ -781,16 +718,16 @@ for i, d in ft.groupby('sweep_lr'):
     if i is None:
         continue
 
-    rel_times.append(d['sweep_time'])
-    ang_vels.append(d['ang_vel_fly'])
-    targ_angles.append(d['target_angle'])
+    rel_times.append(d['sweep_time'].values)
+    ang_vels.append(d['ang_vel_fly'].values)
+    targ_angles.append(d['target_angle'].values)
 
 ang_vels = np.array(ang_vels)
 rel_times = np.array(rel_times)
 targ_angles = np.array(targ_angles)
 
 #%%
-fig, axn =pl.subplots(2, 1)
+fig, axn =pl.subplots(2, 1, sharex=True)
 ax=axn[0]
 ax.plot(rel_times.mean(axis=0), targ_angles.mean(axis=0),
         lw=2, color='r')
@@ -802,6 +739,10 @@ for i, (t, v) in enumerate(zip(rel_times, ang_vels)):
 ax.plot(rel_times.mean(axis=0), ang_vels.mean(axis=0),
         lw=2, color='r')
 ax.set_ylim([-50, 50])
+
+putil.label_figure(fig, acq)
+figname = 'target_angle_v_angvel'
+pl.savefig(os.path.join(figdir, '{}.png'.format(figname)), bbox_inches='tight')
 
 # %%
 fig, ax =pl.subplots()
