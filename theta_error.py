@@ -468,7 +468,10 @@ def plot_regr_by_species(chase_, xvar, yvar, hue_var=None, plot_hue=False, plot_
     n_species = chase_['species'].nunique()
     fig, axn = pl.subplots(1, n_species, sharex=True, sharey=True)
     for ai, (sp, df_) in enumerate(chase_[chase_['stim_hz']>0].groupby('species')):
-        ax = axn[ai]
+        if n_species>1:
+            ax = axn[ai]
+        else:
+            ax=axn
         # plot scatter
         if plot_hue:
             sns.scatterplot(data=df_, x=xvar, y=yvar, ax=ax,
