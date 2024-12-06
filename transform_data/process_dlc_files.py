@@ -33,11 +33,10 @@ import dlc as dlc
 import plot_dlc_frames as pdlc
 
 #%%
-
 # DLC
-minerva_base='/Volumes/Julie'
+minerva_base='/Volumes/Juliana'
 projectname='projector-1dot-jyr-2024-02-18' 
-procdir = os.path.join(minerva_base, '2d-projector-analysis/DeepLabCut', projectname)
+procdir = os.path.join(minerva_base, '2d-projector-analysis/circle_diffspeeds/DeepLabCut', projectname)
 print(len(os.listdir(procdir)))
 
 #% get src paths
@@ -57,14 +56,12 @@ fps = 60  # Hz
 max_jump = 6
 pcutoff=0.8 #0.99
 
-
 destdir = os.path.join(procdir.split(projectname)[0], 'processed')
 if not os.path.exists(destdir):
     os.makedirs(destdir)
 print("Saving processed files to: {}".format(destdir))
 
 #%%
-
 errors = []
 d_list = []
 for fpath in all_fpaths:

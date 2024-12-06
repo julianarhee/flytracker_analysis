@@ -88,14 +88,17 @@ pcutoff=0.8
 #tstamp = np.linspace(0, len(trk) * 1 / fps, len(trk))
 #nframes = len(trk)
 
-flydf, dotdf = dlc.load_dlc_df(fpath, fly1=flyid, fly2=dotid, fps=fps, 
+df = dlc.load_dlc_df(fpath, fly1=flyid, fly2=dotid, fps=fps, 
                            max_jump=max_jump, pcutoff=pcutoff, diff_speeds=True)
+flydf = df[df['id']==0].copy()
+dotdf = df[df['id']==1].copy()
+
 
 #%% add speed info
 importlib.reload(dlc)
 
 #%% Change var names for relative metrics
-trk_ = dlc.dlc_df_to_flytracker_df(flydf, dotdf)
+trk_ = dlc.convert_dlc_to_flytracker(df) #flydf, dotdf)
 
 # do transformations
 df = rem.do_transformations_on_df(trk_, frame_width, frame_height) #, fps=fps)

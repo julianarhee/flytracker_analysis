@@ -17,7 +17,8 @@ import pylab as pl
 import seaborn as sns
 
 import utils as util
-
+import relative_metrics as rem
+import cv2
 
 from shapely.geometry import Point, MultiPoint
 #from shapely.geometry.polygon import Polygon
@@ -537,122 +538,77 @@ def load_dlc_df(fpath, fly1='fly', fly2='single', fps=60, max_jump=6, pcutoff=0.
     nan_rows = flydf.isna().any(axis=1)
     dotdf.loc[nan_rows] = np.nan
 
-    flydf, dotdf = get_interfly_params(flydf, dotdf, cop_ix=None)
-
-    if diff_speeds:
-        acq = get_acq_from_dlc_fpath(fpath)
-        dotdf, flydf = add_speed_epochs(dotdf, flydf, acq, filter=False)
-
-    return flydf, dotdf
-
-
-def dlc_df_to_flytracker_df(flydf, dotdf, mm_per_pix=None):
-    # assign IDs like FlyTracker DFs
+    # add ID vars
     flydf['id'] = 0
     dotdf['id'] = 1
     trk_ = pd.concat([flydf, dotdf], axis=0)
 
-    # convert units from pix to mm
-    #mm_per_pix = 3 / trk_['body_length'].mean()
-    trk_ = trk_.rename(columns={'dist_to_other': 'dist_to_other_pix'})
+    # Get metrics between the two objects
+    flydf, dotdf = get_interfly_params(flydf, dotdf, cop_ix=None)
 
-    if mm_per_pix is None:
-        arena_size_mm = 38 - 4 # arena size minus 2 body lengths
-        max_dist_found = trk_['dist_to_other_pix'].max()
-        mm_per_pix = arena_size_mm/max_dist_found
+    # Add speed epoch if this is a diffspeeds2 protocol
+    if diff_speeds:
+        acq = get_acq_from_dlc_fpath(fpath)
+        dotdf, flydf = add_speed_epochs(dotdf, flydf, acq, filter=False)
 
-    # convert units to mm/s and mm (like FlyTracker)
-    trk_['vel'] = trk_['lin_speed'] * mm_per_pix
-    trk_['dist_to_other'] = trk_['dist_to_other_pix'] * mm_per_pix
-    trk_['pos_x_mm'] = trk_['centroid_x'] * mm_per_pix
-    trk_['pos_y_mm'] = trk_['centroid_y'] * mm_per_pix
+    # Combine
+    df = pd.concat([flydf, dotdf], axis=0)
 
-    trk_['mm_to_pix'] = mm_per_pix
-
-    # % rename columns to get RELATIVE pos info
-    trk_ = trk_.rename(columns={'centroid_x': 'pos_x',
-                               'centroid_y': 'pos_y',
-                               'heading': 'ori', # should rename this
-                               'body_length': 'major_axis_len',
-                               'inter_wing_dist': 'minor_axis_len',
-                               'time': 'sec'
-                               }) 
-    return trk_
-
-
-#%%
-import yaml 
-import glob
-
-def get_dlc_analysis_dir(projectname = 'projector-1dot-jyr-2024-02-18', 
-                             rootdir='/Volumes/Julie'):
-    # analyzed files directory
-    minerva_base = os.path.join(rootdir, '2d-projector-analysis', 'circle_diffspeeds')
-    analyzed_dir = os.path.join(minerva_base, 'DeepLabCut', projectname) #'analyzed')
-    #analyzed_files = glob.glob(os.path.join(analyzed_dir, '*_el.h5'))
-    #print("Found {} analyzed files".format(len(analyzed_files)))
-    return analyzed_dir
-
-def load_dlc_config(projectname='projector-1dot-jyr-2024-02-18', 
-                    rootdir='/Users/julianarhee/DeepLabCut'):
-    project_dir = os.path.join(rootdir, projectname)
-    cfg_fpath = os.path.join(project_dir, 'config.yaml')
-    with open(cfg_fpath, "r") as f:
-        cfg = yaml.load(f, Loader=yaml.SafeLoader)
-    return cfg
-
-def get_fpath_from_acq_prefix(analyzed_dir, acq_prefix):
-    match_acq = glob.glob(os.path.join(analyzed_dir, '{}*_el.h5'.format(acq_prefix)))
-    assert len(match_acq)==1, "Found {} files matching acquisition prefix {} in {}".format(len(match_acq), acq_prefix, analyzed_dir)
-    fpath = match_acq[0]
-    return fpath
-
-def get_all_h5_files(analyzed_dir):
-    return glob.glob(os.path.join(analyzed_dir, '*.h5'))
-
-def load_and_transform_dlc(fpath, localroot='/Users/julianarhee/DeepLabCut',
-                           projectname='projector-1dot-jyr-2024-02-18',
-                           assay='2d-projector', heading_var='ori',
-                           flyid='fly', dotid='single', fps=60, max_jump=6, pcutoff=0.8, winsize=10):
-
-    import relative_metrics as rem
-    import plot_dlc_frames as pdlc
-    import cv2
-    import parallel_pursuit as pp
-
+    # Add some meta data
     acq = get_acq_from_dlc_fpath(fpath) #'_'.join(os.path.split(fpath.split('DLC')[0])[-1].split('_')[0:-1])
-    project_dir = os.path.join(localroot, projectname)
-
-    # load dataframe
-    df0 = pd.read_hdf(fpath)
-    scorer = df0.columns.get_level_values(0)[0]
-    
-    # load config file
-    cfg = load_dlc_config(projectname=projectname)
-
-    # get fig id 
-    fig_id = os.path.split(fpath.split('DLC')[0])[-1]
-
-    # Load dlc into dataframes
-
-    # load _eh.h5
-    flydf, dotdf = load_dlc_df(fpath, fly1=flyid, fly2=dotid, fps=fps, 
-                            max_jump=max_jump, pcutoff=pcutoff, diff_speeds=True)
-
-    # transform to FlyTracker format
-    df_ = dlc_df_to_flytracker_df(flydf, dotdf)
     #print(df_['id'].unique())
-    df_['acquisition'] = acq
+    df['acquisition'] = acq
     if 'ele' in acq:
         sp = 'ele'
     elif 'yak' in acq:
         sp = 'yak'
     elif 'mel' in acq:
         sp = 'mel'
-    df_['species'] = sp
+    df['species'] = sp
 
+    return df #flydf, dotdf
+
+
+def convert_dlc_to_flytracker(df, mm_per_pix=None):
+    # assign IDs like FlyTracker DFs
+
+    # convert units from pix to mm
+    #mm_per_pix = 3 / trk_['body_length'].mean()
+    df = df.rename(columns={'dist_to_other': 'dist_to_other_pix'})
+
+    if mm_per_pix is None:
+        arena_size_mm = 38 - 4 # arena size minus 2 body lengths
+        max_dist_found = df['dist_to_other_pix'].max()
+        mm_per_pix = arena_size_mm/max_dist_found
+
+    # convert units to mm/s and mm (like FlyTracker)
+    df['vel'] = df['lin_speed'] * mm_per_pix
+    df['dist_to_other'] = df['dist_to_other_pix'] * mm_per_pix
+    df['pos_x_mm'] = df['centroid_x'] * mm_per_pix
+    df['pos_y_mm'] = df['centroid_y'] * mm_per_pix
+
+    df['mm_to_pix'] = mm_per_pix
+
+    # % rename columns to get RELATIVE pos info
+    df = df.rename(columns={'centroid_x': 'pos_x',
+                               'centroid_y': 'pos_y',
+                               'heading': 'ori', # should rename this
+                               'body_length': 'major_axis_len',
+                               'inter_wing_dist': 'minor_axis_len',
+                               'time': 'sec'
+                               }) 
+    return df
+
+
+def transform_dlc_to_relative(df_, video_fpath=None, winsize=3): #heading_var='ori'):
+    '''
+    Transform variables measured from keypoints to relative positions and angles.
+
+    Returns:
+        _description_
+    '''
     #% Get video info
-    cap = util.get_video_cap_check_multidir(acq, assay=assay)
+    cap = cv2.VideoCapture(video_fpath)
 
     # get frame info
     n_frames = cap.get(cv2.CAP_PROP_FRAME_COUNT)
@@ -673,9 +629,145 @@ def load_and_transform_dlc(fpath, localroot='/Users/julianarhee/DeepLabCut',
     # angular velocity
     df_ = util.smooth_and_calculate_velocity_circvar(df_, smooth_var='ori', 
                                     vel_var='ang_vel', time_var='sec', winsize=winsize)
-    #df_.loc[(df_['ang_vel']>200) | (df_['ang_vel']<-200), 'ang_vel'] = np.nan
-    #df_.loc[(df_['ang_vel_smoothed']>200) | (df_['ang_vel_smoothed']<-200), 'ang_vel_smoothed'] = np.nan
-    df_.loc[ (df_['ang_vel']>100) | (df_['ang_vel']<-100), 'ang_vel' ] = np.nan
+    # df_.loc[ (df_['ang_vel']>200) | (df_['ang_vel']<-200), 'ang_vel' ] = np.nan
+    df_['ang_vel_deg'] = np.rad2deg(df_['ang_vel'])
+    df_['ang_vel_abs'] = np.abs(df_['ang_vel'])
+
+    # targ_pos_theta
+    df_['targ_pos_theta_abs'] = np.abs(df_['targ_pos_theta'])
+    df_ = util.smooth_and_calculate_velocity_circvar(df_, smooth_var='targ_pos_theta', vel_var='targ_ang_vel',
+                                  time_var='sec', winsize=winsize)
+
+    #% smooth x, y, 
+    df_['pos_x_smoothed'] = df_.groupby('id')['pos_x'].transform(lambda x: x.rolling(winsize, 1).mean())
+    #sign = -1 if input_is_flytracker else 1
+    sign=1
+    df_['pos_y_smoothed'] = sign * df_.groupby('id')['pos_y'].transform(lambda x: x.rolling(winsize, 1).mean())  
+
+    # calculate heading
+    for i, d_ in df_.groupby('id'):
+        df_.loc[df_['id']==i, 'traveling_dir'] = np.arctan2(d_['pos_y_smoothed'].diff(), d_['pos_x_smoothed'].diff())
+    df_['traveling_dir_deg'] = np.rad2deg(df_['traveling_dir']) #np.rad2deg(np.arctan2(df_['pos_y_smoothed'].diff(), df_['pos_x_smoothed'].diff())) 
+    df_ = util.smooth_and_calculate_velocity_circvar(df_, smooth_var='traveling_dir', vel_var='traveling_dir_dt',
+                                    time_var='sec', winsize=3)
+
+    df_['heading_travel_diff'] = np.abs( np.rad2deg(df_['ori']) - np.rad2deg(df_['traveling_dir']) ) % 180  #% 180 #np.pi 
+
+    df_['vel_smoothed'] = df_.groupby('id')['vel'].transform(lambda x: x.rolling(winsize, 1).mean())
+
+    # calculate theta_error
+    f1 = df_[df_['id']==0].copy().reset_index(drop=True)
+    f2 = df_[df_['id']==1].copy().reset_index(drop=True)
+    #f1 = pp.calculate_theta_error(f1, f2, heading_var=heading_var)
+    #f2 = pp.calculate_theta_error(f2, f1, heading_var=heading_var)
+    f1 = the.calculate_theta_error(f1, f2, xvar='pos_x', yvar='pos_y')
+    f2 = the.calculate_theta_error(f1, f2, xvar='pos_x', yvar='pos_y')
+
+    df_.loc[df_['id']==0, 'theta_error'] = f1['theta_error']
+    df_.loc[df_['id']==1, 'theta_error'] = f2['theta_error']
+
+    return df_
+
+
+
+#%%
+import yaml 
+import glob
+
+def get_dlc_analysis_dir(projectname = 'projector-1dot-jyr-2024-02-18', 
+                             rootdir='/Volumes/Juliana'):
+    # analyzed files directory
+    minerva_base = os.path.join(rootdir, '2d-projector-analysis', 'circle_diffspeeds')
+    analyzed_dir = os.path.join(minerva_base, 'DeepLabCut', projectname) #'analyzed')
+    #analyzed_files = glob.glob(os.path.join(analyzed_dir, '*_el.h5'))
+    #print("Found {} analyzed files".format(len(analyzed_files)))
+    return analyzed_dir
+
+def load_yaml(cfg_fpath):
+    '''load yaml file from full path'''
+    with open(cfg_fpath, "r") as f:
+        cfg = yaml.load(f, Loader=yaml.SafeLoader)
+    return cfg
+
+def load_dlc_config(projectname='projector-1dot-jyr-2024-02-18', 
+                    rootdir='/Users/julianarhee/DeepLabCut'):
+    project_dir = os.path.join(rootdir, projectname)
+    cfg_fpath = os.path.join(project_dir, 'config.yaml')
+    with open(cfg_fpath, "r") as f:
+        cfg = yaml.load(f, Loader=yaml.SafeLoader)
+    return cfg
+
+def get_fpath_from_acq_prefix(analyzed_dir, acq_prefix):
+    match_acq = glob.glob(os.path.join(analyzed_dir, '{}*_el.h5'.format(acq_prefix)))
+    assert len(match_acq)==1, "Found {} files matching acquisition prefix {} in {}".format(len(match_acq), acq_prefix, analyzed_dir)
+    fpath = match_acq[0]
+    return fpath
+
+def get_all_h5_files(analyzed_dir):
+    return glob.glob(os.path.join(analyzed_dir, '*.h5'))
+
+def load_and_transform_dlc(fpath, #localroot='/Users/julianarhee/DeepLabCut',
+                           video_fpath=None,
+                           projectname='projector-1dot-jyr-2024-02-18',
+                           assay='2d-projector', heading_var='ori',
+                           flyid='fly', dotid='single', fps=60, 
+                           max_jump=6, pcutoff=0.8, winsize=10):
+
+    #import parallel_pursuit as pp
+
+    acq = get_acq_from_dlc_fpath(fpath) #'_'.join(os.path.split(fpath.split('DLC')[0])[-1].split('_')[0:-1])
+    #project_dir = os.path.join(localroot, projectname)
+
+    # load dataframe
+    # df0 = pd.read_hdf(fpath)
+    # scorer = df0.columns.get_level_values(0)[0]
+    
+    # load config file
+    # cfg = load_dlc_config(projectname=projectname)
+
+    # get fig id 
+    fig_id = os.path.split(fpath.split('DLC')[0])[-1]
+
+    # Load dlc into dataframes
+
+    # load _eh.h5
+    df = load_dlc_df(fpath, fly1=flyid, fly2=dotid, fps=fps, 
+                            max_jump=max_jump, pcutoff=pcutoff, diff_speeds=True)
+
+    # transform to FlyTracker format
+    df_ = convert_dlc_to_flytracker(df)
+
+    #% Get video info
+    if video_fpath is None:
+        try:
+            cap = util.get_video_cap_check_multidir(acq, assay=assay)
+            assert cap is not None
+        except:
+            print("No video found for {}. Returning.".format(acq))
+            return df_ 
+    else:
+        cap = cv2.VideoCapture(video_fpath)
+
+    # get frame info
+    n_frames = cap.get(cv2.CAP_PROP_FRAME_COUNT)
+    frame_width  = cap.get(cv2.CAP_PROP_FRAME_WIDTH)   # float `width`
+    frame_height = cap.get(cv2.CAP_PROP_FRAME_HEIGHT)  # float `height`
+    #print(frame_width, frame_height) # array columns x array rows
+
+    # input is DLC
+    df_ = rem.do_transformations_on_df(df_, frame_width, frame_height) #, fps=fps)
+    df_['ori_deg'] = np.rad2deg(df_['ori'])
+    #df['targ_pos_theta'] = -1*df['targ_pos_theta']
+
+    # convert centered cartesian to polar
+    rad, th = util.cart2pol(df_['ctr_x'].values, df_['ctr_y'].values)
+    df_['pos_radius'] = rad
+    df_['pos_theta'] = th
+
+    # angular velocity
+    df_ = util.smooth_and_calculate_velocity_circvar(df_, smooth_var='ori', 
+                                    vel_var='ang_vel', time_var='sec', winsize=winsize)
+    # df_.loc[ (df_['ang_vel']>200) | (df_['ang_vel']<-200), 'ang_vel' ] = np.nan
     df_['ang_vel_deg'] = np.rad2deg(df_['ang_vel'])
     df_['ang_vel_abs'] = np.abs(df_['ang_vel'])
 
