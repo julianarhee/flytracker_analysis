@@ -56,7 +56,9 @@ if __name__ == '__main__':
     parser.add_argument('--experiment', type=str, default='circle_diffspeeds', help='Experiment type (default: circle_diffspeeds).')
     parser.add_argument('--localdir', type=str, 
                         default='/Users/julianarhee/Documents/rutalab/projects/courtship/data/2d-projector/circle_diffspeeds/FlyTracker',
-                        help='Assay type (default: 2d-projector; alt: 38mm-dyad).')
+                        # default1 = '/Users/julianarhee/Documents/rutalab/projects/courtship/data/2d-projector/circle_diffspeeds/FlyTracker'
+                        # default2 = '/Users/julianarhee/Documents/rutalab/projects/courtship/data/MF/38mm-dyad/FlyTracker'
+                        help='Secondary *local* dir to save large .pkl output to.')
     
     args = parser.parse_args()
 
@@ -64,26 +66,23 @@ if __name__ == '__main__':
     create_new = args.new
     basedir = args.basedir
     experiment = args.experiment
-
+    localdir = args.localdir
 
     #%%
-    local_basedir = '/Users/julianarhee/Documents/rutalab/projects/courtship/data'
+    # Specify data source directory based on server filetree
     if assay == '2d-projector':
         # Set sourcedirs
         srcdir = os.path.join(basedir, '2d-projector-analysis', experiment, 'FlyTracker/processed_mats') #relative_metrics'
-        # LOCAL savedir 
-        localdir = os.path.join(local_basedir, assay, experiment, 'FlyTracker')
-    elif assay == '38mm-dyad':
+    elif assay == '38mm_dyad':
         # src dir of processed .dfs from feat/trk.mat files (from relative_metrics.py)
         srcdir = os.path.join(basedir, 'free-behavior-analysis', 'MF', 'FlyTracker', assay, 'processed_mats')
-        # local savedir for giant pkl
-        localdir = os.path.join(local_basedir, 'MF', assay, 'FlyTracker')
 
-    # set figdir
-    destdir = os.path.split(srcdir)[0] # os.path.join(os.path.split(srcdir)[0], 'relative_metrics')
+    # set output dir
+    destdir = os.path.split(srcdir)[0] 
     if not os.path.exists(destdir):
         os.makedirs(destdir)
     print(destdir)
+    out_fpath = os.path.join(destdir, 'relative_metrics.pkl')
 
     # get local file for aggregated data
     out_fpath_local = os.path.join(localdir, 'relative_metrics.pkl')
@@ -105,8 +104,7 @@ if __name__ == '__main__':
         df = util.load_aggregate_data_pkl(srcdir, mat_type='df')
         print(df['species'].unique())
 
-        #% save
-        out_fpath = os.path.join(destdir, 'relative_metrics.pkl')
+        #% save to server loc
         df.to_pickle(out_fpath)
         print(out_fpath)
 

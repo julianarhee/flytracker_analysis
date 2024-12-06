@@ -515,9 +515,10 @@ def combine_jaaba_and_processed_df(df, jaaba):
 def load_aggregate_data_pkl(savedir, mat_type='df', included_species=None):
     '''
     Find all *feat.pkl (or *trk.pkl) files in savedir and load them into a single dataframe.
+    These files are created by relative_metrics.py and contain processed data from FlyTracker.
 
     Arguments:
-        savedir -- Full path to dir containing processed *feat.pkl files.
+        savedir -- Full path to dir containing processed *.pkl files, e.g., _feat.pkl, _df.pkl, etc.
 
     Keyword Arguments:
         mat_type -- feat or trk (default: {'feat'})
@@ -552,7 +553,6 @@ def load_aggregate_data_pkl(savedir, mat_type='df', included_species=None):
         #    feat_ = pkl.load(f)
         feat_ = pd.read_pickle(fp)
         feat_['acquisition'] = acq 
-
         feat_['species'] = sp
 
         f_list.append(feat_)

@@ -595,56 +595,28 @@ if __name__ == '__main__':
     parser.add_argument('--subdir', type=str, default=None, help='subdir of tracked folders, e.g., fly-tracker (default: None).')
     
     args = parser.parse_args()
-    
-    #rootdir = '/Volumes/Julie'
-    #assay = '38mm_dyad'
-    #viddir = '/Volumes/Julie/courtship-videos/38mm_dyad'
-    #savedir = '/Volumes/Julie/free-behavior-analysis/FlyTracker/38mm_dyad/processed'
-    #movie_fmt = 'avi'
-    #flyid1 = 0
-    #flyid2 = 1
-    #plot_checks = False
-
-    #savedir = os.path.join(rootdir, 'free-behavior-analysis', 'FlyTracker', 
-    #                       assay, 'processed')
-
-#    session = '20240109'
-#    flynum = 'fly'
-#    acqdir = glob.glob(os.path.join(viddir, '{}*{}*'.format(session, flynum)))[0]
-#    get_metrics_relative_to_focal_fly(acqdir,
-#                                      savedir=savedir,
-#                                      movie_fmt=movie_fmt, 
-#                                      flyid1=flyid1, flyid2=flyid2,
-#                                      plot_checks=False,
-#                                      rootdir=rootdir) 
-    #viddir = '/Volumes/Giacomo/free_behavior_data'
-    #savedir = '/Volumes/Julie/free-behavior-analysis/FlyTracker/38mm_dyad/processed'
-
-    #viddir = '/Volumes/Giacomo/JAABA_classifiers/projector/changing_dot_size_speed'
-    #savedir = '/Volumes/Julie/2d-projector-analysis/FlyTracker/processed_mats'
-    #flyid1=0
-    #flyid2=1
-    #movie_fmt = 'avi'
-
-    #%% 
+    # 
     viddir = args.viddir 
     savedir = args.savedir
     movie_fmt = args.movie_fmt
     flyid1 = args.flyid1
     flyid2 = args.flyid2
-
     subdir = args.subdir
-
     create_new = args.new
 
-#%%
+#%% #Hardcoded parameter values for running in interactive mode
 
-    viddir = '/Volumes/Julie/2d-projector'
-    savedir = '/Volumes/Julie/2d-projector-analysis/FlyTracker/processed_mats'
+    #viddir = '/Volumes/Giacomo/free_behavior_data'
+    #savedir = '/Volumes/Julie/free-behavior-analysis/FlyTracker/38mm_dyad/processed'
+
+    #viddir = '/Volumes/Giacomo/JAABA_classifiers/projector/changing_dot_size_speed'
+    #savedir = '/Volumes/Julie/2d-projector-analysis/FlyTracker/processed_mats'
+
+    viddir = '/Volumes/Juliana/2d-projector'
+    savedir = '/Volumes/Juliana/2d-projector-analysis/FlyTracker/processed_mats'
     subdir = 'fly-tracker'
     flyid1 = 0
     flyid2 = 1
-
     movie_fmt = '.avi'
     create_new=True
 
@@ -655,9 +627,7 @@ if __name__ == '__main__':
         found_mats = glob.glob(os.path.join(viddir,  '20*', '*', '*feat.mat'))
     print('Found {} processed videos.'.format(len(found_mats)))
 
-    #%%
-    #fp = found_mats[0]
-
+    #%% For each found acquisition (video), calculate relative metrics
     for fp in found_mats:
         if subdir is not None:
             # FT output dir is parent dir
@@ -669,17 +639,18 @@ if __name__ == '__main__':
         else:
             acq = os.path.split(os.path.split(fp.split(viddir+'/')[-1])[0])[0]
 
-        if "BADTRACKING" in fp:
+        if "BADTRACKING" in fp: # Giacomo added this to skip bad tracking
             continue
-        #acq = os.path.split(acq_viddir)[0]
 
         acqdir = os.path.join(viddir, acq)
         print(acq)
+        # Try loading data
         if not create_new:
             df_ = load_processed_data(acqdir, load=False, savedir=savedir)
             if df_ is False: 
                 create_new=True #assert ft is True, "No feat df found, creating now."
-
+        
+        # Create a new processed_mat file by calculating relative metrics
         if create_new:
             if '2d-projector' not in viddir:
                 cop_ix = get_copulation_ix(acq)
@@ -691,11 +662,3 @@ if __name__ == '__main__':
                                         mov_is_upstream=subdir is not None,
                                         flyid1=flyid1, flyid2=flyid2,
                                         plot_checks=False)
-            #assert len(df_['id'].unique()
-#%%
-#            get_metrics_relative_to_focal_fly(acqdir,
-#                                        savedir=savedir,
-#                                        movie_fmt='avi', 
-#                                        flyid1=0, flyid2=1,
-#                                        plot_checks=False)
-#
