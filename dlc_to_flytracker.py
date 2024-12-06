@@ -12,6 +12,7 @@ Last Modified  :
 import sys
 import os
 import glob
+import cv2
 import numpy as np
 import pandas as pd
 
@@ -54,5 +55,24 @@ acquisition_dir = os.path.join(minerva, 'courtship-videos', '38mm_dyad',
                                '{}*'.format(prefix))
 ft_calib, ft_track, ft_feat = util.load_flytracker_data(acquisition_dir, calib_is_upstream=True, 
                                fps=60, subfolder='*', filter_ori=True)
+
+# %%
+# Transform to relative coordinates:
+
+#% Get video info
+cap = cv2.VideoCapture(video_fpath)
+
+# get frame info
+n_frames = cap.get(cv2.CAP_PROP_FRAME_COUNT)
+frame_width  = cap.get(cv2.CAP_PROP_FRAME_WIDTH)   # float `width`
+frame_height = cap.get(cv2.CAP_PROP_FRAME_HEIGHT)  # float `height`
+
+#%%
+
+import transform_data.relative_metrics as rem
+df = rem.do_transformations_on_df(df, frame_width, frame_height, 
+                             feat_=ft_feat,
+                             cop_ix=ft_calib['cop_ind'], 
+                             flyid1=0, flyid2=1)
 
 # %%
