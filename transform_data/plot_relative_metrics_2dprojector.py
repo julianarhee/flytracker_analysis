@@ -15,7 +15,10 @@ import matplotlib as mpl
 
 import matplotlib.gridspec as gridspec
 
-
+# import some custom funcs
+module_path = os.path.abspath(os.path.join('..'))
+if module_path not in sys.path:
+    sys.path.append(module_path)
 from relative_metrics import load_processed_data
 import utils as util
 import plotting as putil

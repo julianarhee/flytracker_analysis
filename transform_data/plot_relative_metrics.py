@@ -15,13 +15,17 @@ import matplotlib as mpl
 
 import matplotlib.gridspec as gridspec
 
-
+#%%
+# import some custom funcs
+module_path = os.path.abspath(os.path.join('..'))
+if module_path not in sys.path:
+    sys.path.append(module_path)
 from relative_metrics import load_processed_data
 import utils as util
 import plotting as putil
 
 #%%
-plot_style='white'
+plot_style='dark'
 putil.set_sns_style(plot_style, min_fontsize=24)
 bg_color = [0.7]*3 if plot_style=='dark' else 'k'
 
@@ -32,7 +36,6 @@ importlib.reload(util)
 
 assay = '2d-projector' # '38mm-dyad'
 create_new = False
-
 minerva_base = '/Volumes/Juliana'
 
 #%%
@@ -47,7 +50,11 @@ elif assay == '38mm-dyad':
     # local savedir for giant pkl
     localdir = '/Users/julianarhee/Documents/rutalab/projects/courtship/38mm-dyad/FlyTracker'
 
-# set figdir
+# Specify path to local file for aggregated data 
+out_fpath_local = os.path.join(localdir, 'relative_metrics.pkl') #'processed.pkl')
+print(out_fpath_local)
+
+# Set figdir to be in parent directory as the source data on server
 if plot_style == 'white':
     figdir = os.path.join(os.path.split(srcdir)[0], 'relative_metrics', 'figures', 'white')
 else: 
@@ -56,10 +63,6 @@ if not os.path.exists(figdir):
     os.makedirs(figdir)
 print(figdir)
 
-# get local file for aggregated data
-out_fpath_local = os.path.join(localdir, 'relative_metrics.pkl') #'processed.pkl')
-print(out_fpath_local)
-
 # try reading if we don't want to create a new one
 if not create_new:
     if os.path.exists(out_fpath_local):
@@ -67,8 +70,7 @@ if not create_new:
         print("Loaded local processed data.")
     else:
         create_new = True
-
-print(create_new)
+assert not(create_new), "No new data to create, and no existing data to load."
 
 #%%
 # cycle over all the acquisition dfs in srcdir and make an aggregated df
@@ -76,8 +78,8 @@ if create_new:
     df = util.load_aggregate_data_pkl(srcdir, mat_type='df')
     print(df['species'].unique())
 
-    #% save
-    out_fpath = os.path.join(os.path.split(figdir)[0], 'processed.pkl')
+    #% save to server
+    out_fpath = os.path.join(os.path.split(figdir)[0], 'relative_metrics.pkl')
     df.to_pickle(out_fpath)
     print(out_fpath)
 

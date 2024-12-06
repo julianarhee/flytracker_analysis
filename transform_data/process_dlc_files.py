@@ -7,6 +7,7 @@ Saves aggregate processed.pkl file to ./2d-projector-analysis/DeepLabCut directo
 Saves a copy to local directory /Users/julianarhee/Documents/rutalab/projects/courtship/data/2d-projector/DLC
 """
 #%%
+import sys
 import os
 import sys
 import glob
@@ -21,6 +22,10 @@ import matplotlib as mpl
 import matplotlib.gridspec as gridspec
 import traceback
 
+# import some custom funcs
+module_path = os.path.abspath(os.path.join('..'))
+if module_path not in sys.path:
+    sys.path.append(module_path)
 #from relative_metrics import load_processed_data
 import utils as util
 import plotting as putil

@@ -6,6 +6,7 @@ Created on Mon Mar  2 14:47:00 2020
 @email: juliana.rhee@gmail.com  
 """
 #%%
+import sys
 import os
 import glob
 import cv2
@@ -17,6 +18,11 @@ import utils as util
 import matplotlib as mpl
 import pickle as pkl
 import argparse
+
+# import some custom funcs
+module_path = os.path.abspath(os.path.join('..'))
+if module_path not in sys.path:
+    sys.path.append(module_path)
 
 #%%
 def plot_frame_check_affines(ix, fly1, fly2, cap, frame_width=None, frame_height=None):
@@ -605,6 +611,7 @@ if __name__ == '__main__':
     create_new = args.new
 
 #%% #Hardcoded parameter values for running in interactive mode
+    interactive = False
 
     #viddir = '/Volumes/Giacomo/free_behavior_data'
     #savedir = '/Volumes/Julie/free-behavior-analysis/FlyTracker/38mm_dyad/processed'
@@ -612,13 +619,14 @@ if __name__ == '__main__':
     #viddir = '/Volumes/Giacomo/JAABA_classifiers/projector/changing_dot_size_speed'
     #savedir = '/Volumes/Julie/2d-projector-analysis/FlyTracker/processed_mats'
 
-    viddir = '/Volumes/Juliana/2d-projector'
-    savedir = '/Volumes/Juliana/2d-projector-analysis/FlyTracker/processed_mats'
-    subdir = 'fly-tracker'
-    flyid1 = 0
-    flyid2 = 1
-    movie_fmt = '.avi'
-    create_new=True
+    if interactive:
+        viddir = '/Volumes/Juliana/2d-projector'
+        savedir = '/Volumes/Juliana/2d-projector-analysis/FlyTracker/processed_mats'
+        subdir = 'fly-tracker'
+        flyid1 = 0
+        flyid2 = 1
+        movie_fmt = '.avi'
+        create_new=True
 
 #%%
     if subdir is not None:
