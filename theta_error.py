@@ -14,7 +14,7 @@ import pylab as pl
 import matplotlib as mpl
 import matplotlib.gridspec as gridspec
 
-from relative_metrics import load_processed_data
+from transform_data.relative_metrics import load_processed_data
 import utils as util
 import plotting as putil
 

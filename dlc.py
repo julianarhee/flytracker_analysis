@@ -17,8 +17,7 @@ import pylab as pl
 import seaborn as sns
 
 import utils as util
-import relative_metrics as rem
-import theta_error as the
+import transform_data.relative_metrics as rem
 import cv2
 
 from shapely.geometry import Point, MultiPoint
