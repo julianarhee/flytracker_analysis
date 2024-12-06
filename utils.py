@@ -1195,6 +1195,10 @@ def load_flytracker_data(acq_dir, calib_is_upstream=False, fps=60, subfolder='*'
     Get calibration info, -feat.mat and -track.mat as DFs.
     If calib_is_upstream, subfolder should be '' -- load_feat and load_trk looks into os.path.join(acq_dir, subfolder, *.mat)
 
+    Args:
+        calib_is_upstream: (bool) calibration.mat file is upstream of flytracker output directory (default should prob be true)
+        subfolder: (str) subfolder where -feat.mat and -track.mat are stored if NOT in default level of where video .avi file is
+        filter_ori: (bool) if True, set ORI to NaN where wing info is missing
     Returns:
         calib: 
         trackdf: raw tracking data (e.g., position, orientation, left wing ang)
