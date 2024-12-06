@@ -1,21 +1,22 @@
 name: flytracker
 channels:
   - defaults
+  - conda-forge
 dependencies:
-  - ipython
-  - pip
   - seaborn
-  - matplotlib
-  - scipy
-  - pandas
-  - jupyter
-  - numpy
-  - python=3.8
-  - opencv
-  - ipykernel
-  - moviepy
   - plotly
-  - librosa
+  - numpy
+  - pip
+  - opencv
+  - scipy
+  - moviepy
   - python-sounddevice
+  - python=3.8
+  - ipython
+  - ipykernel
   - yaml
-prefix: /home/julianarhee/anaconda3/envs/flytracker
+  - jupyter
+  - pandas
+  - pytables
+  - statsmodels
+prefix: /Users/julianarhee/miniforge3/envs/flytracker
