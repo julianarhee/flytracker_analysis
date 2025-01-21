@@ -1207,7 +1207,7 @@ def get_theta_errors_before_turns(aggr_turns, fps=60):
 if __name__ == '__main__':
     #%% 
     # Set plotting
-    plot_style='white'
+    plot_style='dark'
     putil.set_sns_style(plot_style, min_fontsize=18)
     bg_color = [0.7]*3 if plot_style=='dark' else 'k'
 
@@ -1532,7 +1532,7 @@ if __name__ == '__main__':
 
     behav = 'chasing'
     min_frac_bout = 0.5
-    do_bouts = True
+    do_bouts = False
 
     markersize=5
     huevar='stim_hz'
@@ -1607,6 +1607,79 @@ if __name__ == '__main__':
 
     print(figdir, figname)
 
+#%%
+    # FIGURE:
+    # 1) allocentric frames for 1 example fly
+    # 2) Dmel: all bouts, male-centered
+    # 3) Dyak: all bouts, male-centered
+
+    min_frac_bout = 0.1
+
+    frames_ = select_data_subset(filtdf, meanbouts, behav=behav, min_frac_bout=min_frac_bout, 
+                                do_bouts=False, is_flytracker=is_flytracker)
+    bouts_ = select_data_subset(filtdf, meanbouts, behav=behav, min_frac_bout=min_frac_bout, 
+                                do_bouts=True, is_flytracker=is_flytracker)
+    
+
+    single_acq_df = frames_[frames_['acquisition'] == curr_acq].copy()
+
+    huevals = np.array(list(stimhz_palette.keys()))
+    hue_norm = mpl.colors.Normalize(vmin=huevals.min(), vmax=huevals.max())
+    alpha=0.75
+
+    fig, axn = pl.subplots(1,3, figsize=(10,5), sharex=True, sharey=False,
+                               subplot_kw={'projection': 'polar'})
+
+    #  plot allocentric - get polar coords from transformed
+    # ctr_x, _y are the transformed coordinates of the TARGET
+    rad, th = util.cart2pol(single_acq_df['ctr_x'].values, single_acq_df['ctr_y'].values)
+    single_acq_df['pos_radius'] = rad
+    single_acq_df['pos_theta'] = th
+    ax = axn[0] #fig.add_subplot(121,projection='polar')
+    ax.set_title('Example fly (allocentric)')
+    sns.scatterplot(data=single_acq_df, ax=ax,
+                    x='pos_theta', y='pos_radius', s=markersize,
+                    hue=huevar, palette=stimhz_palette,
+                    hue_norm=hue_norm,
+                    edgecolor='none', legend=0, alpha=alpha) 
+
+    # plot egocentric
+    #xvar='targ_pos_theta'
+    #yvar='targ_pos_radius'
+    xvar= 'facing_angle'
+    yvar = 'targ_pos_radius'
+    for ai, (sp, spec_df) in enumerate(bouts_.groupby('species')): 
+        ax=axn[ai+1]
+        ax.set_title('{}: egocentric'.format(sp))
+        sns.scatterplot(data=spec_df, ax=ax,
+                        x=xvar, y=yvar, s=markersize,
+                        hue=huevar, palette=stimhz_palette, 
+                        hue_norm=hue_norm,
+                        edgecolor='none', legend=0, alpha=alpha)
+        if plot_com:
+            # plot Center of Mass
+            for hueval, f_ in spec_df.groupby(huevar):
+                cm_theta = pd.Series(np.unwrap(f_[xvar])).mean()
+                cm_radius = f_[yvar].mean()
+                ax.scatter(cm_theta, cm_radius, s=30, c=stimhz_palette[hueval],
+                        marker='o', edgecolor='k', lw=0.5,
+                        label='COM: {:.2f}'.format(hueval))
+
+    for ai, ax in enumerate(fig.axes):
+        if ai>0:
+            ax.set_ylim([0, 800])
+        curr_ticks = ax.get_yticklabels()
+        ax.set_yticklabels(['' for i, v in enumerate(curr_ticks) 
+                            if i==len(curr_ticks)], fontsize=12)
+        ax.set_xticklabels('')
+
+    putil.label_figure(fig, figid)
+    fig.text(0.1, 0.9, 'ex: {}\n{} {}, where min fract of bout >= {:.2f}'.format(curr_acq, behav, data_type, min_frac_bout))
+
+    figname = 'allo-ego_examplefly_Dyak_Dmel_minfracbout={}'.format(min_frac_bout)
+    print(figname)
+    pl.savefig(os.path.join(figdir, '{}.png'.format(figname)))
+    pl.savefig(os.path.join(figdir, '{}.svg'.format(figname)))
 
 
 #%% =======================================================
