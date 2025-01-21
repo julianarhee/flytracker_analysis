@@ -19,11 +19,11 @@ import seaborn as sns
 
 import utils as util
 import plotting as putil
-import relative_metrics as rem
+import transform_data.relative_metrics as rem
 import importlib
 import dlc as dlc
 
-from relative_metrics import load_processed_data, get_video_cap
+from transform_data.relative_metrics import load_processed_data, get_video_cap
 #%% FUNCTIONS 
 def calculate_theta_error(f1, f2, xvar='pos_x', yvar='pos_y', heading_var='ori'):
     vec_between = f2[[xvar, yvar]] - f1[[xvar, yvar]]
