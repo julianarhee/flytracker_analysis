@@ -513,6 +513,54 @@ def combine_jaaba_and_processed_df(df, jaaba):
 
     return ftjaaba
 
+def split_condition_from_acquisition_name(df0):
+    '''
+    Sometimes condition (led level, stimulus size, etc.) is saved in acquisition filename. 
+    Extract condition, save as column in df0, and update acquisition name to standard.
+    NOTE: currently only set to check for ledXX in filename (for projector assay tests)
+    Arguments:
+        df0 -- pd.DataFrame
+            Can be aggregate or 1 dataframe, will add flynum, date_str, then group by flynum, datestr, species
+
+    Returns:
+        newdf -- pd.DataFrame
+            Subset of data, with 1 acquisition per date-fly combo.
+    '''
+    # find the pattern 'flyX' where X is a number in ft_acq
+    #ft_acq = [s for s in ft_acq if re.search(r'fly\d', s)]
+    df0['flynum'] = [int(re.search('_fly\d_', a)[0][4:-1]) if 'fly' in a else 
+                     int(re.search('_f\d_', a)[0][2:-1]) for a in df0['acquisition']]
+    df0['date_str'] = [int(v[0:8]) for v in df0['acquisition']]
+    # check that we only take 1 file per date/fly combo
+    df_list = []
+    #df0['led'] = 0
+    for (flynum, datestr, sp), d_ in df0.groupby(['flynum', 'date_str', 'species']):
+        #if len(d_['acquisition'].unique())>1 and 
+        curr_acqs = d_['acquisition'].unique()
+        if any(['led' in a for a in curr_acqs]):
+            #print(flynum, datestr, curr_acqs)
+            if len([a for a in curr_acqs if a.endswith('led20')]) > 0:
+                keep_acq = [a for a in curr_acqs if a.endswith('led20')][0]
+                led_level = 20
+            elif len([a for a in curr_acqs if not a.endswith('led00')]) > 0:
+                led_str = [a.split('led')[-1] for a in curr_acqs if not a.endswith('led00')]
+                nonzero_led_ix = np.argmax([int(v) for v in led_str])
+                led_level = int(led_str[nonzero_led_ix])
+                keep_acq = [a for a in curr_acqs if a.endswith('led{}'.format(led_str[nonzero_led_ix]))][0]
+            # updated df
+            keep_df = d_[d_['acquisition']==keep_acq].copy()
+            keep_df['led'] = led_level
+            updated_acq = keep_acq.split('_led')[0]
+            keep_df['acquisition'] = updated_acq
+            df_list.append(keep_df)
+        else:
+            df_list.append(d_)
+
+    newdf = pd.concat(df_list)
+
+    return newdf
+
+
 
 def load_aggregate_data_pkl(savedir, mat_type='df', included_species=None):
     '''
