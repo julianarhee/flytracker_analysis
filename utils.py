@@ -230,35 +230,37 @@ def smooth_and_calculate_velocity_circvar(df, smooth_var='ori', vel_var='ang_vel
     df['{}_smoothed'.format(smooth_var)] = np.nan
     for i, df_ in df.groupby('id'): 
         # unwrap for continuous angles, then interpolate NaNs
-        nans = df_[df_[smooth_var].isna()].index
+        #nans = df_[df_[smooth_var].isna()].index
         unwrapped = pd.Series(np.unwrap(df_[smooth_var].interpolate().ffill().bfill()),
                             index=df_.index) #.interpolate().values))
-        # replace nans 
-        #unwrapped.loc[nans] = np.nan 
+
         # interpolate over nans now that the values are unwrapped
         oris = unwrapped.interpolate() 
-        # revert back to -pi, pi
-        #oris = [util.set_angle_range_to_neg_pos_pi(i) for i in oris]
-        # smooth with rolling()
+
+        # smooth with rolling() - this sets range from 0, 2pi
         smoothed = smooth_orientations_pandas(oris, winsize=winsize) #smoothed = smooth_orientations(df_['ori'], winsize=3)
-        # unwrap again to take difference between oris -- should look similar to ORIS
+
+        # revert back to -pi, pi
         smoothed_wrap = pd.Series([set_angle_range_to_neg_pos_pi(i) for i in smoothed])
-        #smoothed_wrap_unwrap = pd.Series(np.unwrap(smoothed_wrap), index=df_.index)
-        # take difference
-        smoothed_diff = smoothed_wrap.diff()
-        smoothed_diff_range = [set_angle_range_to_neg_pos_pi(i) for i in smoothed_diff]
+        df.loc[df['id']==i, '{}_smoothed'.format(smooth_var)] = smoothed_wrap.values
+
+        # unwrap again to take difference between oris -- should look similar to ORIS
+        #smoothed_unwrap = pd.Series(np.unwrap(smoothed), index=df_.index)
+
+        # take difference and set range -pi, pi
+        smoothed_diff = [set_angle_range_to_neg_pos_pi(i) for i in smoothed_wrap.diff().bfill()]
+        # get smoothed angular velocity by dividing by timme
+        ang_vel_smoothed = smoothed_diff / df_[time_var].diff().mean()
+
         #smoothed_diff = np.concatenate([[0], smoothed_diff])
-        ori_diff_range = [set_angle_range_to_neg_pos_pi(i) for i in oris.diff()]
-        # get angular velocity
-        ang_vel_smoothed = smoothed_diff_range / df_[time_var].diff().mean()
-        ang_vel = ori_diff_range / df_[time_var].diff().mean() 
+        ori_diff = [set_angle_range_to_neg_pos_pi(i) for i in oris.diff().bfill()]
+        ang_vel = ori_diff / df_[time_var].diff().mean() 
 
         df.loc[df['id']==i, vel_var] = ang_vel
-        df.loc[df['id']==i, '{}_diff'.format(smooth_var)] = ori_diff_range
+        df.loc[df['id']==i, '{}_diff'.format(smooth_var)] = ori_diff #.values
 
-        df.loc[df['id']==i, '{}_smoothed'.format(vel_var)] = ang_vel_smoothed
-        df.loc[df['id']==i, '{}_smoothed'.format(smooth_var)] = smoothed_wrap
-        df.loc[df['id']==i, '{}_smoothed_range'.format(smooth_var)] = [set_angle_range_to_neg_pos_pi(i) for i in smoothed_wrap]
+        df.loc[df['id']==i, '{}_smoothed'.format(vel_var)] = ang_vel_smoothed #.values
+        #df.loc[df['id']==i, '{}_smoothed_range'.format(smooth_var)] = [set_angle_range_to_neg_pos_pi(i) for i in smoothed_wrap]
 
     #df.loc[df[df[smooth_var].isna()].index, :] = np.nan
     bad_ixs = df[df[smooth_var].isna()]['frame'].dropna().index.tolist()
@@ -532,7 +534,12 @@ def load_aggregate_data_pkl(savedir, mat_type='df', included_species=None):
     for fp in found_fns:
         if 'BADTRACKING' in fp:
             continue
+
         acq = os.path.split(fp)[1].split('_{}'.format(mat_type))[0] 
+        # format acq
+        year_str = acq[0:4]
+        if len(re.findall(year_str, acq))>1:
+            acq = acq.split('_'+year_str)[0]
 
         if 'yak' in acq:
             sp = 'Dyak'
@@ -609,7 +616,7 @@ def load_jaaba(assay='2d-projector', experiment='circle_diffspeeds', fname=None)
     '''
     local_basedir = '/Users/julianarhee/Documents/rutalab/projects/courtship/data'
     if assay=='2d-projector':
-        srcdir =  os.path.join(local_basedir, assay, experiment, 'JAABA')
+        srcdir =  os.path.join(local_basedir, assay, experiment, 'FlyTracker')
         #% Load jaaba-traansformed data
         #jaaba_fpath = os.path.join(srcdir, 'jaaba_transformed_data_transf.pkl')
         if fname is None:
@@ -623,11 +630,11 @@ def load_jaaba(assay='2d-projector', experiment='circle_diffspeeds', fname=None)
         assert os.path.exists(jaaba_fpath), "File not found: {}".format(jaaba_fpath)
         jaaba = pd.read_pickle(jaaba_fpath)   
         print(jaaba['species'].unique())
-    elif assay=='MF': #'38mm-dyad':
+    elif assay=='38mm-dyad':
         #jaaba_file = '/Volumes/Julie/free-behavior-analysis/38mm-dyad/jaaba.pkl'
-        srcdir = os.path.join(local_basedir, assay, '38mm-dyad') #'38mm-dyad-ft-jaaba'
+        srcdir = os.path.join(local_basedir, assay, experiment, 'FlyTracker') #'38mm-dyad-ft-jaaba'
         if fname is not None:
-            jaaba_fpath = os.path.join(srcdir, '{}_jaaba.pkl'.format(fname))
+            jaaba_fpath = os.path.join(srcdir, '{}.pkl'.format(fname))
         else:
             jaaba_fpath = os.path.join(srcdir, 'jaaba.pkl')
         print("loading: {}".format(jaaba_fpath))
