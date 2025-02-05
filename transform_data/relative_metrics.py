@@ -14,7 +14,6 @@ import numpy as np
 import pandas as pd
 import pylab as pl  
 import seaborn as sns
-import utils as util
 import matplotlib as mpl
 import pickle as pkl
 import argparse
@@ -23,6 +22,8 @@ import argparse
 module_path = os.path.abspath(os.path.join('..'))
 if module_path not in sys.path:
     sys.path.append(module_path)
+import utils as util
+
 
 #%%
 def plot_frame_check_affines(ix, fly1, fly2, cap, frame_width=None, frame_height=None):
@@ -310,7 +311,7 @@ def get_copulation_ix(acq):
         '20240322-1156_f9_eleWT_4do_gh': 92680
     }
 
-    local_dir = '/Users/julianarhee/Documents/rutalab/projects/courtship/38mm-dyad'
+    local_dir = '/Users/julianarhee/Documents/rutalab/projects/courtship/data/38mm-dyad/MF'
     fname = 'courtship-free-behavior (Responses) - Form Responses 1.csv'
     meta_fpath = os.path.join(local_dir, fname)
     meta = pd.read_csv(meta_fpath)
@@ -359,10 +360,70 @@ def get_video_cap(acqdir, ftname=None, movie_fmt='avi'):
     cap = cv2.VideoCapture(vidpath)
     return cap
 
+#% Calculation functions
+def calculate_theta_error(f1, f2, xvar='pos_x', yvar='pos_y'):
+    vec_between = f2[[xvar, yvar]] - f1[[xvar, yvar]]
+    abs_ang = np.arctan2(vec_between[yvar], vec_between[xvar])
+    th_err = util.circular_distance(abs_ang, f1['ori']) # already bw -np.pi, pi
+    #th_err = [util.set_angle_range_to_neg_pos_pi(v) for v in th_err]
+    #th_err[0] = th_err[1]
+    f1['abs_ang_between'] = abs_ang # this is the line-of-sigh, line btween pursuer and target
+    f1['theta_error'] = th_err
+    f1['theta_error_dt'] = pd.Series(np.unwrap(f1['theta_error'].interpolate().ffill().bfill())).diff() / f1['sec'].diff().mean()
+    f1['theta_error_deg'] = np.rad2deg(f1['theta_error'])
+
+    return f1
+
+def calculate_theta_error_from_heading(f1, f2, xvar='pos_x', yvar='pos_y'):
+    if 'heading' not in f1.columns:
+        f1 = calculate_heading(f1)
+        f2 = calculate_heading(f2)
+
+    vec_between = f2[[xvar, yvar]] - f1[[xvar, yvar]]
+    abs_ang = np.arctan2(vec_between[yvar], vec_between[xvar])
+    th_err = util.circular_distance(abs_ang, f1['heading']) # already bw -np.pi, pi
+    #th_err = [util.set_angle_range_to_neg_pos_pi(v) for v in th_err]
+    #th_err[0] = th_err[1]
+    f1['theta_error_heading'] = th_err
+    f1['theta_error_heading_dt'] = pd.Series(np.unwrap(f1['theta_error'].interpolate().ffill().bfill())).diff() / f1['sec'].diff().mean()
+    f1['theta_error_heading_deg'] = np.rad2deg(f1['theta_error'])
+
+    return f1
+
+def calculate_heading(df_, winsize=5):
+    #% smooth x, y, 
+    df_['pos_x_smoothed'] = df_.groupby('id')['pos_x'].transform(lambda x: x.rolling(winsize, 1).mean())
+    df_['pos_y_smoothed'] = 1*df_.groupby('id')['pos_y'].transform(lambda x: x.rolling(winsize, 1).mean())  # for FlyTracker, flipud
+
+    # calculate heading
+    df_['heading'] = np.arctan2(df_['pos_y_smoothed'].diff(), df_['pos_x_smoothed'].diff())
+    df_['heading_deg'] = np.rad2deg(df_['heading']) #np.rad2deg(np.arctan2(df_['pos_y_smoothed'].diff(), df_['pos_x_smoothed'].diff())) 
+
+    return df_
+
 
 def do_transformations_on_df(trk_, frame_width, frame_height, 
                              feat_=None,
                              cop_ix=None, flyid1=0, flyid2=1):
+    '''
+    Transform coordinates to focal fly (do it for both fly1 and fly2).
+    Also calculate additional metrics based on these relative positions.
+    Includes calculate_thet_error()
+
+    Arguments:
+        trk_ -- _description_
+        frame_width -- _description_
+        frame_height -- _description_
+
+    Keyword Arguments:
+        feat_ -- _description_ (default: {None})
+        cop_ix -- _description_ (default: {None})
+        flyid1 -- _description_ (default: {0})
+        flyid2 -- _description_ (default: {1})
+
+    Returns:
+        _description_
+    '''
     if feat_ is None:
         assert 'dist_to_other' in trk_.columns, "No feat df provided. Need dist_to_other."
 
@@ -420,6 +481,13 @@ def do_transformations_on_df(trk_, frame_width, frame_height,
     # Repeat for fly2:
     fly2 = get_target_sizes_df(fly2, fly1, xvar='pos_x', yvar='pos_y')
 
+    # calculate theta error
+    fly1 = calculate_theta_error(fly1, fly2)
+    fly1 = calculate_theta_error_from_heading(fly1, fly2)
+    fly2 = calculate_theta_error(fly2, fly1)
+    fly2 = calculate_theta_error_from_heading(fly2, fly1)
+
+
     # recombine trk df
     trk = pd.concat([fly1.iloc[:cop_ix], fly2.iloc[:cop_ix]], axis=0).reset_index(drop=True)#.sort_index()
     trk['copulation'] = copulation
@@ -433,7 +501,7 @@ def do_transformations_on_df(trk_, frame_width, frame_height,
             f_list.append(df_.reset_index(drop=True).iloc[:cop_ix])
         feat = pd.concat(f_list, axis=0).reset_index(drop=True) #.sort_index()
         feat['copulation'] = copulation
-        print(trk.iloc[-1].name, feat.iloc[-1].name)
+        #print(trk.iloc[-1].name, feat.iloc[-1].name)
         df = pd.concat([trk, 
                 feat.drop(columns=[c for c in feat.columns if c in trk.columns])], axis=1)
         assert df.shape[0]==trk.shape[0], "Bad merge: {}, {}".format(feat.shape, trk.shape)
@@ -506,7 +574,7 @@ def get_metrics_relative_to_focal_fly(acqdir, mov_is_upstream=False, fps=60, cop
     n_frames = cap.get(cv2.CAP_PROP_FRAME_COUNT)
     frame_width  = cap.get(cv2.CAP_PROP_FRAME_WIDTH)   # float `width`
     frame_height = cap.get(cv2.CAP_PROP_FRAME_HEIGHT)  # float `height`
-    print(frame_width, frame_height) # array columns x array rows
+    #print(frame_width, frame_height) # array columns x array rows
     # switch ORI
     trk_['ori'] = -1*trk_['ori'] # flip for FT to match DLC and plot with 0, 0 at bottom left
     df_ = do_transformations_on_df(trk_, frame_width, frame_height, 
@@ -614,14 +682,14 @@ if __name__ == '__main__':
     interactive = False
 
     #viddir = '/Volumes/Giacomo/free_behavior_data'
-    #savedir = '/Volumes/Julie/free-behavior-analysis/FlyTracker/38mm_dyad/processed'
+    #savedir = '/Volumes/Julie/free-behavior-analysis/38mm_dyad/MF/FlyTracker/processed_mats'
 
     #viddir = '/Volumes/Giacomo/JAABA_classifiers/projector/changing_dot_size_speed'
     #savedir = '/Volumes/Julie/2d-projector-analysis/FlyTracker/processed_mats'
 
     if interactive:
         viddir = '/Volumes/Juliana/2d-projector'
-        savedir = '/Volumes/Juliana/2d-projector-analysis/FlyTracker/processed_mats'
+        savedir = '/Volumes/Juliana/2d-projector-analysis/circle_diffspeeds/FlyTracker/processed_mats'
         subdir = 'fly-tracker'
         flyid1 = 0
         flyid2 = 1

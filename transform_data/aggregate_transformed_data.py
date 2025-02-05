@@ -37,31 +37,47 @@ import plotting as putil
 import argparse
 
 #%%
-def aggregate_relative_metrics(basedir, assay='2d-projector', experiment='circle_diffspeeds', create_new=False, localdir=None):
+def aggregate_relative_metrics(srcdir, create_new=False, localdir=None):
     """
     Aggregate individual _df.pkl files into a single relative_metrics.pkl file for analysis.    
     Saves to both local and remote directories.
     Individual _df.pkl files are output of relative_metrics.py.
+
+    Parameters
+    ----------
+    srcdir : str
+        Directory containing individual _df.pkl files. Output of relative_metrics.py. 
+        Likely /behavior-analysis-rootdir/assay/experiment/FlyTracker/processed_mats/,
+        where assay is either '2d-projector' or '38mm_dyad' and experiment is 'circle_diffspeeds' or 'MF'.
+
+    localdir : str
+        Local directory to save the processed data. Default is None.
+        Likely /Users/julianarhee/Documents/rutalab/projects/courtship/data/2d-projector/circle_diffspeeds/FlyTracker/
+        or /Users/julianarhee/Documents/rutalab/projects/courtship/data/MF/38mm-dyad/FlyTracker/
     """
     #%
     # Specify data source directory based on server filetree
-    if assay == '2d-projector':
-        # Set sourcedirs
-        srcdir = os.path.join(basedir, '2d-projector-analysis', experiment, 'FlyTracker/processed_mats') #relative_metrics'
-    elif assay == '38mm_dyad':
-        # src dir of processed .dfs from feat/trk.mat files (from relative_metrics.py)
-        srcdir = os.path.join(basedir, 'free-behavior-analysis', 'MF', 'FlyTracker', assay, 'processed_mats')
+#    if assay == '2d-projector':
+#        # Set sourcedirs
+#        srcdir = os.path.join(basedir, '2d-projector-analysis', experiment, 'FlyTracker/processed_mats') #relative_metrics'
+#    elif assay == '38mm_dyad':
+#        # src dir of processed .dfs from feat/trk.mat files (from relative_metrics.py)
+#        srcdir = os.path.join(basedir, 'free-behavior-analysis', 'MF', 'FlyTracker', assay, 'processed_mats')
 
+    assert os.path.exists(srcdir), "Specified source directory does not exist:\n {}".format(srcdir)
+    assert len(os.listdir(srcdir)) > 0, "No files found in source directory:\n {}".format(srcdir)
+    
     # set output dir
     destdir = os.path.split(srcdir)[0] 
     if not os.path.exists(destdir):
         os.makedirs(destdir)
-    print(destdir)
     out_fpath = os.path.join(destdir, 'relative_metrics.pkl')
-
+    print("Saving output file to:\n  {}".format(out_fpath))
+    
     # get local file for aggregated data
-    out_fpath_local = os.path.join(localdir, 'relative_metrics.pkl')
-    print(out_fpath_local)
+    if localdir is not None:
+        out_fpath_local = os.path.join(localdir, 'relative_metrics.pkl')
+        print("Also saving to localdir:\n  {}".format(out_fpath_local))
 
     # try reading if we don't want to create a new one
     if not create_new:
@@ -75,14 +91,16 @@ def aggregate_relative_metrics(basedir, assay='2d-projector', experiment='circle
     # cycle over all the acquisition dfs in srcdir and make an aggregated df
     if create_new:
         df = util.load_aggregate_data_pkl(srcdir, mat_type='df')
-        print(df['species'].unique())
+        print("Found species: ", df['species'].unique())
 
         #% save to server loc
         df.to_pickle(out_fpath)
-        print(out_fpath)
+        print("Saved to:\n {}".format(out_fpath))
 
         # save local, too
-        df.to_pickle(out_fpath_local)
+        if localdir is not None:
+            df.to_pickle(out_fpath_local)
+            print("Saved local, too.")
 
     # summary of what we've got
     print(df[['species', 'acquisition']].drop_duplicates().groupby('species').count())
@@ -104,25 +122,29 @@ def aggregate_relative_metrics(basedir, assay='2d-projector', experiment='circle
 if __name__ == '__main__':
 
     parser = argparse.ArgumentParser(description='Process FlyTracker data for relative metrics.')
-    parser.add_argument('--basedir', type=str, help='Rootdir of src files (default: /Volumes/Julie)', default='/Volumes/Julie')    
+    parser.add_argument('--srcdir', type=str, help='Dir containing relative metrics mats (e.g., /Volumes/Juliana/.../processed_mats/)', default=None)    
     parser.add_argument('--new', type=bool, default=False, help='Create new processed data (default: False).')
-    parser.add_argument('--assay', type=str, default='2d-projector', help='Assay type (default: 2d-projector; alt: 38mm-dyad).')
-    parser.add_argument('--experiment', type=str, default='circle_diffspeeds', help='Experiment type (default: circle_diffspeeds).')
+    #parser.add_argument('--assay', type=str, default='2d-projector', help='Assay type (default: 2d-projector; alt: 38mm-dyad).')
+    #parser.add_argument('--experiment', type=str, default='circle_diffspeeds', help='Experiment type (default: circle_diffspeeds).')
     parser.add_argument('--localdir', type=str, 
-                        default='/Users/julianarhee/Documents/rutalab/projects/courtship/data/2d-projector/circle_diffspeeds/FlyTracker',
+                        default=None,
+                        #default='/Users/julianarhee/Documents/rutalab/projects/courtship/data/2d-projector/circle_diffspeeds/FlyTracker',
                         # default1 = '/Users/julianarhee/Documents/rutalab/projects/courtship/data/2d-projector/circle_diffspeeds/FlyTracker'
                         # default2 = '/Users/julianarhee/Documents/rutalab/projects/courtship/data/MF/38mm-dyad/FlyTracker'
                         help='Secondary *local* dir to save large .pkl output to.')
     
     args = parser.parse_args()
 
-    assay = args.assay
+    #assay = args.assay
     create_new = args.new
-    basedir = args.basedir
-    experiment = args.experiment
+    #basedir = args.basedir
+    #experiment = args.experiment
+    srcdir = args.srcdir
     localdir = args.localdir
 
-    print(f"Aggregating relative metrics for {assay} in {experiment}.")
+    print(f"Aggregating relative metrics from:\n  {srcdir}")
     print(f"Creating new data: {create_new}")
-    aggregate_relative_metrics(basedir, assay=assay, experiment=experiment, create_new=create_new, localdir=localdir)   
+    #aggregate_relative_metrics(basedir, assay=assay, experiment=experiment, create_new=create_new, localdir=localdir)   
+    aggregate_relative_metrics(srcdir, create_new=create_new, localdir=localdir)
+
 
