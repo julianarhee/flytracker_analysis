@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-
+"""
+Code for importing MATLAB output from JAABA classifiers (GG) to dataframes.
+"""
 #%%
 import pandas as pd
 import scipy.io
