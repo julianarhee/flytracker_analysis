@@ -1187,12 +1187,13 @@ if __name__ == '__main__':
     #figdir = os.path.join(os.path.split(savedir)[0], 'figures', 'relative_metrics')
     importlib.reload(util)
 
-    #assay = '2d-projector' # '38mm-dyad'
-    #experiment = 'circle_diffspeeds'
     create_new = False
 
-    assay = '38mm-dyad' 
-    experiment = 'MF'
+    assay = '2d_projector' # '38mm-dyad'
+    experiment = 'circle_diffspeeds'
+
+    #assay = '38mm_dyad' 
+    #experiment = 'MF'
 
     #%%
     minerva_base = '/Volumes/Juliana'
@@ -1201,18 +1202,19 @@ if __name__ == '__main__':
     #out_fpath = os.path.join(srcdir, 'relative_metrics.pkl')
 
     # Specify local dirs
-    local_basedir = '/Users/julianarhee/Documents/rutalab/projects/courtship/data'
+    #local_basedir = '/Users/julianarhee/Documents/rutalab/projects/courtship/data'
+    local_basedir = '/Users/julianarhee/Dropbox @RU Dropbox/Juliana Rhee/free_behavior' 
     localdir = os.path.join(local_basedir, assay, experiment, 'FlyTracker')
 
-    if assay == '2d-projector':
+    if assay == '2d_projector':
         # Set sourcedirs
-        srcpath = '2d-projector-analysis/circle_diffspeeds/FlyTracker'       
+        srcpath = '2d_projector_analysis/circle_diffspeeds/FlyTracker'       
         # local jaaba_file
         jaaba_fname = 'ftjaaba_mel_yak_20240330'
 
-    elif assay == '38mm-dyad':
+    elif assay == '38mm_dyad':
         # Set src
-        srcpath= 'free-behavior-analysis/38mm-dyad/MF/FlyTracker'
+        srcpath= 'free_behavior_analysis/38mm_dyad/MF/FlyTracker'
         # local jaaba_file
         jaaba_fname = 'jaaba_20240303.pkl' #'jaaba_free_behavior_data_mel_yak_20240403'
 
