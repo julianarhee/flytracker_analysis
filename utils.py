@@ -1245,7 +1245,8 @@ def add_bout_durations(df):
 
     return df
 
-def load_flytracker_data(acq_dir, calib_is_upstream=False, fps=60, subfolder='*', filter_ori=True):
+def load_flytracker_data(acq_dir, calib_is_upstream=False, fps=60, 
+                         subfolder='*', filter_ori=True):
     '''
     Get calibration info, -feat.mat and -track.mat as DFs.
     If calib_is_upstream, subfolder should be '' -- load_feat and load_trk looks into os.path.join(acq_dir, subfolder, *.mat)
@@ -1283,7 +1284,17 @@ def load_flytracker_data(acq_dir, calib_is_upstream=False, fps=60, subfolder='*'
     return calib, trk_, feat_
 
 
-def combine_flytracker_data(acq, viddir, subfolder='fly-tracker/*', fps=60):
+def combine_flytracker_data(acq, viddir, subfolder='*', fps=60):
+    '''From specified acquisition folder, load_flytracker_data(), combine feat and trk
+    
+    Args:
+    -----
+    acq: (str) acquisition name, relevant if more than 1 acquisition in viddir
+    viddir: (str) parent dir containing all video files
+    subfolder: (str) subfolder where -feat.mat and -track.mat are stored if NOT in default level of where video .avi file is (for ex., 'fly-tracker/*')
+    fps: (int) frames per second of video
+    
+    '''
     # load flytracker .mat as df
     calib_, trk_, feat_ = load_flytracker_data(viddir, 
                                     subfolder=subfolder,
