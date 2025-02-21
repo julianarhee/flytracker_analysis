@@ -506,6 +506,7 @@ def do_transformations_on_df(trk_, frame_width, frame_height,
                 feat.drop(columns=[c for c in feat.columns if c in trk.columns])], axis=1)
         assert df.shape[0]==trk.shape[0], "Bad merge: {}, {}".format(feat.shape, trk.shape)
     else:
+        # feat_ and trk_ are already combined 
         f_list = []
         assert 'dist_to_other' in trk.columns, "No feat df provided. Need dist_to_other."
         for fi, df_ in trk.groupby('id'):
