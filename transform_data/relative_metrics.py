@@ -361,7 +361,7 @@ def get_video_cap(acqdir, ftname=None, movie_fmt='avi'):
     return cap
 
 #% Calculation functions
-def calculate_theta_error(f1, f2, xvar='pos_x', yvar='pos_y'):
+def calculate_theta_error(f1, f2, xvar='pos_x', yvar='pos_y', fps=60.):
     vec_between = f2[[xvar, yvar]] - f1[[xvar, yvar]]
     abs_ang = np.arctan2(vec_between[yvar], vec_between[xvar])
     th_err = util.circular_distance(abs_ang, f1['ori']) # already bw -np.pi, pi
@@ -369,6 +369,9 @@ def calculate_theta_error(f1, f2, xvar='pos_x', yvar='pos_y'):
     #th_err[0] = th_err[1]
     f1['abs_ang_between'] = abs_ang # this is the line-of-sigh, line btween pursuer and target
     f1['theta_error'] = th_err
+    
+    if 'sec' not in f1.columns:
+        f1['sec'] = f1['frame'] / fps
     f1['theta_error_dt'] = pd.Series(np.unwrap(f1['theta_error'].interpolate().ffill().bfill())).diff() / f1['sec'].diff().mean()
     f1['theta_error_deg'] = np.rad2deg(f1['theta_error'])
 
@@ -404,7 +407,8 @@ def calculate_heading(df_, winsize=5):
 
 def do_transformations_on_df(trk_, frame_width, frame_height, 
                              feat_=None,
-                             cop_ix=None, flyid1=0, flyid2=1):
+                             cop_ix=None, flyid1=0, flyid2=1,
+                             verbose=False, get_relative_sizes=True):
     '''
     Transform coordinates to focal fly (do it for both fly1 and fly2).
     Also calculate additional metrics based on these relative positions.
@@ -416,11 +420,11 @@ def do_transformations_on_df(trk_, frame_width, frame_height,
         frame_height -- _description_
 
     Keyword Arguments:
-        feat_ -- _description_ (default: {None})
-        cop_ix -- _description_ (default: {None})
-        flyid1 -- _description_ (default: {0})
-        flyid2 -- _description_ (default: {1})
-
+        feat_ (pd.DataFrame, None): include of feak/trk separate (default: {None})
+        cop_ix (int): Frame index of copulation start (default: {None})
+        flyid1 (int): id of male (default: {0})
+        flyid2 (int): id of female (default: {1})
+        verbose (bool): describe each step (default: {False})
     Returns:
         _description_
     '''
@@ -428,6 +432,8 @@ def do_transformations_on_df(trk_, frame_width, frame_height,
         assert 'dist_to_other' in trk_.columns, "No feat df provided. Need dist_to_other."
 
     # center x- and y-coordinates
+    if verbose:
+        print("... centering coordinates")
     trk_ = util.center_coordinates(trk_, frame_width, frame_height) 
 
     # separate fly1 and fly2
@@ -436,11 +442,15 @@ def do_transformations_on_df(trk_, frame_width, frame_height,
 
     # FIRST, do fly1: -------------------------------------------------
     # translate coordinates so that focal fly is at origin
+    if verbose:
+        print("... translating to focal fly1")
     fly1, fly2 = util.translate_coordinates_to_focal_fly(fly1, fly2)
 
     # rotate coordinates so that fly1 is facing 0 degrees (East)
     # Assumes fly1 ORI goes from 0 to pi CCW, with y-axis NOT-inverted.
     # if using FlyTracker, trk_['ori'] = -1*trk_['ori']
+    if verbose:
+        print("... rotating to focal fly1")
     fly1, fly2 = util.rotate_coordinates_to_focal_fly(fly1, fly2)
 
     # add polar conversion
@@ -453,6 +463,8 @@ def do_transformations_on_df(trk_, frame_width, frame_height,
 
     # NOW, do fly2: ----------------------------------------------------
     # translate coordinates so that focal fly is at origin
+    if verbose:
+        print("... now repeating for fly2")
     fly2, fly1 = util.translate_coordinates_to_focal_fly(fly2, fly1)
 
     # rotate coordinates so that fly1 is facing 0 degrees (East)
@@ -476,23 +488,29 @@ def do_transformations_on_df(trk_, frame_width, frame_height,
         copulation = True
     cop_ix = int(cop_ix)
 
-    #% Get all sizes and aggregate trk df
-    fly1 = get_target_sizes_df(fly1, fly2, xvar='pos_x', yvar='pos_y')
-    # Repeat for fly2:
-    fly2 = get_target_sizes_df(fly2, fly1, xvar='pos_x', yvar='pos_y')
+    if get_relative_sizes:
+        if verbose:
+            print("... getting target sizes")
+        #% Get all sizes and aggregate trk df
+        fly1 = get_target_sizes_df(fly1, fly2, xvar='pos_x', yvar='pos_y')
+        # Repeat for fly2:
+        fly2 = get_target_sizes_df(fly2, fly1, xvar='pos_x', yvar='pos_y')
 
+    if verbose:
+        print("... calculating theta error")
     # calculate theta error
     fly1 = calculate_theta_error(fly1, fly2)
     fly1 = calculate_theta_error_from_heading(fly1, fly2)
     fly2 = calculate_theta_error(fly2, fly1)
     fly2 = calculate_theta_error_from_heading(fly2, fly1)
 
-
     # recombine trk df
     trk = pd.concat([fly1.iloc[:cop_ix], fly2.iloc[:cop_ix]], axis=0).reset_index(drop=True)#.sort_index()
     trk['copulation'] = copulation
 
     # Get relative velocity and aggregate feat df
+    if verbose:
+        print("... calculating relative velocity")
     if feat_ is not None:
         f_list = []
         for fi, df_ in feat_.groupby('id'):
@@ -521,8 +539,8 @@ def do_transformations_on_df(trk_, frame_width, frame_height,
 
 def get_metrics_relative_to_focal_fly(acqdir, mov_is_upstream=False, fps=60, cop_ix=None,
                                       movie_fmt='avi', flyid1=0, flyid2=1,
-                                      plot_checks=False,
-                                      savedir=None):
+                                      plot_checks=False, get_relative_sizes=True,
+                                      save=False, savedir=None, create_new=False):
     '''
     Load -feat.mat and -trk.mat, do some processing, save processed df to savedir.
 
@@ -530,18 +548,28 @@ def get_metrics_relative_to_focal_fly(acqdir, mov_is_upstream=False, fps=60, cop
         acqdir -- _description_
 
     Keyword Arguments:
-        fps -- _description_ (default: {60})
-        cop_ix -- _description_ (default: {None})
-        movie_fmt -- _description_ (default: {'avi'})
-        flyid1 -- _description_ (default: {0})
-        flyid2 -- _description_ (default: {1})
-        plot_checks -- _description_ (default: {False})
-        savedir -- _description_ (default: {None})
+        get_relative_sizes (bool): Calculate target size based on distance and angle, SLOW (default: {True})
+        fps (float): Acquisition rate (default: {60})
+        cop_ix: Copulation frame or None (default: {None})
+        movie_fmt (str): (default: {'avi'})
+        flyid1 (int): flytracker male index (default: {0})
+        flyid2 (int): flytracker female index (default: {1})
+        plot_checks (bool): do some plotting to check correct transformations (default: {False})
+        savedir (str, None): Save processed _df.pkl (default: {None})
     '''
     # check output dir
-    if savedir is None:
+    if savedir is None and save is True:
         print("No save directory provided. Saving to acquisition directory.")
         savedir = acqdir
+        
+    acq = os.path.split(acqdir)[-1]
+    df_fpath = os.path.join(savedir, '{}_df.pkl'.format(acq))
+
+    if not create_new and os.path.exists(df_fpath):
+        df_ = pd.read_pickle(df_fpath)
+        print('Loaded: {}'.format(df_fpath))
+        return df_
+    
     # load flyracker data
     if mov_is_upstream:
         subfolder = ''
@@ -580,15 +608,14 @@ def get_metrics_relative_to_focal_fly(acqdir, mov_is_upstream=False, fps=60, cop
     trk_['ori'] = -1*trk_['ori'] # flip for FT to match DLC and plot with 0, 0 at bottom left
     df_ = do_transformations_on_df(trk_, frame_width, frame_height, 
                                    feat_=feat_, cop_ix=cop_ix,
-                                   flyid1=0, flyid2=1)
+                                   flyid1=flyid1, flyid2=flyid2, 
+                                   get_relative_sizes=get_relative_sizes)
 
     # save
     #% save
     if savedir is not None:
         if not os.path.exists(savedir):
             os.makedirs(savedir)
-        acq = os.path.split(acqdir)[-1]
-        df_fpath = os.path.join(savedir, '{}_df.pkl'.format(acq))
         with open(df_fpath, 'wb') as f: 
             pkl.dump(df_, f)
         print('Saved: {}'.format(df_fpath))
