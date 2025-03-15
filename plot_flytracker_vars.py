@@ -22,7 +22,8 @@ import seaborn as sns
 #%
 import matplotlib.gridspec as gridspec
 
-from relative_metrics import load_processed_data
+#from relative_metrics import load_processed_data
+import transform_data.relative_metrics as rel
 import utils as util
 import plotting as putil
 
@@ -36,7 +37,8 @@ create_new = False
 
 # Set sourcedirs
 # srcdir = '/Volumes/Juliana/2d-projector-analysis/FlyTracker/processed_mats' #relative_metrics'
-srcdir = '/Volumes/Juliana/free-behavior-analysis/MF/FlyTracker/38mm_dyad/processed'
+#srcdir = '/Volumes/Juliana/free_behavior_analysis/MF/FlyTracker/38mm_dyad/processed'
+srcdir = '/Volumes/Juliana/free_behavior_analysis/38mm_dyad/MF/FlyTracker/processed'
 
 if plot_style == 'white':
     figdir = os.path.join(os.path.split(srcdir)[0], 'plot_flytracker_vars', 'white')
@@ -49,7 +51,10 @@ print(figdir)
 
 # LOCAL savedir 
 #localdir = '/Users/julianarhee/Documents/rutalab/projects/courtship/2d-projector/FlyTracker'
-localdir = '/Users/julianarhee/Documents/rutalab/projects/courtship/data/MF/38mm-dyad/FlyTracker'
+#localdir = '/Users/julianarhee/Documents/rutalab/projects/courtship/data/MF/38mm-dyad/FlyTracker'
+localdir = '/Users/julianarhee/Dropbox @RU Dropbox/Juliana Rhee/free_behavior/38mm_dyad/MF/FlyTracker'
+out_fpath_local = os.path.join(srcdir, 'processed.pkl')
+
 out_fpath_local = os.path.join(localdir, 'processed.pkl')
 print(out_fpath_local)
 assert os.path.exists(out_fpath_local)
@@ -94,8 +99,7 @@ df.groupby('species')['acquisition'].nunique()
 
 # %%
 
-jaaba_fpath = glob.glob(os.path.join(os.path.split(localdir)[0], 
-                           '*mel_yak*_jaaba.pkl'))[0]
+jaaba_fpath = glob.glob(os.path.join(localdir, 'free_behavior_*_jaaba.pkl'))[0]
 print(jaaba_fpath)
 
 jaaba = pd.read_pickle(jaaba_fpath)
@@ -252,7 +256,7 @@ if 'strain' in ftjaaba.columns:
 
 #%%
 bin_size = 5
-max_dist = np.ceil(ftjaaba['dist_to_other'].max())
+max_dist = 30 #np.ceil(ftjaaba['dist_to_other'].max())
 dist_bins = np.arange(0, max_dist+bin_size, bin_size)
 
 # Cut dist_to_other into bins and assign label to new columns:
@@ -275,14 +279,19 @@ courting = ftjaaba[ftjaaba['courtship']==1].copy()
 #%%
 # average over subbout
 
-bout_type = 'subboutnum'
-meanbouts_courting = courting.groupby(['species', 'acquisition', #'behavior', 
+bout_type = 'frames' #'subboutnum'
+if bout_type == 'subboutnum':
+    meanbouts_courting = courting.groupby(['species', 'acquisition', #'behavior', 
                         'binned_dist_to_other',
                          bout_type]).mean().reset_index()
+    bout_type = 'subboutnum-{}'.format(subbout_dur)
+
+else:
+    meanbouts_courting = courting.groupby(['species', 'acquisition', #'behavior', 
+                        'binned_dist_to_other']).mean().reset_index()
+    bout_type = 'frames'
 meanbouts_courting.head()
 
-if bout_type == 'subboutnum':
-    bout_type = 'subboutnum-{}'.format(subbout_dur)
 
 #%%
 # Bin dist_to_other during chasing and singing
@@ -290,13 +299,13 @@ species_palette = {'Dmel': 'lavender',
                    'Dyak': 'mediumorchid'}
 error_type = 'ci'
 
-max_dist = np.ceil(meanbouts_courting['dist_to_other'].max())
-bin_size=5
-bins = np.arange(0, max_dist+bin_size, bin_size)
+#max_dist = np.ceil(meanbouts_courting['dist_to_other'].max())
+#bin_size=5
+#bins = np.arange(0, max_dist+bin_size, bin_size)
 #meanbouts_courting['binned_dist_to_other'] = pd.cut(meanbouts_courting['dist_to_other'], 
 #                                       bins=bins, labels=bins[:-1])  
 
-fig, axn = pl.subplots(1, 2, sharex=True, sharey=True)
+fig, axn = pl.subplots(1, 2, sharex=True, sharey=False)
 sns.barplot(data=meanbouts_courting,
              x='binned_dist_to_other', 
              y='chasing_binary', ax=axn[0], 
@@ -324,13 +333,20 @@ axn[0].set_xticklabels([str(x) for x in bin_edges], rotation=0)
 
 axn[1].set_ylabel("p(singing|courtship)")
 
+for ax in axn:
+    ax.set_ylim([0, 1])
+    
 sns.move_legend(axn[1], bbox_to_anchor=(1.05, 1), loc='upper left', frameon=False)
 sns.despine(offset=4)
 
-fig.text(0.1, 0.8, 'Behaviors split by consecutive courtship bouts ({})'.format(bout_type))
+if bout_type == 'subboutnum':
+    fig.text(0.1, 0.8, 'Behaviors split by consecutive courtship bouts ({})'.format(bout_type))
+else:
+    fig.text(0.1, 0.8, 'Averaging {} by bin across pairs'.format(bout_type))
 fig.text(0.1, 0.85, 'Dmel (n={}), Dyak (n={})'.format(\
                     plotd[plotd['species']=='Dmel']['acquisition'].nunique(),
                     plotd[plotd['species']=='Dyak']['acquisition'].nunique()))
+pl.subplots_adjust(wspace=0.6, right=0.9)
 
 putil.label_figure(fig, figid)
 
@@ -339,6 +355,44 @@ pl.savefig(os.path.join(figdir, '{}.png'.format(figname)))
 print(figdir, figname)
 
 #%%
+
+# Plot EACH pair
+#plotd = meanbouts_courting[meanbouts_courting['species']=='Dyak'].copy()
+for sp, plotd in meanbouts_courting.groupby('species'):
+    if sp=='Dyak':
+        nr=2; nc=5;
+    else:
+        nr=3; nc=5;
+    fig, axn = pl.subplots(nr, nc, sharex=True, sharey=True, 
+                        figsize=(nc*2, nr*2))
+    for ai, (acq, d_) in enumerate(plotd.groupby('acquisition')):
+        ax=axn.flat[ai]
+        sns.barplot(data=d_,
+                    x='binned_dist_to_other', 
+                    y='singing_binary', ax=ax, 
+                    errorbar=error_type, errcolor=bg_color,
+                    hue='species', palette=species_palette, 
+                    edgecolor='none')
+        ax.legend_.remove() 
+        ax.set_title(acq, fontsize=4, loc='left')
+        ax.set_box_aspect(1)
+        ax.set_xlabel('')
+    pl.subplots_adjust(bottom=0.2, top=0.9)
+    fig.text(0.5, 0.1, 'binned distance to other (mm)', ha='center')
+    fig.text(0.1, 0.93, 'Dyak: p(singing|courtship) vs. distance to other (mm)')
+    # format xticks to single digit numbers:
+    bin_edges = [str(int(x)) for x in dist_bins[:-1]]
+    bin_edges[0] = '<{}'.format(bin_size)
+    bin_edges[-1] = '>{}'.format(int(dist_bins[-2]))
+    ax.set_xticks(range(len(bin_edges)))
+    ax.set_xticklabels([str(x) for x in bin_edges], rotation=0)
+    #ax.set_ylabel("p(singing|courtship)")
+
+    putil.label_figure(fig, figid)
+    figname = 'p(singing)_binned_dist_to_other_{}'.format(sp)
+    pl.savefig(os.path.join(figdir, '{}.png'.format(figname)))
+
+    #%%
 
 
 # %%
