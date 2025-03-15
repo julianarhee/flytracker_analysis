@@ -120,9 +120,9 @@ def filter_bouts_by_frame_duration(consec_bouts, min_bout_len, fps=60, return_in
     else:
         return incl_bouts
 
-def subdivide_into_subbouts(ftjaaba, bout_dur=0.2):
+def subdivide_into_subbouts(ftjaaba, bout_dur=0.2, grouper='acquisition'):
     d_list = []
-    for acq, df_ in ftjaaba.groupby('acquisition'):
+    for acq, df_ in ftjaaba.groupby(grouper):
         sec_min, sec_max = df_['sec'].min(), df_['sec'].max()
 
         group_dur_sec = sec_max - sec_min #df_['sec'].max() - df_['sec'].min()
@@ -662,9 +662,10 @@ def load_jaaba(assay='2d-projector', experiment='circle_diffspeeds', fname=None)
     Returns:
         _description_
     '''
-    local_basedir = '/Users/julianarhee/Documents/rutalab/projects/courtship/data'
+    #local_basedir = '/Users/julianarhee/Documents/rutalab/projects/courtship/data'
+    local_basedir = '/Users/julianarhee/Dropbox @RU Dropbox/Juliana Rhee'
     if assay=='2d-projector':
-        srcdir =  os.path.join(local_basedir, assay, experiment, 'FlyTracker')
+        srcdir =  os.path.join(local_basedir, '2d_projector', assay, experiment, 'FlyTracker')
         #% Load jaaba-traansformed data
         #jaaba_fpath = os.path.join(srcdir, 'jaaba_transformed_data_transf.pkl')
         if fname is None:
@@ -678,9 +679,9 @@ def load_jaaba(assay='2d-projector', experiment='circle_diffspeeds', fname=None)
         assert os.path.exists(jaaba_fpath), "File not found: {}".format(jaaba_fpath)
         jaaba = pd.read_pickle(jaaba_fpath)   
         print(jaaba['species'].unique())
-    elif assay=='38mm-dyad':
+    elif assay=='38mm_dyad':
         #jaaba_file = '/Volumes/Julie/free-behavior-analysis/38mm-dyad/jaaba.pkl'
-        srcdir = os.path.join(local_basedir, assay, experiment, 'FlyTracker') #'38mm-dyad-ft-jaaba'
+        srcdir = os.path.join(local_basedir, 'free_behavior', assay, experiment, 'FlyTracker') #'38mm-dyad-ft-jaaba'
         if fname is not None:
             jaaba_fpath = os.path.join(srcdir, '{}.pkl'.format(fname))
         else:
@@ -1250,7 +1251,8 @@ def load_flytracker_data(acq_dir, calib_is_upstream=False, fps=60,
     '''
     Get calibration info, -feat.mat and -track.mat as DFs.
     If calib_is_upstream, subfolder should be '' -- load_feat and load_trk looks into os.path.join(acq_dir, subfolder, *.mat)
-
+    NOTE: filter_ori NaNs ori if wing position is missing.
+    
     Args:
         calib_is_upstream: (bool) calibration.mat file is upstream of flytracker output directory (default should prob be true)
         subfolder: (str) subfolder where -feat.mat and -track.mat are stored if NOT in default level of where video .avi file is
@@ -1722,3 +1724,5 @@ def custom_filter_events(events):
             & (events['index']>=22095) & (events['index']<=22932), 'Chasing'] = 1
 
     return events
+
+# %%

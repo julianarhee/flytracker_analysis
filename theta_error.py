@@ -54,12 +54,13 @@ import scipy.stats as spstats
 #    df0 = pd.concat(d_list)
 #    return df0
 
-def calculate_angle_metrics_focal_fly(df0, winsize=5):
+def calculate_angle_metrics_focal_fly(df0, winsize=5, grouper='acquisition',
+                                      has_size=True):
     assert df0['id'].nunique()==1, "Too many fly IDs, specify 1"
 
     # df_ = df[df['acquisition']==acq].copy()
     d_list = []
-    for acq, df_ in df0.groupby('acquisition'):
+    for acq, df_ in df0.groupby(grouper):
         #print(acq)
         # Calculate target angular vel
         df_ = util.smooth_and_calculate_velocity_circvar(df_, 
@@ -108,7 +109,8 @@ def calculate_angle_metrics_focal_fly(df0, winsize=5):
     df['rel_vel_abs'] = np.abs(df['rel_vel']) 
     df['targ_ang_vel_abs'] = np.abs(df['targ_ang_vel'])
     df['targ_pos_theta_abs'] = np.abs(df['targ_pos_theta'])
-    df['targ_ang_size_deg'] = np.rad2deg(df['targ_ang_size'])
+    if has_size:
+        df['targ_ang_size_deg'] = np.rad2deg(df['targ_ang_size'])
     df['targ_ang_vel_deg'] = np.rad2deg(df['targ_ang_vel'])
     df['targ_ang_vel_deg_abs'] = np.abs(df['targ_ang_vel_deg'])
     df['facing_angle_deg'] = np.rad2deg(df['facing_angle'])
@@ -1189,11 +1191,11 @@ if __name__ == '__main__':
 
     create_new = False
 
-    assay = '2d_projector' # '38mm-dyad'
-    experiment = 'circle_diffspeeds'
+    #assay = '2d_projector' # '38mm-dyad'
+    #experiment = 'circle_diffspeeds'
 
-    #assay = '38mm_dyad' 
-    #experiment = 'MF'
+    assay = '38mm_dyad' 
+    experiment = 'MF'
 
     #%%
     minerva_base = '/Volumes/Juliana'
