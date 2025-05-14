@@ -1173,8 +1173,8 @@ def get_theta_errors_before_turns(aggr_turns, fps=60):
 if __name__ == '__main__':
     #%% 
     # Set plotting
-    plot_style='dark'
-    putil.set_sns_style(plot_style, min_fontsize=18)
+    plot_style='white'
+    putil.set_sns_style(plot_style, min_fontsize=6)
     bg_color = [0.7]*3 if plot_style=='dark' else 'k'
 
     #% plotting settings
@@ -1191,11 +1191,11 @@ if __name__ == '__main__':
 
     create_new = False
 
-    #assay = '2d_projector' # '38mm-dyad'
-    #experiment = 'circle_diffspeeds'
+    assay = '2d_projector' # '38mm-dyad'
+    experiment = 'circle_diffspeeds'
 
-    assay = '38mm_dyad' 
-    experiment = 'MF'
+    #assay = '38mm_dyad' 
+    #experiment = 'MF'
 
     #%%
     minerva_base = '/Volumes/Juliana'
@@ -1332,12 +1332,12 @@ if __name__ == '__main__':
     if 'strain' in filtdf.columns:
         filtdf = filtdf.drop(columns=['strain'])
     #%
-    meanbouts = filtdf.groupby(['species', 'acquisition', 'subboutnum']).mean().reset_index()
+    meanbouts = filtdf.groupby(['species', 'acquisition',  'subboutnum']).mean().reset_index()
     meanbouts.head()
 
     cmap='viridis'
 
-    if assay == '2d-projector':
+    if assay == '2d_projector':
         stimhz_palette = putil.get_palette_dict(ftjaaba[ftjaaba['stim_hz']>=0], 'stim_hz', cmap=cmap)
 
         # find the closest matching value to one of the keys in stimhz_palette:
@@ -1444,10 +1444,17 @@ if __name__ == '__main__':
 
         print(figdir, figname)
 
+
+#%%
+    hue_var = 'stim_hz'
+    cmap='viridis'
+    stimhz_palette = putil.get_palette_dict(ftjaaba[ftjaaba[hue_var]>=0], 
+                                            hue_var, cmap=cmap)
+
     #
     #%% Fit REGR to each stim_hz level
 
-    if assay == '2d-projector':
+    if assay == '2d_projector':
         xvar = 'theta_error' #'facing_angle_vel_deg_abs'
         yvar = 'ang_vel_fly_shifted' #'ang_vel_abs'
 
@@ -1519,11 +1526,7 @@ if __name__ == '__main__':
 
     # find the closest matching value to one of the keys in stimhz_palette:
     meanbouts_long['stim_hz'] = meanbouts_long['stim_hz'].apply(lambda x: min(stimhz_palette.keys(), key=lambda y:abs(y-x)))   
-
-
 #%%
-
-
     import parallel_pursuit as pp
     importlib.reload(pp)
 
@@ -1579,15 +1582,12 @@ if __name__ == '__main__':
     plotdf_ = select_data_subset(filtdf, meanbouts, behav=behav, min_frac_bout=min_frac_bout, 
                                 do_bouts=do_bouts, is_flytracker=is_flytracker)
     
-
     currplotdf = plotdf_[plotdf_['acquisition'] == curr_acq].copy()
     print(currplotdf.shape)
 
-
     fig = plot_allo_ego_frames_by_species(currplotdf, xvar=xvar, yvar=yvar,
                                         markersize=markersize, huevar=huevar, cmap=cmap, plot_com=plot_com,
-                                        stimhz_palette=stimhz_palette)
-    
+                                        stimhz_palette=stimhz_palette) 
     for ax in fig.axes:
         ax.set_ylim([0, 500])
         curr_ticks = ax.get_yticklabels()
@@ -1604,6 +1604,19 @@ if __name__ == '__main__':
 
     print(figdir, figname)
 
+    #%%
+
+    currplotdf['facing_angle_abs'] = np.abs(currplotdf['facing_angle'])
+    fig, axn = pl.subplots(1, 2, sharex=True, figsize=(6, 3))
+    ax=axn[0]
+    sns.pointplot(data=currplotdf, x='stim_hz', y='facing_angle_abs', ax=ax, 
+                  errorbar=('ci', 95))
+    ax=axn[1]
+    sns.pointplot(data=currplotdf, x='stim_hz', y='targ_pos_radius', ax=ax)
+
+    pl.subplots_adjust(wspace=0.5)
+    
+    
 #%%
     # FIGURE:
     # 1) allocentric frames for 1 example fly
@@ -1612,9 +1625,11 @@ if __name__ == '__main__':
 
     min_frac_bout = 0.1
 
-    frames_ = select_data_subset(filtdf, meanbouts, behav=behav, min_frac_bout=min_frac_bout, 
+    frames_ = select_data_subset(filtdf, meanbouts, behav=behav, 
+                                 min_frac_bout=min_frac_bout, 
                                 do_bouts=False, is_flytracker=is_flytracker)
-    bouts_ = select_data_subset(filtdf, meanbouts, behav=behav, min_frac_bout=min_frac_bout, 
+    bouts_ = select_data_subset(filtdf, meanbouts, behav=behav, 
+                                min_frac_bout=min_frac_bout, 
                                 do_bouts=True, is_flytracker=is_flytracker)
     
 
@@ -1678,7 +1693,133 @@ if __name__ == '__main__':
     pl.savefig(os.path.join(figdir, '{}.png'.format(figname)))
     pl.savefig(os.path.join(figdir, '{}.svg'.format(figname)))
 
+#%%
+    import pingouin as pg
 
+    col_yak = 'mediumorchid'
+    col_mel = 'darkcyan'
+    species_palette = {'Dmel': col_mel, 'Dyak': col_yak}
+    min_frac_bout = 0.2
+    frames_ = select_data_subset(filtdf, meanbouts, behav=behav, 
+                                 min_frac_bout=min_frac_bout, 
+                                do_bouts=False, is_flytracker=is_flytracker)
+    
+    # convert to degrees
+    frames_['facing_angle_abs'] = np.abs(frames_['facing_angle']) 
+    frames_['facing_angle_abs_deg'] = np.rad2deg(frames_['facing_angle_abs'])
+    # Convert pixels to mm
+    ppm = 23 #(mostly 25.7, some 22.2)
+    frames_['targ_pos_radius_mm'] = frames_['targ_pos_radius'] / ppm
+    
+    # get mean 
+    stimhz_means = frames_.groupby(['species', 'acquisition', 'stim_hz']).mean().reset_index()
+
+    # count 
+    cnts = stimhz_means.groupby(['stim_hz', 'species'])['acquisition'].count().reset_index()
+    exclude_levels = cnts[cnts['acquisition'] < 10]['stim_hz'].unique()
+    stimhz_means = stimhz_means[~stimhz_means['stim_hz'].isin(exclude_levels)]
+     
+    errorbar = 'se'
+    fig, axn = pl.subplots(1, 2, sharex=True, figsize=(2.5, 1))
+       
+    #% stats?       
+    for ai, yvar in enumerate(['facing_angle_abs_deg', 'targ_pos_radius_mm']):
+        ax=axn[ai]
+        # plot
+        sns.pointplot(data=stimhz_means, x='stim_hz', y=yvar, ax=ax, 
+                    errorbar=errorbar, hue='species', palette=species_palette, scale=0.5,
+                    legend=ai==1)
+        if yvar=='facing_angle_abs_deg':
+            ax.set_ylabel('Eror (deg)')
+            ylim = 30
+        else:
+            ax.set_ylabel('Distance (mm)')
+            ylim = 16
+        if ai==1:
+            sns.move_legend(axn[1], loc='upper left', bbox_to_anchor=(1,1), 
+                    frameon=False, title='')
+
+        # Stats
+        aov = pg.mixed_anova(data=stimhz_means, dv=yvar,
+                         within='stim_hz', between='species', 
+                         subject='acquisition')
+        # Perform the Mann-Whitney U test for each frequency
+        # Store results
+        results = []
+        # Loop over each frequency and run the Mann-Whitney U test
+        for freq, subset in stimhz_means.groupby('stim_hz'):#['frequency'].unique():        
+            group1 = subset[subset['species'] == 'Dmel'][yvar]
+            group2 = subset[subset['species'] == 'Dyak'][yvar]
+            
+            stat, pval = spstats.mannwhitneyu(group1, group2, alternative='two-sided') 
+            results.append({
+                'frequency': freq,
+                'U_statistic': stat,
+                'p_value': pval
+            })
+
+        # Convert to DataFrame for display
+        results_df = pd.DataFrame(results).sort_values('frequency')
+        print(results_df)
+
+        from statsmodels.stats.multitest import multipletests
+        # Extract p-values
+        pvals = results_df['p_value'].values
+        
+        # Apply corrections
+        reject_fdr, pvals_fdr, _, _ = multipletests(pvals, alpha=0.05, method='fdr_bh')
+        reject_bonf, pvals_bonf, _, _ = multipletests(pvals, alpha=0.05, method='bonferroni')
+
+        # Add to DataFrame
+        results_df['p_fdr'] = pvals_fdr
+        results_df['sig_fdr'] = reject_fdr
+        results_df['p_bonf'] = pvals_bonf
+        results_df['sig_bonf'] = reject_bonf
+        print(results_df)
+
+        # Map frequency to x-tick positions and add asterisks above max point
+        xticks = ax.get_xticks()  # Numerical x positions (e.g., [0, 1, 2, ...])
+        xticklabels = [float(label.get_text()) for label in ax.get_xticklabels()]  # e.g., [0.025, 0.05, ...]
+        x_pos_map = dict(zip(xticklabels, xticks))
+        significant_frequencies = results_df[results_df['sig_fdr']]['frequency'].values
+        for freq in significant_frequencies:
+            xpos = x_pos_map[freq]
+            #value_dmel = stimhz_means[(stimhz_means['stim_hz'] == freq) & (stimhz_means['species'] == 'Dmel')]['targ_pos_radius_mm'].values[0]
+            #value_dyak = stimhz_means[(stimhz_means['stim_hz'] == freq) & (stimhz_means['species'] == 'Dyak')]['targ_pos_radius_mm'].values[0]   
+            #ymax = 16 #max(value_dmel, value_dyak) + 2
+            ax.text(xpos, ylim + 1.5, '*', ha='center', va='bottom')
+     
+    for ax in axn:
+        ax.set_xlabel('Stimulus frequency (Hz)')    
+        ax.set_box_aspect(1)
+        # only label every other x-tick, plus first and last
+        curr_ticks = ax.get_xticks()
+        sub_ticks = curr_ticks[0::2]
+        if curr_ticks[-1] not in sub_ticks:
+            sub_ticks = np.append(sub_ticks, curr_ticks[-1])
+        ax.set_xticks(sub_ticks)
+        #ax.set_xticks([curr_ticks[0]] + [curr_ticks[i] for i in range(1, len(curr_ticks)-1, 2)] + [curr_ticks[-1]])     
+
+    pl.subplots_adjust(wspace=0.7)
+    sns.despine(offset=2, trim=False)
+    
+    putil.label_figure(fig, figid)
+    figname = 'facingangle_vs_stimhz_all-pairs_{}_minfracbout={}'.format(behav, min_frac_bout)
+    pl.savefig(os.path.join(figdir, '{}.png'.format(figname)))
+    pl.savefig(os.path.join(figdir, '{}.svg'.format(figname)))
+
+    print(figdir)
+    
+ 
+    #%%
+    import statsmodels.formula.api as smf
+
+    model = smf.mixedlm("facing_angle_abs_deg ~ species * stim_hz", 
+                        data=stimhz_means, groups="acquisition")
+    result = model.fit()
+    print(result.summary())
+ 
+    
 #%% =======================================================
 # AGGREGATE all turns across flies
 # =======================================================
