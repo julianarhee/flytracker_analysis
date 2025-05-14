@@ -294,7 +294,9 @@ def get_relative_velocity(df_, win=1,
 
 
 #%%
-def get_copulation_ix(acq):
+def get_copulation_ix(acq, 
+    local_dir = '/Volumes/Juliana/free_behavior_analysis/38mm_dyad/MF/meta'):
+    #local_dir='/Users/julianarhee/Documents/rutalab/projects/courtship/data/38mm-dyad/MF'):
     cop_ele = {
         '20231213-1103_fly1_eleWT_5do_sh_eleWT_5do_gh': 52267,
         '20231213-1154_fly3_eleWT_6do_sh_eleWT_5do_gh': 17243,
@@ -311,8 +313,7 @@ def get_copulation_ix(acq):
         '20240322-1156_f9_eleWT_4do_gh': 92680
     }
 
-    local_dir = '/Users/julianarhee/Documents/rutalab/projects/courtship/data/38mm-dyad/MF'
-    fname = 'courtship-free-behavior (Responses) - Form Responses 1.csv'
+    fname = 'courtship-free-behavior-GG (Responses) - Form Responses 1.csv'
     meta_fpath = os.path.join(local_dir, fname)
     meta = pd.read_csv(meta_fpath)
 
@@ -756,6 +757,7 @@ if __name__ == '__main__':
         
         # Create a new processed_mat file by calculating relative metrics
         if create_new:
+            print("Creaing new procssed metrics")
             if '2d-projector' not in viddir:
                 cop_ix = get_copulation_ix(acq)
             else:
@@ -765,4 +767,6 @@ if __name__ == '__main__':
                                         movie_fmt=movie_fmt, 
                                         mov_is_upstream=subdir is not None,
                                         flyid1=flyid1, flyid2=flyid2,
-                                        plot_checks=False)
+                                        plot_checks=False,
+                                        create_new=create_new,
+                                        save=create_new)
