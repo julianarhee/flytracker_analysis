@@ -142,9 +142,10 @@ def annotate_regr(data, ax, x='facing_angle', y='ang_vel',
 
     r, p = spstats.pearsonr(data[x].interpolate().ffill().bfill(), 
                             data[y].interpolate().ffill().bfill())
-    ax.text(xloc, yloc, 'r={:.2f}, p={:.2g}'.format(r, p),
+    ax.text(xloc, yloc, 'pearson r={:.2f}, p={:.2g}'.format(r, p),
             transform=ax.transAxes, fontsize=fontsize)
 
+    return (r, p)
 
 #%%
 
