@@ -432,6 +432,8 @@ def do_transformations_on_df(trk_, frame_width, frame_height,
     if feat_ is None:
         assert 'dist_to_other' in trk_.columns, "No feat df provided. Need dist_to_other."
 
+    print("Doing transformations:") #.format(acq))
+
     # center x- and y-coordinates
     if verbose:
         print("... centering coordinates")
@@ -605,6 +607,11 @@ def get_metrics_relative_to_focal_fly(acqdir, mov_is_upstream=False, fps=60, cop
     frame_width  = cap.get(cv2.CAP_PROP_FRAME_WIDTH)   # float `width`
     frame_height = cap.get(cv2.CAP_PROP_FRAME_HEIGHT)  # float `height`
     #print(frame_width, frame_height) # array columns x array rows
+    # Check that we have 2 flies
+    if trk_['id'].nunique()==1:
+        print("ERROR: Only 1 fly found ({})".format(acq) )
+        return None
+
     # switch ORI
     trk_['ori'] = -1*trk_['ori'] # flip for FT to match DLC and plot with 0, 0 at bottom left
     df_ = do_transformations_on_df(trk_, frame_width, frame_height, 
@@ -663,20 +670,25 @@ def load_processed_data(acqdir, savedir=None, load=True):
     #feat_fpath = os.path.join(savedir, '{}_feat.pkl'.format(acq))
     #trk_fpath = os.path.join(savedir, '{}_trk.pkl'.format(acq))
 
+    check_exists = True
     if load:
-        with open(df_fpath, 'rb') as f:
-            df_ = pkl.load(f) 
-        print('Loaded: {}'.format(df_fpath))
-#        with open(feat_fpath, 'rb') as f:
-#            feat_ = pkl.load(f) 
-#        print('Loaded: {}'.format(feat_fpath))
-#
-#        with open(trk_fpath, 'rb') as f:
-#            trk = pkl.load(f)
-#        print('Loaded: {}'.format(trk_fpath))
+        try:
+            with open(df_fpath, 'rb') as f:
+                df_ = pkl.load(f) 
+            print('Loaded: {}'.format(df_fpath))
+    #        with open(feat_fpath, 'rb') as f:
+    #            feat_ = pkl.load(f) 
+    #        print('Loaded: {}'.format(feat_fpath))
+    #
+    #        with open(trk_fpath, 'rb') as f:
+    #            trk = pkl.load(f)
+    #        print('Loaded: {}'.format(trk_fpath))
+        except Exception as e:
+            check_exists = True
 
-    else:
+    if check_exists:
         df_ = os.path.exists(df_fpath)
+
 #        feat_ = os.path.exists(feat_fpath)
 #        trk = os.path.exists(trk_fpath)
 
@@ -696,7 +708,8 @@ if __name__ == '__main__':
     parser.add_argument('--viddir', type=str, default='/Volumes/Julie/38mm_dyad/courtship-videos/38mm_dyad', help='Root directory of videos (default: /Volumes/Julie/38mm_dyad/courtship-videos/38mm_dyad).')   
     parser.add_argument('--new', type=bool, default=False, help='Create new processed data (default: False).')
     parser.add_argument('--subdir', type=str, default=None, help='subdir of tracked folders, e.g., fly-tracker (default: None).')
-    
+    parser.add_argument('--single', type=bool, default=False, help='Set True if just running one acquisition, provide path to acquisition dir for viddir rather than parent (default: False).')
+   
     args = parser.parse_args()
     # 
     viddir = args.viddir 
@@ -706,6 +719,7 @@ if __name__ == '__main__':
     flyid2 = args.flyid2
     subdir = args.subdir
     create_new = args.new
+    single = args.single
 
 #%% #Hardcoded parameter values for running in interactive mode
     interactive = False
@@ -726,19 +740,28 @@ if __name__ == '__main__':
         create_new=True
 
 #%%
-    if subdir is not None:
-        found_mats = glob.glob(os.path.join(viddir,  '20*', '*{}*'.format(subdir), '*', '*feat.mat'))
+    if single:
+        if subdir is not None:
+            found_mats = glob.glob(os.path.join(viddir, '*{}*'.format(subdir), '*', '*feat.mat'))
+        else:
+            found_mats = glob.glob(os.path.join(viddir, '*', '*feat.mat'))
     else:
-        found_mats = glob.glob(os.path.join(viddir,  '20*', '*', '*feat.mat'))
+        if subdir is not None:
+            found_mats = glob.glob(os.path.join(viddir,  '20*', '*{}*'.format(subdir), '*', '*feat.mat'))
+        else:
+            found_mats = glob.glob(os.path.join(viddir,  '20*', '*', '*feat.mat'))
     print('Found {} processed videos.'.format(len(found_mats)))
 
     #%% For each found acquisition (video), calculate relative metrics
     for fp in found_mats:
-        if subdir is not None:
+        if (subdir is not None) or (single is True):
             # FT output dir is parent dir
             ftdir = os.path.split(fp)[0]
             # video dir is upstream
-            viddir = os.path.split(ftdir)[0]
+            if subdir is not None:
+                viddir = os.path.split(ftdir)[0]    
+            elif single is True:
+                viddir = os.path.split(os.path.split(ftdir)[0])[0]
             # acq name is FT name
             acq = os.path.split(ftdir)[-1]
         else:
@@ -746,19 +769,21 @@ if __name__ == '__main__':
 
         if "BADTRACKING" in fp: # Giacomo added this to skip bad tracking
             continue
-
+        
         acqdir = os.path.join(viddir, acq)
         print(acq)
+        print(acqdir)
         # Try loading data
         if not create_new:
             df_ = load_processed_data(acqdir, load=False, savedir=savedir)
             if df_ is False: 
                 create_new=True #assert ft is True, "No feat df found, creating now."
-        
+            else:
+                print("processed mat exists, skipping")        
         # Create a new processed_mat file by calculating relative metrics
         if create_new:
             print("Creaing new procssed metrics")
-            if '2d-projector' not in viddir:
+            if 'projector' not in viddir:
                 cop_ix = get_copulation_ix(acq)
             else:
                 cop_ix = None
@@ -770,3 +795,4 @@ if __name__ == '__main__':
                                         plot_checks=False,
                                         create_new=create_new,
                                         save=create_new)
+
