@@ -49,7 +49,7 @@ src = os.path.join(rootdir, assay)
 
 meta_fpath = glob.glob(os.path.join(src, '*.csv'))[0]
 meta0 = pd.read_csv(meta_fpath)
-meta = meta0[meta0['tracked in matlab']=='yes']
+meta = meta0[meta0['tracked in matlab and checked for swaps ']=='yes']
 meta['acquisition'] = ['_'.join( [f.split('-')[0], f.split('_')[1]] ) for f in meta['file_name']]
 
 meta.head()
@@ -79,7 +79,7 @@ for a in acqs:
 #%%
 acq_dirs = glob.glob(os.path.join(src, '20*'))
 found_acqs = [os.path.split(a)[-1] for a in acq_dirs]
-print("Found {} {} acqs.".format(len(acqs), assay))
+print("Found {} {} acqs.".format(len(found_acqs), assay))
 
 acqs = meta['file_name'].values
 
@@ -91,6 +91,7 @@ if len(not_in_src)>0:
         print(i)
 else:
     print("All acqs in src")
+    
 
 #%%
 
@@ -101,7 +102,6 @@ else:
 # '20250220-1537_fly2_Dmel-p1-front-left-third-slant_1do_gh_1dR_ccw' - 
 # '20250220-1545_fly2_Dmel-p1-front-left-third-slant_1do_gh_1dR_cw' - 
 create_new=False
-
 d_list = []
 errors = []
 for i, acq in enumerate(acqs):
@@ -127,6 +127,7 @@ for i, acq in enumerate(acqs):
         continue
     df_['file_name'] = os.path.split(acq)[-1]
     df_['acquisition'] = ['_'.join( [f.split('-')[0], f.split('_')[1]] ) for f in df_['file_name']]    
+    df_['species'] = 'Dmel' if 'mel' in acq else 'Dyak' 
     d_list.append(df_)
     
 df0 = pd.concat(d_list)
@@ -163,6 +164,14 @@ for fn, df_ in df0.groupby('file_name'):
     elif manipulation_.startswith('both '):
         paint_side = 'both'
     df0.loc[df0['file_name']==fn, 'paint_side'] = paint_side 
+
+#%%
+
+#df0['species'] = [ 'Dmel' if 'mel' in a else 'Dyak' for a in df0['file_name'] ]
+
+df0.groupby(['species', 'paint_side', 'paint_coverage'])['acquisition'].nunique()
+
+df0['date'] = [int(a.split('_')[0]) for a in df0['acquisition']]
 
 #%%
 # --------------------------------------------------------
@@ -207,7 +216,8 @@ figname = 'targ_rel_pos_EX-{}_{}_{}'.format(cond_str, acq1, acq2)
 plt.savefig(os.path.join(figdir, '{}.png'.format(figname)))
 plt.savefig(os.path.join(figdir, '{}.svg'.format(figname)))
 
-# %% Split by STIM_HZ
+# %% 
+# Split by STIM_HZ
 n_frames = 24000
 n_epochs = 10
 n_frames_per_epoch = n_frames/n_epochs
@@ -418,10 +428,12 @@ elif cond_str == 'front_third_painted':
 print(df0[['paint_coverage', 'paint_side']].drop_duplicates())
 
 #%%
-coverage = 'back 2/3'
-side = 'both'
+coverage = 'whole eye '
+side = 'right'
 df = df0[(df0['paint_side']==side)
-       & (df0['paint_coverage']==coverage)].copy()
+       & (df0['paint_coverage']==coverage)
+       & (df0['date']>=20250512)].copy()
+
 print(df['acquisition'].unique())
 
 cond_str = '{}_{}'.format(coverage, side)
@@ -453,7 +465,7 @@ hue_var = 'stim_hz' #'epoch'
 cmap='viridis'
 stimhz_palette = putil.get_palette_dict(df[df[hue_var]>=0], hue_var, cmap=cmap)
 
-meanbouts = f1[incl_cols_for_mean].groupby(['acquisition', 'file_name', 'id', 
+meanbouts = f1[incl_cols_for_mean].groupby(['species', 'acquisition', 'file_name', 'id', 
                         'stim_direction', 'paint_side', 'paint_coverage', 'stim_hz', 
                         'subboutnum']).mean().reset_index()   
 meanbouts['stim_hz'] = meanbouts['stim_hz'].apply(lambda x: min(stimhz_palette.keys(), key=lambda y:abs(y-x)))  
@@ -484,6 +496,16 @@ if nc<=2:
 print(nr, nc)
 print("Rows are conds: {}".format(rows_are_conds))
 
+#%%
+
+min_vel = 5
+max_facing_angle = np.deg2rad(180)
+max_dist_to_other = 30
+max_targ_pos_theta = np.deg2rad(270) #270 #160
+min_targ_pos_theta = np.deg2rad(-270) # -160
+min_wing_ang_deg = 5
+min_wing_ang = np.deg2rad(min_wing_ang_deg)
+
 court_ = filter_court(plotd, min_vel=min_vel, max_facing_angle=max_facing_angle, 
                       max_dist_to_other=max_dist_to_other, 
                       max_targ_pos_theta=max_targ_pos_theta, 
@@ -495,38 +517,48 @@ court_ = court_.reset_index(drop=True)
 marker_size=1
 cmap='viridis'
 # PLOT, egocentric, color by stim Hz
-fig, axn = plt.subplots(nr, nc, sharex=True, sharey=True, figsize=(nc*3, nr*2.5))
 
-for ai, (acq, currdf) in enumerate(court_.groupby('acquisition')):
-    #acq = currdf['acquisition'].unique()[0]
-    for ci, (fn, df_) in enumerate(currdf.groupby('file_name')):
-        stim_dir = df_['stim_direction'].unique()[0] 
-        #ci = 0 if stim_dir=='ccw' else 1
-        if rows_are_conds:
-            if nr==1:
-                ax=axn[ai]
+for sp, curr_court in court_.groupby('species'):
+    nr=curr_court['acquisition'].nunique()
+    nc=curr_court.groupby('acquisition')['file_name'].nunique().max()
+    print(nr, nc)
+    rows_are_conds=False
+    if nc<=2:
+        rows_are_conds=True
+        nc=nr
+        nr=curr_court.groupby('acquisition')['file_name'].nu0nique().max()
+    
+    fig, axn = plt.subplots(nr, nc, sharex=True, sharey=True, figsize=(nc*3, nr*2.5))
+    for ai, (acq, currdf) in enumerate(curr_court.groupby('acquisition')):
+        #acq = currdf['acquisition'].unique()[0]
+        for ci, (fn, df_) in enumerate(currdf.groupby('file_name')):
+            stim_dir = df_['stim_direction'].unique()[0] 
+            #ci = 0 if stim_dir=='ccw' else 1
+            if rows_are_conds:
+                if nr==1:
+                    ax=axn[ai]
+                else:
+                    ax=axn[ci, ai]
+            elif nr==1:
+                ax=axn[ci]
             else:
-                ax=axn[ci, ai]
-        elif nr==1:
-            ax=axn[ci]
-        else:
-            ax = axn[ai, ci]
-        ax = plot_egocentric_hue(df_, ax=ax, xvar=xvar, yvar=yvar, hue_var=hue_var,
-                            marker_size=marker_size, plot_com=plot_com,
-                            bg_color=bg_color, cmap=cmap)
-            
-        title = '{} ({})\n{}'.format(cond_str, stim_dir, acq)
-        ax.set_title(title, loc='left', fontsize=10) 
+                ax = axn[ai, ci]
+            ax = plot_egocentric_hue(df_, ax=ax, xvar=xvar, yvar=yvar, hue_var=hue_var,
+                                marker_size=marker_size, plot_com=plot_com,
+                                bg_color=bg_color, cmap=cmap)
+                
+            title = '{} ({})\n{}'.format(cond_str, stim_dir, acq)
+            ax.set_title(title, loc='left', fontsize=10) 
 
-for ax in axn.flat:
-    ax.axis('off')
-ax.invert_yaxis() # to match video POV
-plt.subplots_adjust(hspace=0.2, wspace=0.5)
+    for ax in axn.flat:
+        ax.axis('off')
+    ax.invert_yaxis() # to match video POV
+    plt.subplots_adjust(hspace=0.2, wspace=0.5)
 
-putil.label_figure(fig, figid)
-figname = '{}_egocentric_hue-stimhz'.format(cond_str.replace('/', '-'))
-plt.savefig(os.path.join(figdir, '{}.png'.format(figname)))
-plt.savefig(os.path.join(figdir, '{}.svg'.format(figname)))
+    putil.label_figure(fig, figid)
+    figname = '{}_{}_egocentric_hue-stimhz'.format(cond_str.replace('/', '-'), sp)
+    plt.savefig(os.path.join(figdir, '{}.png'.format(figname)))
+    #plt.savefig(os.path.join(figdir, '{}.svg'.format(figname)))
 
 
 #%%
