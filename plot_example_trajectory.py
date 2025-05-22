@@ -74,28 +74,32 @@ interval = 12
 # Define marker size and line length
 marker_length = 20  # length of line markers
 circle_size = 8      # size of circle markers
-female_size = 50
+female_size = 30
 alpha=0.75
 use_arrow = True
-cmap = 'viridis'
+female_cmap = 'Greys'
+male_cmap = 'viridis'
 male_alpha=0.75
 female_alpha=0.75
+
+add_female_arrow = True
+
 #%%
+interval=5
 for (start_frame, stop_frame) in bouts:
     #%
-    #start_frame, stop_frame = bouts[0]
-    
+    #start_frame, stop_frame = bouts[0] 
     plotd = df[df['frame'].between(start_frame, stop_frame)].copy()
     plotd['ori'] = -1 * plotd['ori']
 
     # Calculate colors
-    palette = sns.color_palette(cmap, plotd['frame'].nunique())
+    palette = sns.color_palette(male_cmap, plotd['frame'].nunique())
     color_mapping = dict(zip(plotd['frame'].unique(), palette))
 
     male_pos = plotd[plotd['id'] == 0].copy()
     female_pos = plotd[plotd['id'] == 1].copy()
 
-    fig, ax = plt.subplots()
+    fig, ax = plt.subplots(figsize=(3,3))
     if use_arrow:
         for curr_id, plotd_ in plotd.iloc[0::interval].groupby('id'):
             # Calculate direction vectors
@@ -104,14 +108,32 @@ for (start_frame, stop_frame) in bouts:
             colors = plotd_['frame'].map(color_mapping)
 
             if curr_id == 0:
-                plt.quiver(plotd_['pos_x'], plotd_['pos_y'], u, v, angles='xy', 
-                    scale_units='xy', scale=0.02, color=colors, width=0.004,
-                    headaxislength=8, headlength=8, headwidth=5, alpha=male_alpha)
+                # plot male
+                plt.quiver(plotd_['pos_x'].iloc[0::interval], plotd_['pos_y'].iloc[0::interval], 
+                           u.iloc[0::interval], v.iloc[0::interval], 
+                           angles='xy', pivot='middle', 
+                    scale_units='xy', scale=0.02, color=colors, width=0.02,
+                    headaxislength=8, headlength=10, headwidth=5, alpha=male_alpha)
+                # plot a line
+                ax.plot(plotd_['pos_x'], plotd_['pos_y'], color='gray', linewidth=0.5)
             else:
-                sns.scatterplot(data=plotd_, x='pos_x', y='pos_y', ax=ax,
-                                hue='frame', palette='viridis', marker='o',
-                                s=female_size, edgecolor='none', linewidth=0,
-                                legend=False, alpha=female_alpha)
+                # plot female
+                if add_female_arrow:
+                    plt.quiver([plotd_['pos_x'].iloc[0], plotd_['pos_x'].iloc[-1]],
+                            [plotd_['pos_y'].iloc[0], plotd_['pos_y'].iloc[-1]], 
+                            [u.iloc[0], u.iloc[-1]], [v.iloc[0], v.iloc[-1]], 
+                            angles='xy', pivot='middle', 
+                        scale_units='xy', scale=0.02, color='gray', width=0.004,
+                        headaxislength=8, headlength=8, headwidth=5, alpha=male_alpha)
+                # plot dots
+                plot_ixs = np.arange(1, len(plotd_)-2, interval)
+                sns.scatterplot(data=plotd_.iloc[plot_ixs], x='pos_x', y='pos_y', ax=ax,
+                                #color='gray', marker='o',
+                                hue='frame', palette=female_cmap, marker='o',
+                                s=female_size, edgecolor='k', linewidth=0.1,
+                                legend=False, alpha=1)
+                # plot a line
+                ax.plot(plotd_['pos_x'], plotd_['pos_y'], color='gray', linewidth=0.5)
     else:
         for r, row in male_pos.iloc[0::interval].iterrows():
             x, y, angle_rad, fr = row['pos_x'], row['pos_y'], row['ori'], row['frame']
