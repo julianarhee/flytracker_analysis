@@ -55,7 +55,7 @@ import scipy.stats as spstats
 #    return df0
 
 def calculate_angle_metrics_focal_fly(df0, winsize=5, grouper='acquisition',
-                                      has_size=True):
+                                      has_size=True, fps=60):
     assert df0['id'].nunique()==1, "Too many fly IDs, specify 1"
 
     # df_ = df[df['acquisition']==acq].copy()
@@ -72,12 +72,26 @@ def calculate_angle_metrics_focal_fly(df0, winsize=5, grouper='acquisition',
                                 smooth_var='facing_angle', vel_var='facing_angle_vel',)
 
         # Calculate "theta-error"
-        df_ = util.smooth_and_calculate_velocity_circvar(df_, 
-                                smooth_var='theta_error', vel_var='theta_error_dt', 
-                                time_var='sec', winsize=winsize)
-        df_ = util.smooth_and_calculate_velocity_circvar(df_, smooth_var='ori', vel_var='ang_vel_fly', 
-                                                        time_var='sec', winsize=winsize)
+        try:
+            df_tmp = util.smooth_and_calculate_velocity_circvar(df_, 
+                                    smooth_var='theta_error', vel_var='theta_error_dt', 
+                                    time_var='sec', winsize=winsize)
+            assert all(np.isnan(df_tmp['theta_error']))==False
+        except Exception as e:
+            print("Error calculating theta error: {}".format(e))
+            df_['theta_error_dt'] = np.nan
 
+        # TMP splitiom to get vel into mm/s
+        df_['vel_fly'] = np.concatenate(
+                            (np.zeros(1), 
+                            np.sqrt(np.sum(np.square(np.diff(df_[['pos_x_smoothed', 'pos_y_smoothed']], axis=0)), 
+                            axis=1)))) / (winsize*4/fps)# /4 
+        df_.loc[df_['vel_fly']>50, 'vel_fly'] = np.nan 
+        df_['vel_fly'] = df_['vel_fly'].interpolate().ffill().bfill()
+         
+        df_ = util.smooth_and_calculate_velocity_circvar(df_, smooth_var='ori', 
+                                                            vel_var='ang_vel_fly', 
+                                                            time_var='sec', winsize=winsize)            
         # Calculate difference in ori between consecutive rows 
         df_['turn_size'] = df_.groupby('id')['ori'].transform(lambda x: x.diff())
 
@@ -348,6 +362,8 @@ def shift_variables_by_lag(df, lag=2):
     '''
     df['ang_vel_abs_shifted'] = df.groupby('acquisition')['ang_vel_abs'].shift(-lag)
     df['ang_vel_fly_shifted'] = df.groupby('acquisition')['ang_vel_fly'].shift(-lag)
+    df['vel_fly_shifted'] = df.groupby('acquisition')['vel_fly'].shift(-lag)
+
     df['vel_shifted'] = df.groupby('acquisition')['vel'].shift(-lag)
     df['vel_shifted_abs'] = np.abs(df['vel_shifted']) 
     df['ang_vel_shifted'] = df.groupby('acquisition')['ang_vel'].shift(-lag)
@@ -399,7 +415,9 @@ def split_theta_error(chase_, theta_error_small=np.deg2rad(10), theta_error_larg
 #% PLOTTING
 
 def plot_regr_by_species(chase_, xvar, yvar, hue_var=None, plot_hue=False, plot_grid=True, 
-                         cmap='viridis', stimhz_palette=None, bg_color=[0.7]*3, xlabel=None, ylabel=None):
+                         cmap='viridis', stimhz_palette=None, bg_color=[0.7]*3, 
+                         xlabel=None, ylabel=None, fitstr_xloc=0.1, fitstr_yloc=0.9,
+                         pearsons_xloc=0.1, pearsons_yloc=0.8):
     '''
     Do linear regression of yvar on xvar. Plot scatter of xvar vs. yvar, color by hue_var if specified.
 
@@ -458,14 +476,20 @@ def plot_regr_by_species(chase_, xvar, yvar, hue_var=None, plot_hue=False, plot_
                     color=bg_color, scatter=False) #, ax=ax)
         # res.params: [intercept, slope]
         ax.set_box_aspect(1)
-        fit_str = 'OLS: y = {:.2f}x + {:.2f}'.format(res.params[1], res.params[0])
-        print(fit_str) #lope, intercept)
-        ax.text(0.05, 0.85, fit_str, fontsize=8, transform=ax.transAxes)
+        lr, r2 = get_R2_ols(df_, xvar, yvar)
+        r2_str = 'OLS: y = {:.2f}x + {:.2f}\nR2={:.2f}'.format(lr.coef_[0], 
+                                                                    lr.intercept_,
+                                                                    r2)
+        ax.text(fitstr_xloc, fitstr_yloc, r2_str, fontsize=8, transform=ax.transAxes) 
+        #fit_str = 'OLS: y = {:.2f}x + {:.2f}'.format(res.params[1], res.params[0])
+        #print(fit_str) #lope, intercept)
+        #ax.text(0.05, 0.85, fit_str, fontsize=8, transform=ax.transAxes)
 
         # set xlabel to be theta subscript E
         ax.set_xlabel(xlabel)
         ax.set_ylabel(ylabel)
-        putil.annotate_regr(df_, ax, x=xvar, y=yvar, fontsize=8)
+        putil.annotate_regr(df_, ax, x=xvar, y=yvar, fontsize=8,
+                            xloc=pearsons_xloc, yloc=pearsons_yloc)
 
     if plot_hue:
         putil.colorbar_from_mappable(ax, cmap=cmap, norm = mpl.colors.Normalize(vmin=vmin, vmax=vmax),
@@ -474,7 +498,9 @@ def plot_regr_by_species(chase_, xvar, yvar, hue_var=None, plot_hue=False, plot_
     return fig
 
 def plot_ang_v_fwd_vel_by_theta_error_size(chase_, var1='vel_shifted', var2='ang_vel_shifted', 
-                                        lw=1, err_palette={'small': 'r', 'large': 'b'}):
+                        lw=1, err_palette={'small': 'r', 'large': 'b'}, 
+                        figsize=(10, 4), fly_marker_size=5, fly_color='gray',
+                        median_marker_size=3, scatter_size=3):
 
     '''
     3-subplot figure: (1) spatial distribution of small vs. large theta errors, (2) velocity histograms, (3) angular vel histograms
@@ -482,14 +508,14 @@ def plot_ang_v_fwd_vel_by_theta_error_size(chase_, var1='vel_shifted', var2='ang
     Returns:
         fig
     ''' 
-    fig = pl.figure(figsize=(12,5)) #, axn = pl.subplots(1, 3, figsize=(7,4))
+    fig = pl.figure(figsize=figsize) #, axn = pl.subplots(1, 3, figsize=(7,4))
 
     # plot theta error relative to focal male
     ax = fig.add_subplot(1, 3, 1)
     sns.scatterplot(data=chase_, x='targ_rel_pos_x', y='targ_rel_pos_y', ax=ax, 
-                    hue='error_size', palette=err_palette, s=2)
+                    hue='error_size', palette=err_palette, s=scatter_size)
     ax.set_aspect(1)
-    ax.plot(0, 0, 'wo', markersize=3)
+    ax.plot(0, 0, marker='o', color=fly_color, markersize=fly_marker_size)
     ax.axis('off')
     ax.legend_.remove()
     #sns.move_legend(ax, bbox_to_anchor=(1,1), loc='upper left', frameon=False)
@@ -514,7 +540,7 @@ def plot_ang_v_fwd_vel_by_theta_error_size(chase_, var1='vel_shifted', var2='ang
     for v, ax in zip([var1, var2], [ax1, ax2]):
         med_ = chase_.groupby('error_size')[v].median()
         for mval, cval in err_palette.items():
-            ax.plot(med_[mval], curr_ylim, color=cval, marker='v', markersize=10) #ax.axvline(x=m, color=c, linestyle='--')
+            ax.plot(med_[mval], curr_ylim, color=cval, marker='v', markersize=median_marker_size) #ax.axvline(x=m, color=c, linestyle='--')
         #print(med_)
         ax.set_box_aspect(1)
 
@@ -557,6 +583,9 @@ def plot_regr_by_hue(chase_, xvar, yvar, hue_var='stim_hz', stimhz_palette=None,
 
 def select_data_subset(filtdf, meanbouts, do_bouts=False, behav='chasing', min_frac_bout=0.5, is_flytracker=True):
 
+    '''
+    Select subset of the dataframe where <behav> is True (JAABA-classified behavior, for ex.)
+    '''
     sign = -1 if is_flytracker else 1
     #chase_ = meanbouts[meanbouts['{}_binary'.format(behav)]>=min_frac_bout].copy()
 
@@ -1167,6 +1196,75 @@ def get_theta_errors_before_turns(aggr_turns, fps=60):
     return turn_starts
 
 
+# some stats
+def mixed_anova_stats(stimhz_means, yvar, within='stim_hz', between='species', 
+                        subject='acquisition',
+                        between1='Dmel', between2='Dyak'): 
+    '''
+    Do mixed anova, with between & within factors. Expect 2 bewteen groups (usually species),
+    and the within factor is some measure within pair (like testing multiple stim_hz).
+    Uses pingouin's mixed_anova function and the Mann-Whitney U test to compare.
+    
+    Returns:
+        results_df -- DataFrame with Mann-Whitney U test results for each frequency
+        aov -- ANOVA results
+    '''
+    aov = pg.mixed_anova(data=stimhz_means, dv=yvar,
+                        within=within, between=between, 
+                        subject=subject)
+    # Perform the Mann-Whitney U test for each frequency
+    # Store results
+    results = []
+    # Loop over each frequency and run the Mann-Whitney U test
+    for freq, subset in stimhz_means.groupby(within):#['frequency'].unique():        
+        group1 = subset[subset['species'] == between1][yvar]
+        group2 = subset[subset['species'] == between2][yvar]
+        
+        stat, pval = spstats.mannwhitneyu(group1, group2, 
+                                            alternative='two-sided') 
+        results.append({
+            'frequency': freq,
+            'U_statistic': stat,
+            'p_value': pval
+        })
+
+    # Convert to DataFrame for display
+    results_df = pd.DataFrame(results).sort_values('frequency')
+    
+    return results_df, aov
+
+def add_multiple_comparisons(results_df):
+    '''
+    For each comparison, has a p-value -- returns if significant after multiple comparisons
+    using FDR and Bonferroni correction.
+    
+    Returns:
+    - results_df: DataFrame with p-values and significance columns
+    '''
+    from statsmodels.stats.multitest import multipletests
+    # Extract p-values
+    pvals = results_df['p_value'].values
+    
+    # Apply corrections
+    reject_fdr, pvals_fdr, _, _ = multipletests(pvals, alpha=0.05, method='fdr_bh')
+    reject_bonf, pvals_bonf, _, _ = multipletests(pvals, alpha=0.05, method='bonferroni')
+
+    # Add to DataFrame
+    results_df['p_fdr'] = pvals_fdr
+    results_df['sig_fdr'] = reject_fdr
+    results_df['p_bonf'] = pvals_bonf
+    results_df['sig_bonf'] = reject_bonf
+
+    return results_df
+
+def get_R2_ols(plotd, xvar, yvar):
+    from sklearn import linear_model
+    X = plotd[xvar].interpolate().ffill().bfill().values
+    y = plotd[yvar].interpolate().ffill().bfill().values
+    lr = linear_model.LinearRegression()
+    lr.fit(X.reshape(len(X), 1), y)
+    r2 = lr.score(X.reshape(len(X), 1), y)
+    return lr, r2
 
 #%%
 
@@ -1191,11 +1289,11 @@ if __name__ == '__main__':
 
     create_new = False
 
-    assay = '2d_projector' # '38mm-dyad'
-    experiment = 'circle_diffspeeds'
+    #assay = '2d_projector' # '38mm-dyad'
+    #experiment = 'circle_diffspeeds'
 
-    #assay = '38mm_dyad' 
-    #experiment = 'MF'
+    assay = '38mm_dyad' 
+    experiment = 'MF'
 
     #%%
     minerva_base = '/Volumes/Juliana'
@@ -1218,7 +1316,7 @@ if __name__ == '__main__':
         # Set src
         srcpath= 'free_behavior_analysis/38mm_dyad/MF/FlyTracker'
         # local jaaba_file
-        jaaba_fname = 'jaaba_20240303.pkl' #'jaaba_free_behavior_data_mel_yak_20240403'
+        jaaba_fname = 'jaaba_20240403' #'jaaba_free_behavior_data_mel_yak_20240403'
 
     srcdir =  os.path.join(minerva_base, srcpath)
 
@@ -1282,6 +1380,10 @@ if __name__ == '__main__':
         #%
         # Process df0 for male fly
         winsize = 5
+        if assay == '2d_projector':
+            grouper = ['species', 'acquisition', 'fly_pair'] 
+        else:
+            grouper = ['species', 'acquisition']
         f1 = df0[df0['id']==0].copy()
         f1 = calculate_angle_metrics_focal_fly(f1, winsize=5)
 
@@ -1303,25 +1405,39 @@ if __name__ == '__main__':
 
     #%% =====================================================
     # subdivide 
+    #% Split into bouts of courtship
+    get_courtship_bouts = False
+    if get_courtship_bouts:
+        d_list = []
+        for acq, df_ in ftjaaba.groupby('acquisition'):
+            df_ = df_.reset_index(drop=True)
+            df_ = util.mat_split_courtship_bouts(df_, bout_marker='courtship')
+            dur_ = util.get_bout_durs(df_, bout_varname='boutnum', return_as_df=True,
+                            timevar='sec')
+            d_list.append(df_.merge(dur_, on=['boutnum']))
+        ftjaaba = pd.concat(d_list)
+
     # --------------------------------------------------------
     # split into small bouts
     # --------------------------------------------------------
     #%
     # subdivide into smaller boutsa
-    bout_dur = 0.20
+    bout_dur = 0.10
     ftjaaba = util.subdivide_into_subbouts(ftjaaba, bout_dur=bout_dur)
 
     #% FILTER
     min_boutdur = 0.05
     min_dist_to_other = 2
+    min_pos_theta = np.deg2rad(-90)
+    max_pos_theta = np.deg2rad(90)
     #%
     filtdf = ftjaaba[(ftjaaba['id']==0)
-                    #& (ftjaaba['targ_pos_theta']>=min_pos_theta) 
-                    #& (ftjaaba['targ_pos_theta']<=max_pos_theta)
+                    & (ftjaaba['targ_pos_theta']>=min_pos_theta) 
+                    & (ftjaaba['targ_pos_theta']<=max_pos_theta)
                     & (ftjaaba['dist_to_other']>=min_dist_to_other)
-                    & (ftjaaba['boutdur']>=min_boutdur)
-                    & (ftjaaba['good_frames']==1)
-                    #& (ftjaaba['led_level']>0)
+                    #& (ftjaaba['boutdur']>=min_boutdur)
+                    #& (ftjaaba['good_frames']==1) # only for PROJECTOR
+                    #& (ftjaaba['led_level']>0)    # only for PROJECTOR
                     ].copy() #.reset_index(drop=True)
 
     # drop rows with only 1 instance of a given subboutnum
@@ -1329,14 +1445,34 @@ if __name__ == '__main__':
     filtdf = filtdf[filtdf.groupby(['species', 'acquisition', 'subboutnum'])['subboutnum'].transform('count')>min_nframes]
     #%%
     # Get mean value of small bouts
-    if 'strain' in filtdf.columns:
-        filtdf = filtdf.drop(columns=['strain'])
+#     if 'strain' in filtdf.columns:
+#         filtdf = filtdf.drop(columns=['strain'])
+#     if 'fpath' in filtdf.columns:
+#         filtdf = filtdf.drop(columns=['fpath'])
+#     if 'filename' in filtdf.columns:
+#         filtdf = filtdf.drop(columns=['filename'])
     #%
-    meanbouts = filtdf.groupby(['species', 'acquisition',  'subboutnum']).mean().reset_index()
+    if 'stimsize' in filtdf.columns:
+        grouper = ['species', 'acquisition', 'stimsize', 'acq_fly', 'subboutnum']
+    else:
+        grouper = ['species', 'acquisition', 'subboutnum'] 
+    # Apply custom aggregation
+    meanbouts = filtdf.groupby(grouper, as_index=False).agg(
+                    {col: 'mean' if pd.api.types.is_numeric_dtype(dtype)
+                    else util.only_if_unique
+                    for col, dtype in filtdf.dtypes.items()}
+                ).reset_index()
+
+# 
+#         meanbouts = filtdf.groupby(['species', 'acquisition', 'stimsize', 'acq_fly', \
+#                                 'subboutnum']).mean().reset_index()
+#     else:
+#         meanbouts = filtdf.groupby(['species', 'acquisition', \
+#                                 'subboutnum']).mean().reset_index()
     meanbouts.head()
 
+    # Make stimulus palette for changing size/speed - PROJECTOR only
     cmap='viridis'
-
     if assay == '2d_projector':
         stimhz_palette = putil.get_palette_dict(ftjaaba[ftjaaba['stim_hz']>=0], 'stim_hz', cmap=cmap)
 
@@ -1347,45 +1483,68 @@ if __name__ == '__main__':
     # ANG_VEL vs. THETA_ERROR
     # -------------------------------------------------
     #%
-    xvar ='theta_error'
-    yvar = 'ang_vel_fly' #'ang_vel_fly_shifted' #'ang_vel' #'ang_vel_fly'
+    xvar = 'theta_error'
+    yvar = 'ang_vel_fly_shifted' #_shifted' #'ang_vel_fly_shifted' #'ang_vel' #'ang_vel_fly'
     plot_hue= False #True
     plot_grid = True
-    nframes_lag = 2
+    plot_frames = False
+    plot_example_animal = True
+    min_frac_bout = 0.
+    species_colors = ['plum', 'lightgreen']
 
+    data_type_str = 'FRAMES' if plot_frames else 'BOUTS-min-frac-bout-{}'.format(min_frac_bout)
+    nframes_lag = 2
     shift_str = 'SHIFT-{}frames_'.format(nframes_lag) if 'shifted' in yvar else ''
     hue_str = 'stimhz' if plot_hue else 'no-hue'
     hue_var = 'stim_hz' if plot_hue else None
     
     # Set palettes
     cmap='viridis'
-    #stimhz_palette = putil.get_palette_dict(ftjaaba[ftjaaba['stim_hz']>=0], 'stim_hz', cmap=cmap)
 
     # Get CHASING bouts 
     behav = 'chasing'
-    min_frac_bout = 0.9
-    chase_ = meanbouts[ (meanbouts['{}_binary'.format(behav)]>min_frac_bout) ].copy()
+    if plot_frames:
+        chase_ = filtdf[filtdf['{}_binary'.format(behav)]>0].copy().reset_index(drop=True)
+    else:
+        chase_ = meanbouts[ (meanbouts['{}_binary'.format(behav)]>min_frac_bout) ].copy().reset_index(drop=True)
+        
     if assay == '2d-projector':
         chase_ = chase_[chase_['stim_hz']>0]
                     #    & (meanbouts['ang_vel_fly_shifted']< -25)].copy()
-    #chase_ = filtdf[filtdf['{}_binary'.format(behav)]>0].copy()
+
 
     if 'shifted' in yvar:
-        figtitle = '{} bouts, where min fract of bout >= {:.2f}\nshifted {} frames'.format(behav, min_frac_bout, nframes_lag)
+        figtitle = '{}: {}\nshifted {} frames'.format(behav, data_type_str, nframes_lag)
     else:
-        figtitle = '{} bouts, where min fract of bout >= {:.2f}'.format(behav, min_frac_bout)
+        figtitle = '{}: {}'.format(behav, data_type_str)
 
     species_str = '-'.join(chase_['species'].unique())
-
-    xlabel = r'$\theta_{E}$ at $\Delta t$ (rad)'
+    if 'shifted' in yvar:
+        xlabel = r'$\theta_{E}$ at $\Delta t$ (rad)'
+    else:
+        xlabel = r'$\theta_{E}$ (rad)'
     ylabel = '$\omega_{f}$ (rad/s)'
 
     # SCATTERPLOT:  ANG_VEL vs. THETA_ERROR -- color coded by STIM_HZ
     fig = plot_regr_by_species(chase_, xvar, yvar, hue_var=hue_var, 
                                plot_hue=plot_hue, plot_grid=plot_grid,
-                            xlabel=xlabel, ylabel=ylabel, bg_color=bg_color)
-    fig.suptitle(figtitle, fontsize=12)
+                            xlabel=xlabel, ylabel=ylabel, bg_color=bg_color,
+                            fitstr_xloc=0.01, fitstr_yloc=1.15, 
+                            pearsons_xloc=0.01, pearsons_yloc=1.1)
+
+    if plot_example_animal:    
+        # Plot 1 animal overlaid?
+        yak_acq = chase_[chase_['species']=='Dyak']['acquisition'].unique()[1]
+        mel_acq = chase_[chase_['species']=='Dmel']['acquisition'].unique()[2]
+        example_yak = chase_[chase_['acquisition']==yak_acq].copy()
+        example_mel = chase_[chase_['acquisition']==mel_acq].copy()
+         
+        for ai, (sp, sp_df, col) in enumerate(zip(['Dmel', 'Dyak'], [example_mel, example_yak], species_colors)):
+            ax=fig.axes[ai]
+            ax.scatter(sp_df[xvar], sp_df[yvar], s=0.5, color=col, alpha=0.5)
+            #ax.set_title(sp, fontsize=4)
     pl.subplots_adjust(wspace=0.25)
+    fig.suptitle(figtitle, fontsize=6, ha='left')
 
     for ax in fig.axes:
         #ax.invert_yaxis()
@@ -1393,18 +1552,242 @@ if __name__ == '__main__':
 
     putil.label_figure(fig, figid)
     #figname = 'sct_{}_v_{}_stimhz_{}_min-frac-bout-{}'.format(yvar, xvar, species_str, min_frac_bout)
-    figname = 'sct_{}_v_{}_{}{}_{}_min-frac-bout-{}'.format(yvar, xvar, shift_str, hue_str, species_str, min_frac_bout)
+    figname = 'sct_{}_v_{}_{}{}_{}_{}'.format(\
+                yvar, xvar, shift_str, hue_str, species_str, data_type_str)
     pl.savefig(os.path.join(figdir, '{}.png'.format(figname)))
     pl.savefig(os.path.join(figdir, '{}.svg'.format(figname)))
 
     print(figdir, figname)
 
+    
+#%%
+    # Compare steering gain for FAST vs SLOW fwd vel
+    # -------------------------------------------------
+    # See Collie et al., 2024, Figure 4c
+    plot_frames = True
+    data_type = 'FRAMES' if plot_frames else 'BOUTS-min-frac-bout-{}'.format(min_frac_bout)
+    vir_colors = sns.color_palette('viridis', n_colors=5)
+    forward_vel_palette = {'slow': vir_colors[1], 'fast': vir_colors[-2]}
+
+    if plot_frames:
+        chase_ = filtdf[filtdf['{}_binary'.format(behav)]>0].copy().reset_index(drop=True)
+    else:
+        chase_ = meanbouts[ (meanbouts['{}_binary'.format(behav)]>min_frac_bout) ].copy().reset_index(drop=True)
+    if 'stim_hz' in chase_.columns: #assay == '2d_projector':
+        chase_ = chase_[chase_['stim_hz']>0]
+
+    #%%
+    fwd_vel_var = 'vel_shifted'
+
+    # First, get top and bottom quartile of vel_shifted for each species separately
+    def get_upper_lower_quartiles(mel_vel, lower=0.25, upper=0.75):
+        mel_q_lower = np.quantile(mel_vel, lower)
+        mel_q_upper = np.quantile(mel_vel, upper)
+        #print(mel_q_lower, mel_q_upper)
+        return mel_q_lower, mel_q_upper
+  
+    lower_q = 0.3
+    upper_q = 0.7 
+    mel_vel = chase_[chase_['species']=='Dmel'][fwd_vel_var].interpolate().ffill().bfill().values
+    mel_lower, mel_upper = get_upper_lower_quartiles(mel_vel, 
+                                        lower=lower_q, upper=upper_q)
+      
+    yak_vel = chase_[chase_['species']=='Dyak'][fwd_vel_var].interpolate().ffill().bfill().values 
+    yak_lower, yak_upper = get_upper_lower_quartiles(yak_vel,
+                                        lower=lower_q, upper=upper_q) 
+
+    fig, ax = pl.subplots()
+    sns.histplot(data=chase_, x=fwd_vel_var, 
+                 hue='species', bins=50, ax=ax, palette=species_palette)
+    ax.axvline(mel_lower, color=species_palette['Dmel'], linestyle='--')
+    ax.axvline(mel_upper, color=species_palette['Dmel'], linestyle='--')
+    ax.axvline(yak_lower, color=species_palette['Dyak'], linestyle='--')
+    ax.axvline(yak_upper, color=species_palette['Dyak'], linestyle='--') 
+        
+    vel_ranges = {'Dmel': (mel_lower, mel_upper), 
+                  'Dyak': (yak_lower, yak_upper)}
+    
+    ax.set_box_aspect(1)
+     
+    #%%
+    fwd_vel_var
+  
+    chase_['forward_vel_type'] = None
+    for sp, sp_chase in chase_.groupby('species'): 
+        fwd_vel_slow, fwd_vel_fast = vel_ranges[sp]
+        chase_.loc[((chase_['species']==sp)
+                   & (chase_[fwd_vel_var]<fwd_vel_slow)), 'forward_vel_type'] = 'slow'
+        chase_.loc[((chase_['species']==sp)
+                     & (chase_[fwd_vel_var]>fwd_vel_fast)), 'forward_vel_type'] = 'fast' 
+                 
+    # Plot steering gain by forward velocity (linear regression)    
+    fig, axn =pl.subplots(1, 2, sharex=True, sharey=False,
+                          figsize=(4,2), dpi=300)
+    for si, (sp, sp_chase) in enumerate(chase_.groupby('species')):
+
+        ax = axn[si] 
+        for fwd_vel, vel_df in sp_chase.groupby('forward_vel_type'):
+            sns.regplot(data=vel_df, ax=ax,
+                        x='theta_error', y='ang_vel_fly_shifted', 
+                        color=forward_vel_palette[fwd_vel],
+                        scatter=False, label=fwd_vel,
+                        scatter_kws={'s': 0.5, 'alpha': 0.2,
+                                     'color': forward_vel_palette[fwd_vel]},
+                        truncate=True)
+        fwd_vel_slow, fwd_vel_fast = vel_ranges[sp]
+        ax.set_title('{}: slow={:.2f}, fast={:.2f}'.format(sp, fwd_vel_slow, fwd_vel_fast), fontsize=6) 
+        if si==1:
+            ax.legend(title='forward vel', fontsize=6, frameon=False,
+                  bbox_to_anchor=(1,1), loc='upper left')
+        ax.set_box_aspect(1)
+        ax.set_xlabel('error (object position, rad)')
+        ax.set_ylabel('angular velocity, lag 2 (rad/s)')
+    fig.text(0.1, 0.92, 'Steering gain by forward vel:', fontsize=6) 
+
+    pl.subplots_adjust(wspace=0.5, top=0.85)
+     
+    putil.label_figure(fig, figid)
+    figname = 'sct_{}_v_{}_by_forward_vel_{}'.format(yvar, xvar, data_type)
+    
+    pl.savefig(os.path.join(figdir, '{}.png'.format(figname)))
     #%% 
+    # Fit linear regression to get steering gain per fly
+    from sklearn import linear_model
+    import sklearn.metrics as skmetrics
+    
+    # PER FLY: Compare steering gain for FAST vs SLOW fwd vel
+    d_list = [] 
+    for (sp, acq), df_ in chase_.groupby(['species', 'acquisition']):
+        # Fit linear regression between theta error and angular velocity for slow and fast forward_vel
+        # Fit the model for each forward velocity type
+        for fwd_vel, vel_df in df_.groupby('forward_vel_type'):
+            lr = linear_model.LinearRegression()
+
+            X = vel_df['theta_error'].interpolate().ffill().bfill().values.reshape(-1, 1)
+            y = vel_df['ang_vel_fly_shifted'].interpolate().ffill().bfill().values
+            lr.fit(X, y)
+            y_pred = lr.predict(X)
+            # Get the slope (gain) and intercept
+            gain = lr.coef_[0]
+            intercept = lr.intercept_
+            # Get R2 scopre
+            r2 = skmetrics.r2_score(y.flatten(), y_pred.flatten())
+            tmpdf = pd.DataFrame({'species': sp, 'acquisition': acq,
+                                    'forward_vel_type': fwd_vel, 
+                                    'gain': gain, 
+                                    'intercept': intercept,
+                                    'R2': r2}, index=[0])
+            # Append to the list
+            d_list.append(tmpdf)
+            
+            #print(f"Species: {sp}, Acquisition: {acq}, Forward Velocity: {fwd_vel}, Gain: {gain}, Intercept: {intercept}")
+    gain_df = pd.concat(d_list, ignore_index=True).reset_index(drop=True)
+     
+    #%% plot     
+    # Plot pairwise gain for slow vs. fast
+    fig, ax = pl.subplots()     
+    sns.stripplot(data=gain_df, x='species', y='gain', 
+                    hue='forward_vel_type',
+                    palette=forward_vel_palette, dodge=True,
+                    jitter=False, alpha=0.5, s=8, ax=ax, legend=False)
+    for sp, sp_df in gain_df.groupby('species'):
+        dodge = 0.25
+        x_pos = ax.get_xticks()[list(gain_df['species'].unique()).index(sp)]
+
+        for acq, acq_df in sp_df.groupby('acquisition'):
+            print(sp)
+            # Find the slow and fast values
+            slow_data = acq_df[acq_df['forward_vel_type'] == 'slow']
+            fast_data = acq_df[acq_df['forward_vel_type'] == 'fast']
+            
+            if not slow_data.empty and not fast_data.empty:
+                # Draw line between points
+                x1 = x_pos - dodge
+                x2 = x_pos + dodge
+                y2 = slow_data['gain'].values[0]
+                y1 = fast_data['gain'].values[0]
+                ax.plot([x1, x2], [y1, y2], 
+                        color='gray', alpha=0.3, linewidth=0.75)
+                
+   # Add pointplot to show group statistics (mean and CI)
+    sns.pointplot(data=gain_df, x='species', y='gain', hue='forward_vel_type',
+              palette=forward_vel_palette, dodge=dodge, join=False,
+              markers='o', scale=1.2, ci=95, ax=ax)
+ 
+    ax.set_title('Steering gain by forward velocity')
+    
+    putil.label_figure(fig, figid)
+    figname = 'gain_by_forward_vel_by_fly'
+    pl.savefig(os.path.join(figdir, '{}.png'.format(figname)))
+    pl.savefig(os.path.join(figdir, '{}.svg'.format(figname)))
+     
+    #%%
+    # Compare continnuous gain
+    chase_['gain'] = chase_['ang_vel_fly_shifted'] / chase_['theta_error']
+    chase_['log_gain'] = np.log1p(chase_['gain'])  # Apply log transformation to compress the range
+    fig, ax = pl.subplots()
+    sns.scatterplot(data=chase_, x=fwd_vel_var, y='log_gain', ax=ax, 
+                    hue='species', palette=species_palette,
+                    s=0.5, alpha=0.5)
+     
+    putil.label_figure(fig, figid)
+    figname = '{}_v_{}_by_forward_vel_{}'.format('log_gain',
+                                                     'vel_shifted', data_type)
+    
+    pl.savefig(os.path.join(figdir, '{}.png'.format(figname)))
+
+    #%% ang vel vs. theta error - 1 fly
+    # ------------------------------------------------ 
+    chase_ = filtdf[filtdf['{}_binary'.format(behav)]>0].copy().reset_index(drop=True)
+  
+    #chase_.groupby('species')['acquisition'].nunique()
+    xvar= 'theta_error'
+    yvar = 'ang_vel_fly_shifted' 
+    curr_species = 'Dyak'
+
+    #acq = chase_['acquisition'].unique()[0]  
+    for sp, sp_df in chase_.groupby('species'):
+        if sp=='Dyak':
+            nr=2
+            nc = 5
+        elif sp=='Dmel':
+            nr=3
+            nc=5
+        fig, axn = pl.subplots(nr, nc, figsize=(nr*1.5, nc*0.5), 
+                                                sharex=True, sharey=True) 
+        for ai, (acq, df_) in enumerate(sp_df.groupby('acquisition')): 
+            ax=axn.flat[ai]
+            sns.regplot(data=df_, x=xvar, y=yvar, ax=ax, color=bg_color,
+                            scatter_kws={'s': 0.5, 'color': bg_color},
+                            truncate=False, line_kws={'color': bg_color, 'lw': 0.5})
+            ax.axvline(x=0, color=bg_color, linestyle='--', lw=0.5)
+            ax.axhline(y=0, color=bg_color, linestyle='--', lw=0.5)
+            #ax.set_title(acq, fontsize=4)
+
+            # do fit
+            #res = rpl.regplot(data=df_, ax=ax, x=xvar, y=yvar,
+            #            color=bg_color, scatter=False) #, ax=ax)
+            # res.params: [intercept, slope]
+            ax.set_box_aspect(1)
+            lr, r2 = get_R2_ols(df_, xvar, yvar)
+            r2_str = '{}. OLS: y = {:.2f}x + {:.2f}\nR2={:.2f}'.format(ai, lr.coef_[0], 
+                                                                        lr.intercept_,
+                                                                        r2)
+            ax.text(0.01, 1.2, r2_str, fontsize=4, transform=ax.transAxes) 
+            putil.annotate_regr(df_, ax, x=xvar, y=yvar, fontsize=4,
+                                xloc=0.01, yloc=1.15)
+            # set xlabel to be theta subscript E
+            #ax.set_xlabel(xlabel)
+            #ax.set_ylabel(ylabel)
+        figname = '{}_{}_{}_by_acquisition'.format(curr_species, yvar, xvar) 
+        pl.savefig(os.path.join(figdir, '{}.png'.format(figname)))
+     
+    #%%
     # ------------------------------------------------
-    # Compare small vs. large theta -error
+    # Compare ANG vs. FWD velocity:  small vs. large theta -error
     # -------------------------------------------------
     var1 = 'vel_shifted'
-    var2 = 'ang_vel_shifted'
+    var2 = 'ang_vel_shifted' #'ang_vel_fly_shifted'
     err_palette={'small': 'r', 'large': 'cornflowerblue'}
     min_frac_bout = 0.
     use_bouts = True
@@ -1426,25 +1809,384 @@ if __name__ == '__main__':
             chase_ = filtdf[(filtdf['{}_binary'.format(behav)]>min_frac_bout)
                         & (filtdf['species']==curr_species)].copy().reset_index(drop=True)
         chase_ = split_theta_error(chase_, theta_error_small=theta_error_small, theta_error_large=theta_error_large)
+        if 'stim_hz' in chase_.columns: #assay == '2d_projector':
+            chase_ = chase_[chase_['stim_hz']>0]
+                    #    & (meanbouts['ang_vel_fly_shifted']< -25)].copy()
 
         # plot ------------------------------------------------
-        fig = plot_ang_v_fwd_vel_by_theta_error_size(chase_, 
-                            var1=var1, var2=var2, err_palette=err_palette, lw=2)
+        fig = plot_ang_v_fwd_vel_by_theta_error_size(chase_, figsize=(4,2),
+                            var1=var1, var2=var2, err_palette=err_palette, lw=1, 
+                            fly_marker_size=2,
+                            median_marker_size=2, scatter_size=1)
+        for ax in fig.axes:
+            sns.despine(ax=ax, offset=2)
         fig.text(0.1, 0.92, 
                  '{} bouts, frac. of {} > {:.1f}, lag {} frames (small=+/-{}, large=+/-{})'.format(
-                behav, data_type, min_frac_bout, nframes_lag_plot, theta_error_small_deg, theta_error_large_deg), fontsize=12)
+                behav, data_type, min_frac_bout, nframes_lag_plot, theta_error_small_deg, theta_error_large_deg), fontsize=4)
 
-        fig.text(0.1, 0.85, curr_species, fontsize=24)
+        fig.text(0.1, 0.85, curr_species, fontsize=6)
         pl.subplots_adjust(wspace=0.6, left=0.1, right=0.9, top=0.9)
 
         putil.label_figure(fig, figid)
-        figname = 'big-v-small-theta-error_ang-v-fwd-vel_{}_thetaS{}_thetaL{}_min-frac-bout-{}_{}'.format(curr_species, theta_error_small_deg, theta_error_large_deg, min_frac_bout, data_type)
+        figname = 'big-v-small-theta-error_ang-v-fwd-vel_{}_thetaS{}_thetaL{}_{}'\
+                    .format(curr_species, theta_error_small_deg, theta_error_large_deg, data_type)
         pl.savefig(os.path.join(figdir, '{}.png'.format(figname)))
-        #pl.savefig(os.path.join(figdir, '{}.svg'.format(figname)))
+        pl.savefig(os.path.join(figdir, '{}.svg'.format(figname)))
 
         print(figdir, figname)
+    #%%
+    # ANG vs. FWD VEL: compare BIG v SMALL error -- AVERAGE BY FLY.
+    # -------------------------------------------------
+    use_bouts = False
+    data_type = 'BOUTS' if use_bouts else 'FRAMES'
+    if use_bouts:
+        chase_ = meanbouts[(meanbouts['{}_binary'.format(behav)]>min_frac_bout)].copy().reset_index(drop=True)
+    else:
+        chase_ = filtdf[(filtdf['{}_binary'.format(behav)]>min_frac_bout)].copy().reset_index(drop=True)
+    chase_ = split_theta_error(chase_, theta_error_small=theta_error_small, 
+                                       theta_error_large=theta_error_large)
+    if 'stim_hz' in chase_.columns: #assay == '2d_projector':
+        chase_ = chase_[chase_['stim_hz']>0]
+
+    var1 = 'vel_shifted'
+    var2 = 'ang_vel_shifted'
+    # Compare small vs. large theta error by fly
+    # get mean from groupby, ignore non-numeric columns for mean 
+    mean_by_fly = chase_.groupby(['species', 'acquisition', 'error_size'], as_index=False).agg(
+                    {col: 'mean' if pd.api.types.is_numeric_dtype(dtype)
+                    else util.only_if_unique
+                    for col, dtype in filtdf.dtypes.items()}
+                ).reset_index()
+
+    # stack mean_by_fly so that ang_vel_shifted and vel_shifted are in the same column
+    stacked_mean_by_fly = pd.melt(mean_by_fly, 
+                        id_vars=['species', 'acquisition', 'error_size'],
+                        value_vars=[var1, var2], 
+                        var_name='vel_type', value_name='vel_value')
+    
+    #%plot 
+    stat_test = 'mwtest' # 'ttest' # 'kstest'
+    stat_fontsize=8
+    err_palette={'small': 'r', 'large': 'cornflowerblue'}
+    for si, (sp, sp_df) in enumerate(mean_by_fly.groupby('species')):
+        fig, axn = pl.subplots(1, 2, figsize=(2, 1))
+        for ai, (plot_var, plot_name) in enumerate(zip([var1, var2], ['forward vel', 'ang vel'])):
+            ax=axn[ai] 
+            sns.stripplot(data=sp_df, y=plot_var, ax=ax, 
+                    hue='error_size', palette=err_palette, dodge=True, 
+                    legend=0, linewidth=0.25, s=3) 
+            sns.barplot(data=sp_df, y=plot_var, ax=ax,
+                        hue='error_size', dodge=True, palette=err_palette, alpha=0.5,
+                        legend=ai==1)
+            if ai==1:
+                sns.move_legend(ax, 'upper left', bbox_to_anchor=(1, 1), 
+                                frameon=False, title='error size', fontsize=5)
+            ax.set_ylabel(plot_name)
+            ax.set_xlabel(sp)
+            sns.despine(offset=2, ax=ax, bottom=True)
+            
+            # stats
+            v1 = sp_df[sp_df['error_size']=='large'][plot_var].values
+            v2 = sp_df[sp_df['error_size']=='small'][plot_var].values 
+            # Test if the two distributions are different
+            # Use the Kolmogorov-Smirnov test
+            # Use the t-test:
+            if stat_test == 'ttest':
+                stat, pval = spstats.ttest_ind(v1, v2, equal_var=False)
+            elif stat_test == 'kstest':
+                stat, pval = spstats.ks_2samp(v1, v2) 
+            elif stat_test == 'mwtest':
+                stat, pval = spstats.mannwhitneyu(v1, v2, alternative='two-sided')
+            print('K-S test statistic:', stat)
+            print('p-value:', pval)
+            # Draw significance stars over the bars
+            if pval < 0.01:
+                ax.text(0.5, 0.95, '**', fontsize=stat_fontsize, ha='center', va='center',
+                        transform=ax.transAxes, color='k')
+            elif pval < 0.05:
+                ax.text(0.5, 0.95, '*', fontsize=stat_fontsize, ha='center', va='center', 
+                        transform=ax.transAxes, color='k')
+            else:
+                ax.text(0.5, 0.95, 'ns', fontsize=stat_fontsize, ha='center', va='center', 
+                        transform=ax.transAxes, color='k')           
+            # Check if the distributions are significantly different
+            if pval < 0.05:
+                print('The distributions are significantly different (reject H0)')
+            else:
+                print('The distributions are not significantly different (fail to reject H0)')
+
+        pl.subplots_adjust(wspace=0.6, left=0.1, right=0.9, top=0.9)
+     
+        putil.label_figure(fig, figid)
+        figname = 'big-v-small-theta-error_{}_by_fly_{}_{}_{}'.format(sp, var1, var2, data_type)
+        pl.savefig(os.path.join(figdir, '{}.png'.format(figname)))
+        pl.savefig(os.path.join(figdir, '{}.svg'.format(figname)))
+        print(figdir, figname)
+                                       
+    #%%
+    # Is there a DISTANCE difference for small theta in yak? 
+    plot_per_fly = True
+    plot_strip = False 
+    plot_alpha=1 if assay == '2d_projector' else 0.5
+    
+    binned_var = 'targ_ang_size_deg' #'dist_to_other'
+    # -------------------------------------------------
+    # Get CHASING bouts
+    chase_ = filtdf[(filtdf['{}_binary'.format(behav)]>min_frac_bout)].copy().reset_index(drop=True)
+    #chase_ = meanbouts[(meanbouts['{}_binary'.format(behav)]>min_frac_bout)].copy().reset_index(drop=True)
+
+    chase_ = split_theta_error(chase_, theta_error_small=theta_error_small, 
+                                       theta_error_large=theta_error_large)
+    if 'stim_hz' in chase_.columns: #assay == '2d_projector':
+        chase_ = chase_[chase_['stim_hz']>0]
+        
+    # bin distane 
+    bin_size = 10 if binned_var=='targ_ang_size_deg' else 5
+    max_dist = 40 if binned_var=='targt_ang_size_deg' else 30 #np.ceil(ftjaaba['dist_to_other'].max())
+    dist_bins = np.arange(0, max_dist+bin_size, bin_size)
+
+    # Cut dist_to_other into bins and assign label to new columns:
+    chase_['binned_{}'.format(binned_var)] = pd.cut(chase_[binned_var], 
+                                        bins=dist_bins, 
+                                        labels=dist_bins[:-1])   
+    chase_['binned_{}'.format(binned_var)].fillna(0, inplace=True)
+    chase_['binned_{}'.format(binned_var)] = chase_['binned_{}'.format(binned_var)].astype(int)
+
+    #mean_by_bin = chase_.groupby(['species', 'acquisition', 'binned_dist_to_other', 'error_size']).mean().reset_index()    
+    mean_by_bin = chase_.groupby(['species', 'acquisition', 'binned_{}'.format(binned_var), 'error_size'], as_index=False).agg(
+                    {col: 'mean' if pd.api.types.is_numeric_dtype(dtype)
+                    else util.only_if_unique
+                    for col, dtype in filtdf.dtypes.items()}
+                ).reset_index()
+    # Plot
+    #curr_df = chase_[chase_['species']=='Dmel'].copy() 
+    for curr_species, curr_df in chase_.groupby('species'):
+        fig, axn = pl.subplots(2, 2, figsize=(3, 2))
+        for ai, (plot_var) in enumerate([var1, var2]):
+            ax=axn[ai, 0]
+            sns.histplot(data=curr_df, x=plot_var, hue='error_size', ax=ax,
+                            palette=err_palette, alpha=plot_alpha, bins=50, 
+                            common_norm=False, fill=False, 
+                            stat='probability', element='step', legend=0) 
+            # plot median value of histograms
+            medians = curr_df.groupby(['species', 'error_size'])[plot_var].mean().reset_index()
+            # plot median value for each 
+            ylim = ax.get_ylim()[-1] + 0.05
+            for err_size, err_df in medians.groupby('error_size'):
+                ax.plot(err_df[plot_var], ylim, markersize=3,
+                        color=err_palette[err_size], marker='v') 
+            if plot_var=='vel_shifted':
+                ax.set_xlabel('forward vel (mm/s)')
+            elif plot_var=='ang_vel_shifted':
+                ax.set_xlabel('angular vel (rad/s)')
+           
+            ax=axn[ai, 1]
+            # bin dist_to_other
+            if plot_per_fly:
+                plotd = curr_df.groupby(['species', 'acquisition', 'binned_{}'.format(binned_var), 'error_size'], as_index=False).agg(  
+                            {col: 'mean' if pd.api.types.is_numeric_dtype(dtype)
+                            else util.only_if_unique
+                            for col, dtype in filtdf.dtypes.items()}
+                        ).reset_index() 
+            else:
+                plotd = curr_df.copy()
+            sns.barplot(data=plotd, #[curr_df['error_size']=='small'], 
+                            y=plot_var, x='binned_{}'.format(binned_var), ax=ax,
+                            hue='error_size', palette=err_palette, alpha=plot_alpha,
+                            legend=1, errorbar='se', errwidth=0.5,
+                            hue_order=['small', 'large'])
+            if plot_strip:
+                sns.stripplot(data=plotd, y=plot_var, x='binned_{}'.format(binned_var), ax=ax,
+                            hue='error_size', palette=err_palette, dodge=True, legend=0,
+                            linewidth=0.25, alpha=plot_alpha, s=5)
+            sns.move_legend(ax, loc='upper left', bbox_to_anchor=(1,1),
+                            frameon=False, title='error size')
+
+            if plot_var=='vel_shifted':
+                ax.set_ylabel('forward vel (mm/s)')
+            elif plot_var=='ang_vel_shifted':
+                ax.set_ylabel('angular vel (rad/s)')
+            if binned_var == 'dist_to_other':
+                ax.set_xlabel('distance to other (mm)')
+            elif binned_var == 'targ_ang_size_deg':
+                ax.set_xlabel('target size (deg)') 
+             
+        for ax in axn.flat:
+            sns.despine(offset=2, ax=ax)
+        pl.subplots_adjust(wspace=0.5, hspace=0.6, 
+                           left=0.1, right=0.9, top=0.9)
+        fig.text(0.1, 0.93, '{}: {}'.format(curr_species, assay), 
+                 fontsize=6)
+       
+        putil.label_figure(fig, figid) 
+        figname = 'error-size_v_binned_{}_{}_frames'.format(curr_species, binned_var)
+        pl.savefig(os.path.join(figdir, '{}.png'.format(figname)), dpi=300)
+        pl.savefig(os.path.join(figdir, '{}.svg'.format(figname)), dpi=300)
+               
+    #%% 
+    # Compare # of small-error and # of large-error frames
+    # -------------------------------------------------
+    import pingouin as pg 
+   
+    species_palette = {'Dmel': species_colors[0], 
+                       'Dyak': species_colors[1]} 
+    
+    chase_ = filtdf[(filtdf['{}_binary'.format(behav)]>min_frac_bout)].copy()
+    chase_ = split_theta_error(chase_, theta_error_small=theta_error_small, 
+                                       theta_error_large=theta_error_large)
+    counts_by_fly = chase_.groupby(['species', 'acquisition', 'error_size'])['frame'].count().reset_index()
+    
+    g = sns.catplot(data=counts_by_fly, x='species', y='frame', 
+                     col='error_size', hue='species',
+                kind='bar', height=1.5, aspect=0.7, sharey=False,
+                palette=species_palette, legend=False,
+                errorbar='se', errwidth=0.5)
+    fig = g.figure
+    for i, (error_size, err_df) in enumerate(counts_by_fly.groupby('error_size')):
+        ai = 0 if error_size=='large' else 1
+        ax = g.axes[0, ai]
+        sns.stripplot(data=err_df, x='species', y='frame', 
+                    hue='species', palette=species_palette, 
+                    dodge=True, jitter=True, s=2,
+                    linewidth=0.25, ax=ax, alpha=0.5)
+        ax.set_xlabel('N frames') 
+        ax.set_xlabel('')
+        #ax.set_ylim([-500, ax.get_ylim()[1]])
+        sns.despine(ax=ax, offset=2, bottom=True)
+    #sns.histplot(data=n_frames_per_cond, x='frame', hue='error_size', ax=ax)
+    # Stats
+    results_df, aov = mixed_anova_stats(counts_by_fly, yvar='frame',
+                                        within='error_size', between='species', 
+                                        subject='acquisition', between1='Dmel', between2='Dyak')
+    results_df = add_multiple_comparisons(results_df)
+    print(results_df)
+    large_p = results_df[results_df['frequency']=='large']['p_fdr'].values[0]  
+    small_p = results_df[results_df['frequency']=='small']['p_fdr'].values[0]
+    if large_p < 0.01:
+        g.axes[0, 0].annotate('**', xy=(0.5, 0.95), xycoords='axes fraction', fontsize=6,
+                            ha='center', va='center', color='k')
+    elif large_p < 0.05:
+        g.axes[0, 0].annotate('*', xy=(0.5, 0.95), xycoords='axes fraction', fontsize=6,
+                            ha='center', va='center', color='k')
+    if small_p < 0.01:
+        g.axes[0, 1].annotate('**', xy=(0.5, 0.95), xycoords='axes fraction', fontsize=6,
+                            ha='center', va='center', color='k')
+    elif small_p < 0.05:
+        g.axes[0, 1].annotate('*', xy=(0.5, 0.95), xycoords='axes fraction', fontsize=6,
+                            ha='center', va='center', color='k') 
+    pl.subplots_adjust(wspace=1)
+
+    putil.label_figure(fig, figid)
+    figname = 'nframes_by_error-size'
+    pl.savefig(os.path.join(figdir, '{}.png'.format(figname)))
+    pl.savefig(os.path.join(figdir, '{}.svg'.format(figname)))
+    print(figdir, figname)
+
+    #%% 
+    acq = '20240212-1215_fly3_Dmel_sP1-ChR_3do_sh_8x8'
+    curr_plotd = chase_[chase_['acquisition']==acq].copy() 
+    fig = plot_ang_v_fwd_vel_by_theta_error_size(curr_plotd, figsize=(4,2),
+                        var1=var1, var2=var2, err_palette=err_palette, lw=2)
+    fig.text(0.1, 0.92, 
+                '{} bouts, frac. of {} > {:.1f}, lag {} frames (small=+/-{}, large=+/-{})'.format(
+            behav, data_type, min_frac_bout, nframes_lag_plot, theta_error_small_deg, theta_error_large_deg), fontsize=4)
+
+    fig.text(0.1, 0.85, curr_species, fontsize=6)
+    pl.subplots_adjust(wspace=0.6, left=0.1, right=0.9, top=0.9)
+
+    #%%
+    import statsmodels.api as sm
+    from sklearn import linear_model
+    
+    #%%
+    # Check linear fits
+    # ------------------------------------------------
+    #min_frac_bout = 0.
+    curr_species = 'Dmel' 
+    plot_frames = True
+    data_type_str = 'FRAMES' if plot_frames else 'BOUTS-min-frac-bout-{}'.format(min_frac_bout)
+   
+    if plot_frames:
+        chase_ = filtdf[(filtdf['{}_binary'.format(behav)]>min_frac_bout)].copy()
+    else: 
+        min_frac_bout = 0.9
+        chase_ = meanbouts[ (meanbouts['{}_binary'.format(behav)]>min_frac_bout) ].copy()
+    if 'stim_hz' in chase_.columns: #assay == '2d_projector':
+        chase_ = chase_[chase_['stim_hz']>0]
+        
+    small_error_deg = 10
+    large_error_deg = 25 
+    theta_error_small = np.deg2rad(small_error_deg)
+    theta_error_large = np.deg2rad(large_error_deg) #np.rad2deg(theta_error_small), np.rad2deg(theta_error_large)
+    
+    chase_ = split_theta_error(chase_, theta_error_small=theta_error_small, 
+                               theta_error_large=theta_error_large)
+    chase_['theta_error_dt_flipped'] = chase_['theta_error_dt'] * -1
+    
+    # Check small theta vs. vel
+    large = chase_[chase_['error_size']=='large']
+    small = chase_[chase_['error_size']=='small']
+ 
+    xvar1 = 'theta_error'
+    xvar2 = 'theta_error_dt_flipped'
+    yvar = 'ang_vel_fly_shifted' #'ang_vel_fly_shifted' #'ang_vel' #'ang_vel_fly' 
+    
+    fig, axn = pl.subplots(2, 2)
+    for ri, (error_size, plotd) in enumerate(zip(['large', 'small'], 
+                                                 [chase_[chase_['species']==curr_species], 
+                                small[small['species']==curr_species]])):
+        for ai, xvar in enumerate([xvar1, xvar2]):
+            ax=axn[ri, ai] 
+            sns.regplot(data=plotd, x=xvar, y=yvar, ax=ax,
+                        scatter_kws={'s': 0.5, 'alpha': 0.5}, color='k') 
+            # do fit
+            res = rpl.regplot(data=plotd, ax=ax, x=xvar, y=yvar,
+                        color=bg_color, scatter=False) #, ax=ax)
+            # res.params: [intercept, slope]
+            ax.set_box_aspect(1)
+            pearsons = putil.annotate_regr(plotd, ax, x=xvar, y=yvar, fontsize=8)
+            print(pearsons)
+           
+            # OLS
+            lr, r2 = get_R2_ols(plotd, xvar, yvar)
+            r2_str = 'OLS: y = {:.2f}x + {:.2f}\nR2={:.2f}'.format(lr.coef_[0], 
+                                                                     lr.intercept_,
+                                                                     r2)
+            print(r2_str)
+            ax.text(0.05, 0.9, r2_str, fontsize=8, transform=ax.transAxes)
+            ax.set_title('{} error, {}'.format(error_size, xvar), fontsize=6) 
+
+    fig.text(0.1, 0.9, 'Large {} v Small {} errors, plot {}'.format(large_error_deg, small_error_deg, data_type))    
+    pl.subplots_adjust(wspace=0.5, hspace=0.5, top=0.85)
 
 
+    #%%
+    chase_['theta_error'] = chase_['theta_error'].interpolate().ffill().bfill() 
+ 
+    fig, ax = pl.subplots()
+    sns.histplot(data=chase_, x='theta_error_deg') #hue='error_size', ax=ax,)            
+
+    #%%
+    chase_['ang_vel_fly_shifted'] = chase_['ang_vel_fly_shifted'].interpolate().ffill().bfill() 
+
+    chase_['theta_error_deg'] = np.rad2deg(chase_['theta_error'])
+    start_bin = -120
+    end_bin = 120
+    bin_size = 10
+    chase_['binned_theta_error'] = pd.cut(chase_['theta_error_deg'],
+                                        bins=np.arange(-120, 120, 10), 
+                                        labels=np.arange(start_bin+bin_size/2,
+                                                         end_bin-bin_size/2, bin_size))    
+    avg_ang_vel = chase_.groupby(['species', 'acquisition', 
+                    'binned_theta_error'])['ang_vel_fly_shifted'].mean().reset_index()
+    avg_ang_vel = avg_ang_vel.dropna() 
+    fig, ax = pl.subplots()
+    sns.pointplot(data=avg_ang_vel, x='binned_theta_error', y='ang_vel_fly_shifted', 
+                    hue='species', palette=species_palette, ax=ax,
+                    dodge=True, errorbar='se', errwidth=0.5)
+    ax.axvline(x=0, color='k', linestyle='--', lw=0.5)
+    
+    
 #%%
     hue_var = 'stim_hz'
     cmap='viridis'
@@ -1527,6 +2269,7 @@ if __name__ == '__main__':
     # find the closest matching value to one of the keys in stimhz_palette:
     meanbouts_long['stim_hz'] = meanbouts_long['stim_hz'].apply(lambda x: min(stimhz_palette.keys(), key=lambda y:abs(y-x)))   
 #%%
+    # ALLO vs EGO 
     import parallel_pursuit as pp
     importlib.reload(pp)
 
@@ -1571,8 +2314,8 @@ if __name__ == '__main__':
         print(figdir, figname)
 
 
-#%%  Single animal
-
+#%%  
+    # Single animal -- allo vs ego
     curr_acq = '20240222-1611_fly7_Dmel_sP1-ChR_2do_sh_8x8'
 
     behav = 'chasing'
@@ -1605,7 +2348,7 @@ if __name__ == '__main__':
     print(figdir, figname)
 
     #%%
-
+    # summary plot of theta error vs. stim_hz for 1 example
     currplotdf['facing_angle_abs'] = np.abs(currplotdf['facing_angle'])
     fig, axn = pl.subplots(1, 2, sharex=True, figsize=(6, 3))
     ax=axn[0]
@@ -1615,8 +2358,7 @@ if __name__ == '__main__':
     sns.pointplot(data=currplotdf, x='stim_hz', y='targ_pos_radius', ax=ax)
 
     pl.subplots_adjust(wspace=0.5)
-    
-    
+     
 #%%
     # FIGURE:
     # 1) allocentric frames for 1 example fly
@@ -1694,8 +2436,12 @@ if __name__ == '__main__':
     pl.savefig(os.path.join(figdir, '{}.svg'.format(figname)))
 
 #%%
-    import pingouin as pg
+# Do some sumamry stats
 
+    import pingouin as pg
+    average_fly = False
+    
+    stat_type = 'avg-fly' if average_fly else 'avg-trial'
     col_yak = 'mediumorchid'
     col_mel = 'darkcyan'
     species_palette = {'Dmel': col_mel, 'Dyak': col_yak}
@@ -1712,11 +2458,20 @@ if __name__ == '__main__':
     frames_['targ_pos_radius_mm'] = frames_['targ_pos_radius'] / ppm
     
     # get mean 
-    stimhz_means = frames_.groupby(['species', 'acquisition', 'stim_hz']).mean().reset_index()
-
-    # count 
-    cnts = stimhz_means.groupby(['stim_hz', 'species'])['acquisition'].count().reset_index()
-    exclude_levels = cnts[cnts['acquisition'] < 10]['stim_hz'].unique()
+    counter = 'acq_fly' if average_fly else 'acquisition'
+    if average_fly:
+        stimhz_means_multi_per = frames_.groupby(['species', 'acquisition', 'stim_hz']).mean().reset_index()
+        stimhz_means_multi_per['acq_fly'] = [f"{m.group(1)}_{m.group(2)}" for s in \
+                                                stimhz_means_multi_per['acquisition'] if \
+                                                (m := re.match(r"(\d{8})-\d{4}_(fly\d)", s))]
+        stimhz_means_multi_per = stimhz_means_multi_per.drop(columns=['acquisition'])
+        stimhz_means = stimhz_means_multi_per.groupby(['species', 'acq_fly', 'stim_hz']).mean().reset_index()
+    else:
+        stimhz_means = frames_.groupby(['species', 'acquisition', 'stim_hz']).mean().reset_index()       
+    
+    # count conditions
+    cnts = stimhz_means.groupby(['stim_hz', 'species'])[counter].count().reset_index()
+    exclude_levels = cnts[cnts[counter] < 10]['stim_hz'].unique()
     stimhz_means = stimhz_means[~stimhz_means['stim_hz'].isin(exclude_levels)]
      
     errorbar = 'se'
@@ -1731,7 +2486,7 @@ if __name__ == '__main__':
                     legend=ai==1)
         if yvar=='facing_angle_abs_deg':
             ax.set_ylabel('Eror (deg)')
-            ylim = 30
+            ylim = 29
         else:
             ax.set_ylabel('Distance (mm)')
             ylim = 16
@@ -1740,43 +2495,12 @@ if __name__ == '__main__':
                     frameon=False, title='')
 
         # Stats
-        aov = pg.mixed_anova(data=stimhz_means, dv=yvar,
-                         within='stim_hz', between='species', 
-                         subject='acquisition')
-        # Perform the Mann-Whitney U test for each frequency
-        # Store results
-        results = []
-        # Loop over each frequency and run the Mann-Whitney U test
-        for freq, subset in stimhz_means.groupby('stim_hz'):#['frequency'].unique():        
-            group1 = subset[subset['species'] == 'Dmel'][yvar]
-            group2 = subset[subset['species'] == 'Dyak'][yvar]
-            
-            stat, pval = spstats.mannwhitneyu(group1, group2, alternative='two-sided') 
-            results.append({
-                'frequency': freq,
-                'U_statistic': stat,
-                'p_value': pval
-            })
-
-        # Convert to DataFrame for display
-        results_df = pd.DataFrame(results).sort_values('frequency')
+        results_df, aov = mixed_anova_stats(stimhz_means, yvar=yvar,
+                                            within='stim_hz', between='species', 
+                                            subject=counter, between1='Dmel', between2='Dyak')
+        results_df = add_multiple_comparisons(results_df)
         print(results_df)
-
-        from statsmodels.stats.multitest import multipletests
-        # Extract p-values
-        pvals = results_df['p_value'].values
-        
-        # Apply corrections
-        reject_fdr, pvals_fdr, _, _ = multipletests(pvals, alpha=0.05, method='fdr_bh')
-        reject_bonf, pvals_bonf, _, _ = multipletests(pvals, alpha=0.05, method='bonferroni')
-
-        # Add to DataFrame
-        results_df['p_fdr'] = pvals_fdr
-        results_df['sig_fdr'] = reject_fdr
-        results_df['p_bonf'] = pvals_bonf
-        results_df['sig_bonf'] = reject_bonf
-        print(results_df)
-
+       
         # Map frequency to x-tick positions and add asterisks above max point
         xticks = ax.get_xticks()  # Numerical x positions (e.g., [0, 1, 2, ...])
         xticklabels = [float(label.get_text()) for label in ax.get_xticklabels()]  # e.g., [0.025, 0.05, ...]
@@ -1804,7 +2528,7 @@ if __name__ == '__main__':
     sns.despine(offset=2, trim=False)
     
     putil.label_figure(fig, figid)
-    figname = 'facingangle_vs_stimhz_all-pairs_{}_minfracbout={}'.format(behav, min_frac_bout)
+    figname = 'facingangle_vs_stimhz_{}_{}_minfracbout={}'.format(stat_type, behav, min_frac_bout)
     pl.savefig(os.path.join(figdir, '{}.png'.format(figname)))
     pl.savefig(os.path.join(figdir, '{}.svg'.format(figname)))
 
@@ -1818,8 +2542,58 @@ if __name__ == '__main__':
                         data=stimhz_means, groups="acquisition")
     result = model.fit()
     print(result.summary())
- 
+
+
+    #%% counts
+    import re
+    # Find the pattern of #x#, where # is a number in the str S
+    # and x is a non-digit character
+    pattern = r'(\d+)[x](\d+)'
+    # Use str.extract to find the pattern in the 'stim_hz' column
+    #stimhz_means[['stimsize_x', 'stimsize_y']] = stimhz_means['acquisition'].astype(str).str.extract(pattern)
+    fly_cnts = stimhz_means[['species', 'acquisition','acq_fly']].drop_duplicates().groupby(['species', 'acq_fly']).count()
+    print("N flies per species:", stimhz_means.groupby('species')['acq_fly'].nunique() )
+    print("N acqs. per species:", stimhz_means.groupby('species')['acquisition'].nunique())
     
+   
+    #%% 
+    # Size/Speed?
+    # -------------------------------------------------
+    ftjaaba['stimsize'] = [re.search(r'\dx\d', s).group() for s in ftjaaba['acquisition']]
+    ftjaaba['acq_fly'] = [f"{m.group(1)}_{m.group(2)}" for s in \
+                                                ftjaaba['acquisition'] if \
+                                                (m := re.match(r"(\d{8})-\d{4}_(fly\d)", s))] 
+   
+    ftjaaba['stimsize'].unique() 
+  
+    means_by_stim = ftjaaba.groupby(['species', 'acq_fly', 'stimsize', 'stim_hz'])['chasing_binary'].mean().reset_index()
+
+    #%%
+    
+    speed_palette = sns.color_palette('flare', n_colors=3)
+    stimsize_palette = dict((k, c) for k, c in zip(sorted(means_by_stim['stimsize'].unique()),
+                                                   speed_palette))
+    fig, axn = pl.subplots(1, 2, sharex=True, sharey=False, figsize=(5,3))
+    for ai, (sp, spdf) in enumerate(means_by_stim.groupby('species')):
+        ax=axn[ai]
+        sns.lineplot(data=spdf, x='stim_hz', y='chasing_binary', ax=ax,
+                    hue='stimsize', errorbar='se', palette=stimsize_palette,
+                    legend=ai==1)
+        if ai==1:
+            sns.move_legend(ax, loc='upper right', bbox_to_anchor=(1,1), frameon=False,
+                            title='dot size')
+        ax.set_title(sp)
+        ax.set_ylim([0, 0.6])
+        ax.set_box_aspect(1)
+        ax.set_xlabel('Stimulus frequency (Hz)')
+        ax.set_ylabel('p(chasing)') 
+    sns.despine(offset=2, trim=False) 
+   
+    putil.label_figure(fig, figid)
+    figname = 'pChasing_vs_stimsize_{}_{}'.format(behav, data_type)
+    pl.savefig(os.path.join(figdir, '{}.png'.format(figname)))
+    pl.savefig(os.path.join(figdir, '{}.svg'.format(figname))) 
+     
 #%% =======================================================
 # AGGREGATE all turns across flies
 # =======================================================
