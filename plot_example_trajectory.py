@@ -30,8 +30,8 @@ print('figdir:', figdir)
 # %%
 
 srcdir = '/Volumes/Giacomo/free_behavior_data'
-#acquisition = '20240116-1015-fly1-yakWT_4do_sh_yakWT_4do_gh'
-acquisition = '20240119-1020-fly3-melWT_4do_sh_melWT_4do_gh'
+acquisition = '20240116-1015-fly1-yakWT_4do_sh_yakWT_4do_gh'
+#acquisition = '20240119-1020-fly3-melWT_4do_sh_melWT_4do_gh'
 
 viddir = os.path.join(srcdir, acquisition)
 df = util.combine_flytracker_data(acquisition, viddir)
@@ -69,6 +69,285 @@ elif curr_species == 'Dmel':
 #start_frame = 14900
 #stop_frame = 15750
 
+
+#%% # 
+import cv2
+
+def video_frames_to_rgba(cap, frame_range):
+    '''
+    Load each frame, get mask for flies, return as list of RGBA images (alpha set my mask)
+    '''
+    rgba_list = []
+    for ix in frame_range:
+        #ix = frame_range[0]  # Start with the first frame
+        # Set video to the first frame
+        cap.set(1, ix)
+        ret, img = cap.read()
+        gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY) #COLOR_BGR2RGB)
+        h, w = gray.shape 
+        
+        # mask image     
+        mask_two = get_mask(gray)
+     
+        # 6. Build the final RGBA: copy original RGB into channels 0–2, and use mask_two as alpha
+        rgba = np.zeros((h, w, 4), dtype=np.uint8)
+        rgba[..., :3] = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+        rgba[..., 3]  = mask_two
+
+        # 7. Flatten the RGBA to a 2D array if want on white background
+        # outim = flatten_rgba(rgba, background='white')
+
+        rgba_list.append(rgba)    
+
+    return rgba_list
+
+
+def get_mask(gray): 
+    h, w = gray.shape
+    # 2. Perform a BlackHat (closing – original) with a large elliptical kernel.
+    #    This “fills in” the two dark flies so the result is nearly zero everywhere
+    #    except for bright spots at the flies’ locations.
+    #    We pick the kernel size to be about 1/10th of the smaller image dimension.
+    k = int(min(h, w) / 10)
+    if k % 2 == 0:
+        k += 1
+    kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (k, k))
+    blackhat = cv2.morphologyEx(gray, cv2.MORPH_BLACKHAT, kernel)
+
+    # 3. Threshold that BlackHat result with a simple fixed threshold (fast, no Otsu).
+    #    We choose 20 so that the two bright fly regions turn white (255), while
+    #    almost everything else (background) remains zero.
+    _, thresh = cv2.threshold(blackhat, 20, 255, cv2.THRESH_BINARY)
+
+    # 4. Remove tiny specks via a 3×3 morphological opening
+    kernel_small = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3))
+    cleaned = cv2.morphologyEx(thresh, cv2.MORPH_OPEN, kernel_small)
+
+    # 5. Find all contours in the cleaned mask, then keep only the two largest
+    contours, _ = cv2.findContours(cleaned, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    areas = [cv2.contourArea(c) for c in contours]
+    if len(areas) > 0:
+        sorted_idx = np.argsort(areas)[::-1]
+        keep_idx = sorted_idx[:2]
+    else:
+        keep_idx = []
+
+    mask_two = np.zeros_like(gray)
+    for i in keep_idx:
+        cv2.drawContours(mask_two, contours, i, 255, thickness=cv2.FILLED)
+
+    return mask_two
+
+def flatten_rgba(rgba, background='white'):
+    """
+    Flattens the RGBA image to a 2D array.
+    """
+    # 2. Split into B, G, R, and A channels
+    b, g, r, a = cv2.split(rgba)
+
+    # 3. Convert the color channels back to a single grayscale image
+    gray_full = cv2.cvtColor(cv2.merge([b, g, r]), cv2.COLOR_BGR2GRAY)
+
+    # 4. Build a “masked_gray” where we keep the grayscale value only if alpha > 0,
+    #    otherwise set to zero.
+    masked_gray = np.zeros_like(gray_full)
+    masked_gray[a > 0] = gray_full[a > 0]
+    if background=='white':
+        masked_gray[masked_gray == 0] = 255  # Set background to white
+
+    return masked_gray
+
+def rgba_to_masked_gray(rgba):
+    """
+    Given an RGBA uint8 image of shape (H,W,4), return a 2D masked array
+    `ma_gray` of shape (H,W) such that:
+      - ma_gray.data[y,x] = the grayscale intensity (0..255)
+      - ma_gray.mask[y,x] = True  if that pixel was transparent in RGBA
+                         = False if that pixel belonged to foreground
+    When you later call `imshow(ma_gray, cmap=...)`, masked pixels will be
+    transparent and the rest will be colored by the colormap.
+    """
+    # Split into B,G,R,A channels
+    b, g, r, a = cv2.split(rgba)
+
+    # Reconstruct a single-channel grayscale from the original RGB (BGR→Gray)
+    # (Since our extracted objects were always grayscale to begin with, this
+    #  simply recovers their gray intensities.)
+    gray = cv2.cvtColor(cv2.merge([b, g, r]), cv2.COLOR_BGR2GRAY)
+
+    # Build a boolean mask: True where alpha==0 (background), False where alpha>0 (foreground)
+    # Note: a is dtype=uint8 in [0..255], so we compare to zero.
+    bg_mask = (a == 0)
+
+    # Create a NumPy masked‐array.  Mask = True ⇒ “hide/transparent.”
+    ma_gray = np.ma.array(gray, mask=bg_mask)
+
+    return ma_gray
+
+
+def separate_objects_by_centroid(rgba_list):
+    """
+    Separate objects in a list of RGBA images by their centroids.
+    Returns two lists: one for each object.
+    """
+    
+    # Lists to store the separated single-object images
+    list_A = []
+    list_B = []
+
+    # To keep track of previous centroids for A and B
+    prev_centroid_A = None
+    prev_centroid_B = None
+
+    for idx, rgba in enumerate(rgba_list):
+        # 1) Split out the alpha channel & find contours on it
+        b_channel, g_channel, r_channel, alpha_channel = cv2.split(rgba)
+        # Convert alpha to binary mask (0 or 255)
+        _, alpha_binary = cv2.threshold(alpha_channel, 1, 255, cv2.THRESH_BINARY)
+        
+        # Find external contours (each contour corresponds to one object)
+        contours, _ = cv2.findContours(alpha_binary, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        
+        # If fewer than 2 contours, skip or handle accordingly
+        if len(contours) < 2:
+            raise ValueError(f"Frame {idx} has fewer than 2 detected objects.")
+        
+        # Compute centroid and masked image for each contour
+        object_info = []  # Will hold tuples of (centroid, single_obj_rgba)
+        for cnt in contours:
+            # Compute centroid using moments
+            M = cv2.moments(cnt)
+            if M['m00'] == 0:
+                continue
+            cx = int(M['m10'] / M['m00'])
+            cy = int(M['m01'] / M['m00'])
+            centroid = (cx, cy)
+            
+            # Build a mask for this single contour
+            mask_single = np.zeros_like(alpha_binary)
+            cv2.drawContours(mask_single, [cnt], -1, 255, thickness=cv2.FILLED)
+            
+            # Apply that mask to the RGBA image to extract the single-object RGBA
+            single_rgba = np.zeros_like(rgba)
+            single_rgba[..., 0] = b_channel * (mask_single // 255)
+            single_rgba[..., 1] = g_channel * (mask_single // 255)
+            single_rgba[..., 2] = r_channel * (mask_single // 255)
+            single_rgba[..., 3] = mask_single
+            
+            object_info.append((centroid, single_rgba))
+        
+        # If more than 2 objects (unlikely), sort by area or pick the two largest:
+        if len(object_info) > 2:
+            # Sort contours by area descending, keep top 2
+            areas = [cv2.contourArea(cnt) for cnt in contours]
+            sorted_idx = np.argsort(areas)[::-1]
+            top_two_info = [object_info[i] for i in sorted_idx[:2]]
+            object_info = top_two_info
+        
+        # Now object_info has exactly two entries: [(centroid1, img1), (centroid2, img2)]
+        (c1, img1), (c2, img2) = object_info
+        
+        if idx == 0:
+            # For the first frame, assign based on x-coordinate (left->A, right->B)
+            if c1[0] < c2[0]:
+                list_A.append(img1)
+                list_B.append(img2)
+                prev_centroid_A = c1
+                prev_centroid_B = c2
+            else:
+                list_A.append(img2)
+                list_B.append(img1)
+                prev_centroid_A = c2
+                prev_centroid_B = c1
+        else:
+            # Compute distances from current centroids to previous
+            dist1_to_A = np.hypot(c1[0] - prev_centroid_A[0], c1[1] - prev_centroid_A[1])
+            dist1_to_B = np.hypot(c1[0] - prev_centroid_B[0], c1[1] - prev_centroid_B[1])
+            dist2_to_A = np.hypot(c2[0] - prev_centroid_A[0], c2[1] - prev_centroid_A[1])
+            dist2_to_B = np.hypot(c2[0] - prev_centroid_B[0], c2[1] - prev_centroid_B[1])
+            
+            # Assign the object whose centroid is closer to prev_centroid_A into A, the other into B
+            if dist1_to_A + dist2_to_B < dist1_to_B + dist2_to_A:
+                # Object 1 goes to A, Object 2 goes to B
+                list_A.append(img1)
+                list_B.append(img2)
+                prev_centroid_A = c1
+                prev_centroid_B = c2
+            else:
+                # Object 2 goes to A, Object 1 goes to B
+                list_A.append(img2)
+                list_B.append(img1)
+                prev_centroid_A = c2
+                prev_centroid_B = c1
+
+    return list_A, list_B
+
+
+
+#%%
+# Load video
+found_vidpaths = glob.glob(os.path.join(viddir, '*.avi'))
+print(found_vidpaths)
+vidpath = found_vidpaths[0]  # Assuming you want the first video file
+
+# Load video
+cap = cv2.VideoCapture(vidpath)
+#success, image = vidcap.read()
+width = cap.get(cv2.CAP_PROP_FRAME_WIDTH)
+height = cap.get(cv2.CAP_PROP_FRAME_HEIGHT)
+n_frames = cap.get(cv2.CAP_PROP_FRAME_COUNT)
+print(width, height, n_frames)
+
+#%%a
+
+male_is_b = [0, 1, 5]
+male_is_a = [i for i, v in enumerate(bouts) if i not in male_is_b]
+# A is male, is gray
+
+interval=50
+for ix, (start_frame, stop_frame) in enumerate(bouts):
+#%
+    # Make a list of frames to process
+    # -----------
+    #start_frame, stop_frame = bouts[0]
+    frame_range = np.arange(start_frame, stop_frame, interval)
+    rgba_list = video_frames_to_rgba(cap, frame_range)
+    #%
+    # Separate male and female
+    # Now `list_A` and `list_B` each contain 10 single-object RGBA images, consistently tracked
+    # left is A, right is B for first frame
+    list_A, list_B = separate_objects_by_centroid(rgba_list)    
+    #%
+    # Convert lists to numpy arrays
+    ma_A = [rgba_to_masked_gray(rgba) for rgba in list_A]
+    ma_B = [rgba_to_masked_gray(rgba) for rgba in list_B]
+
+    # Plot
+    alpha_values = np.linspace(0.1, 1, len(ma_A))
+    fig, ax = plt.subplots(figsize=(4,4))
+    
+    a_cmap = 'Reds_r' if ix in male_is_a else 'gray'
+    b_cmap = 'gray' if a_cmap == 'Reds_r' else 'Reds_r'
+    for a, b, curr_alpha in zip(ma_A, ma_B, alpha_values):
+        # Display the images with some transparency
+        ax.imshow(a, cmap=a_cmap, alpha=curr_alpha, interpolation='none')
+        ax.imshow(b, cmap=b_cmap, alpha=curr_alpha, interpolation='none')
+    ax.set_xlim([0, 1200])
+    ax.set_ylim([1200, 0])  # Invert y-axis to match video coordinates
+    ax.axis('off')
+    fig.text(0.1, 0.95, ix)
+    
+    # Set cbar title
+    figname = 'overlaid_{}__{}_fr{}-{}'.format(curr_species, acquisition, start_frame, stop_frame)
+    plt.savefig(os.path.join(figdir, '{}.png'.format(figname)), dpi=300, bbox_inches='tight')
+
+#%%
+
+
+
+#%% 
+# plot trajectories symbollically
+# ===========================================================================
 interval = 12
 
 # Define marker size and line length
