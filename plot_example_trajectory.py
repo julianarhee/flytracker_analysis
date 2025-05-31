@@ -30,8 +30,8 @@ print('figdir:', figdir)
 # %%
 
 srcdir = '/Volumes/Giacomo/free_behavior_data'
-acquisition = '20240116-1015-fly1-yakWT_4do_sh_yakWT_4do_gh'
-#acquisition = '20240119-1020-fly3-melWT_4do_sh_melWT_4do_gh'
+#acquisition = '20240116-1015-fly1-yakWT_4do_sh_yakWT_4do_gh'
+acquisition = '20240119-1020-fly3-melWT_4do_sh_melWT_4do_gh'
 
 viddir = os.path.join(srcdir, acquisition)
 df = util.combine_flytracker_data(acquisition, viddir)
@@ -299,18 +299,23 @@ n_frames = cap.get(cv2.CAP_PROP_FRAME_COUNT)
 print(width, height, n_frames)
 
 #%%a
+if curr_species == 'Dyak':
+    male_is_b = [0, 1, 5]
+elif curr_species == 'Dmel':
+    male_is_b = [0, 1, 2 ]
 
-male_is_b = [0, 1, 5]
-male_is_a = [i for i, v in enumerate(bouts) if i not in male_is_b]
+print(male_is_b)
 # A is male, is gray
+male_is_a = [i for i, v in enumerate(bouts) if i not in male_is_b]
 
-interval=50
+plot_interval=50
+
 for ix, (start_frame, stop_frame) in enumerate(bouts):
 #%
     # Make a list of frames to process
     # -----------
     #start_frame, stop_frame = bouts[0]
-    frame_range = np.arange(start_frame, stop_frame, interval)
+    frame_range = np.arange(start_frame, stop_frame) #, interval)
     rgba_list = video_frames_to_rgba(cap, frame_range)
     #%
     # Separate male and female
@@ -319,8 +324,8 @@ for ix, (start_frame, stop_frame) in enumerate(bouts):
     list_A, list_B = separate_objects_by_centroid(rgba_list)    
     #%
     # Convert lists to numpy arrays
-    ma_A = [rgba_to_masked_gray(rgba) for rgba in list_A]
-    ma_B = [rgba_to_masked_gray(rgba) for rgba in list_B]
+    ma_A = [rgba_to_masked_gray(rgba) for rgba in list_A[0::plot_interval]]
+    ma_B = [rgba_to_masked_gray(rgba) for rgba in list_B[0::plot_interval]]
 
     # Plot
     alpha_values = np.linspace(0.1, 1, len(ma_A))
