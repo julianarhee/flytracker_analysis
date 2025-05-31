@@ -29,16 +29,23 @@ print('figdir:', figdir)
 
 # %%
 
+curr_species = 'Dele'
+# --------------------------------------------------
 srcdir = '/Volumes/Giacomo/free_behavior_data'
-#acquisition = '20240116-1015-fly1-yakWT_4do_sh_yakWT_4do_gh'
-acquisition = '20240119-1020-fly3-melWT_4do_sh_melWT_4do_gh'
-
+if curr_species == 'Dyak':
+    acquisition = '20240116-1015-fly1-yakWT_4do_sh_yakWT_4do_gh'
+elif curr_species == 'Dmel':
+    acquisition = '20240119-1020-fly3-melWT_4do_sh_melWT_4do_gh'
+elif curr_species == 'Dele':
+    #acquisition = '20240814-0925_fly1_Dele-HK_WT_6do_gh'
+    acquisition = '20240814-1023_fly2_Dele-HK_WT_6do_gh'
+    srcdir = '/Users/julianarhee/Dropbox @RU Dropbox/Juliana Rhee/caitlin_data/Caitlin_elehk_38mm'
 viddir = os.path.join(srcdir, acquisition)
 df = util.combine_flytracker_data(acquisition, viddir)
 df.head()
 
 #%%a
-curr_species = 'Dyak' if 'yak' in acquisition else 'Dmel'
+#curr_species = 'Dyak' if 'yak' in acquisition else 'Dmel'
 
 yak_bouts = [
     [14900, 15650], #700],
@@ -57,7 +64,33 @@ mel_bouts = [
     [10400, 10910]
 ]
 
-
+if acquisition == '20240814-0925_fly1_Dele-HK_WT_6do_gh':
+    ele_bouts = [
+        [10603, 10670], 
+        [36703, 36746],
+        [46451, 46527],  # maybe
+    ]
+elif acquisition == '20240814-1023_fly2_Dele-HK_WT_6do_gh':
+    ele_bouts = [
+        [6438, 6503], 
+        [21161, 21243],
+        [23290, 23339],
+        [31294, 31363],
+        [34355, 34440],
+        [38387, 38468],
+        [60348, 60403], #42-44 are good
+        [71259, 71342],
+        [77732, 77803],
+        [80507, 80581],
+        [92828, 92906],
+        [14828, 14936], # CHASE
+        [19082, 19194],
+        #[19657, 19750],
+        [26808, 27026],
+        [27656, 27744], # chase afar?
+        [28377, 28490],
+        [36238, 36382]      
+    ]
 if curr_species == 'Dyak': 
     #start_frame = 16200 #14900
     #stop_frame = 17100 #15750
@@ -66,6 +99,9 @@ if curr_species == 'Dyak':
 elif curr_species == 'Dmel':
     #start_frame, stop_frame = mel_bouts[-1] #= 6060
     bouts = mel_bouts
+elif curr_species == 'Dele':
+    bouts = ele_bouts
+    
 #start_frame = 14900
 #stop_frame = 15750
 
@@ -282,46 +318,80 @@ def separate_objects_by_centroid(rgba_list):
 
     return list_A, list_B
 
+import pickle as pkl
 
 
+# Try loading frames 
+frame_fpath = os.path.join(figdir, 'frames_{}.pkl'.format(acquisition))
+create_new = True
+
+if create_new is False and os.path.exists(frame_fpath):
+    with open(frame_fpath, 'rb') as f:
+        frame_dict = pkl.load(f)
+    print('Loaded existing frames from:', frame_fpath)
+else:
+    create_new = True 
+print(create_new)
+    
 #%%
-# Load video
-found_vidpaths = glob.glob(os.path.join(viddir, '*.avi'))
-print(found_vidpaths)
-vidpath = found_vidpaths[0]  # Assuming you want the first video file
+if create_new:
+    # Load video
+    found_vidpaths = glob.glob(os.path.join(viddir, '*.avi'))
+    print(found_vidpaths)
+    vidpath = found_vidpaths[0]  # Assuming you want the first video file
 
-# Load video
-cap = cv2.VideoCapture(vidpath)
-#success, image = vidcap.read()
-width = cap.get(cv2.CAP_PROP_FRAME_WIDTH)
-height = cap.get(cv2.CAP_PROP_FRAME_HEIGHT)
-n_frames = cap.get(cv2.CAP_PROP_FRAME_COUNT)
-print(width, height, n_frames)
+    # Load video
+    cap = cv2.VideoCapture(vidpath)
+    #success, image = vidcap.read()
+    width = cap.get(cv2.CAP_PROP_FRAME_WIDTH)
+    height = cap.get(cv2.CAP_PROP_FRAME_HEIGHT)
+    n_frames = cap.get(cv2.CAP_PROP_FRAME_COUNT)
+    print(width, height, n_frames)
+    #%
+    frame_dict = {}
+    for ix, (start_frame, stop_frame) in enumerate(bouts):
+    #%
+        # Make a list of frames to process
+        # -----------
+        #start_frame, stop_frame = bouts[0]
+        frame_range = np.arange(start_frame, stop_frame) #, interval)
+        rgba_list = video_frames_to_rgba(cap, frame_range)
+        #%
+        # Separate male and female
+        # Now `list_A` and `list_B` each contain 10 single-object RGBA images, consistently tracked
+        # left is A, right is B for first frame
+        list_A, list_B = separate_objects_by_centroid(rgba_list)    
+        
+        frame_dict.update({ix: [list_A, list_B]})
 
-#%%a
+    with open(frame_fpath, 'wb') as f:
+        pkl.dump(frame_dict, f)
+        
+    
+#%%
 if curr_species == 'Dyak':
     male_is_b = [0, 1, 5]
+    plot_interval = 50
 elif curr_species == 'Dmel':
     male_is_b = [0, 1, 2 ]
-
+    plot_interval = 50
+elif curr_species == 'Dele':
+    if acquisition == '20240814-0925_fly1_Dele-HK_WT_6do_gh':
+        male_is_b = [1, 2]
+    else:
+        # These are males that are black, but should be red 
+        male_is_b = [1, 3, 6, 7, 10, 11, 12, 14, 15, 16] 
+        #male_is_b = [0, 2, 4,  5, 8, 9, 13]
+    plot_interval = 10
+    
 print(male_is_b)
 # A is male, is gray
 male_is_a = [i for i, v in enumerate(bouts) if i not in male_is_b]
 
-plot_interval=50
+plot_interval=10
 
-for ix, (start_frame, stop_frame) in enumerate(bouts):
-#%
-    # Make a list of frames to process
-    # -----------
-    #start_frame, stop_frame = bouts[0]
-    frame_range = np.arange(start_frame, stop_frame) #, interval)
-    rgba_list = video_frames_to_rgba(cap, frame_range)
-    #%
-    # Separate male and female
-    # Now `list_A` and `list_B` each contain 10 single-object RGBA images, consistently tracked
-    # left is A, right is B for first frame
-    list_A, list_B = separate_objects_by_centroid(rgba_list)    
+for (start_frame, end_frame), (ix, (list_A, list_B)) in zip(bouts, frame_dict.items()):
+    print(start_frame, end_frame, ix)
     #%
     # Convert lists to numpy arrays
     ma_A = [rgba_to_masked_gray(rgba) for rgba in list_A[0::plot_interval]]
