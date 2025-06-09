@@ -24,8 +24,8 @@ import utils as util
 import plotting as putil
 
 #%%
-plot_style='dark'
-putil.set_sns_style(plot_style, min_fontsize=12)
+plot_style='white'
+putil.set_sns_style(plot_style, min_fontsize=6)
 bg_color = [0.7]*3 if plot_style=='dark' else 'k'
 
 #%%
@@ -225,6 +225,26 @@ for acq, d_ in jaaba.groupby('acquisition'):
     d_list.append(currdf)
 
 ftjaaba = pd.concat(d_list)
+#%%
+
+# Convert pixels to mm?
+#elif assay == '38mm_dyad':
+video_srcdir = '/Volumes/Giacomo/JAABA_classifiers/free_behavior'
+    
+ftjaaba['PPM'] = np.nan
+for acq, df_ in ftjaaba.groupby('acquisition'):
+    calib_fpath = glob.glob(os.path.join(video_srcdir, '{}*'.format(acq), 'calibration.mat'))
+    if len(calib_fpath)>0: #os.path.exists(calib_fpath):
+        acq_dir = os.path.split(calib_fpath[0])[0] 
+        calib = util.load_calibration(acq_dir, calib_is_upstream=False)
+        ftjaaba.loc[ftjaaba['acquisition']==acq, 'PPM'] = calib['PPM']
+
+# Get average PPM across acquisitions to fill NaNs
+avg_ppm = ftjaaba['PPM'].mean()
+ftjaaba['PPM'] = ftjaaba['PPM'].fillna(avg_ppm)
+# Convert to mm
+ftjaaba['targ_rel_pos_x_mm'] = ftjaaba['targ_rel_pos_x'] / ftjaaba['PPM']
+ftjaaba['targ_rel_pos_y_mm'] = ftjaaba['targ_rel_pos_y'] / ftjaaba['PPM'] 
 
 #%%
  
@@ -237,7 +257,7 @@ max_dist_to_other = 20
 max_targ_pos_theta = np.deg2rad(270) #160
 min_targ_pos_theta = np.deg2rad(-270) # -160
 min_wing_ang_deg = 30
-min_wing_ang = np.deg2rad(min_wing_ang)
+min_wing_ang = np.deg2rad(min_wing_ang_deg)
 
 #%
 if use_jaaba:
@@ -331,7 +351,7 @@ putil.label_figure(fig, fig_id)
 
 fig_str = '{}_court_{}'.format(stat, court_filter_str)
 figname = 'male-pos-relative-to-fem_bins-{}_{}'.format(bins, fig_str)
-pl.savefig(os.path.join(figdir, '{}.png'.format(figname)), dpi=300, bbox_inches='tight')
+#pl.savefig(os.path.join(figdir, '{}.png'.format(figname)), dpi=300, bbox_inches='tight')
 #pl.savefig(os.path.join(figdir, '{}.svg'.format(figname))) #, dpi=300, bbox_inches='tight')
 print(figdir)
 print(figname)
@@ -420,50 +440,60 @@ print(ftjaaba[['species', 'acquisition']].drop_duplicates().groupby('species').c
 # %%
 
 # Plot from MALE's POV 
-common_bins = False
-
-cmap = 'magma' #'YlOrBr'
+common_bins = True
+#cmap = 'magma' 
+cmap ='magma_r'
 stat = 'probability' #'count' #count'
-vmax=0.001 if stat=='probability' else 250
+vmax=0.01 if stat=='probability' else 250
+if common_bins:
+    vmax = 0.001
+else:
+    vmax = 0.001
 #vmax = 0.002 if stat=='probability' else 250
-bins=100 if common_bins else 'auto'
-axlim = 500
+bins= 100 if common_bins else 'auto'
+bin_str = 'auto-bin' if not common_bins else 'bin-{}'.format(bins)
 
+axlim = 800
+xvar = 'targ_rel_pos_x_mm'
+yvar = 'targ_rel_pos_y_mm'
 norm = mpl.colors.Normalize(vmin=0, vmax=vmax)
-fig, axn = pl.subplots(1, 3, figsize=(8, 4), sharex=True, sharey=True)
-for ai, sp in enumerate(['Dmel', 'Dyak', 'Dele']): #(sp, df_) in enumerate(f2_.groupby('species')):
+pl.rcParams['axes.linewidth'] = 0.25
 
+fig, axn = pl.subplots(1, 2, figsize=(2, 1.3), sharex=True, sharey=True, dpi=300)
+#for ai, sp in enumerate(['Dmel', 'Dyak', 'Dele']): #(sp, df_) in enumerate(f2_.groupby('species')):
+for ai, sp in enumerate(['Dmel', 'Dyak']):
     ax=axn[ai]
     df_ = court_[court_['species']==sp].copy().reset_index(drop=True)
-    sns.histplot(data=df_, x='targ_rel_pos_x', y='targ_rel_pos_y', ax=ax, 
+    sns.histplot(data=df_, x=xvar, y=yvar, ax=ax, 
             cmap=cmap, stat=stat, vmin=0, vmax=vmax, bins=bins) # %%
-    ax.plot(0, 0, 'w', markersize=3, marker='>')
-    ax.set_title(sp)
+    ax.plot(0, 0, 'gray', markersize=2, marker='>')
+    ax.set_title(sp, pad=2)
     # ax.set_xlim([])
     ax.set_aspect(1)
     # if sp=='Dmel': #or sp=='Dyak':
     #     ax.set_xlim([-250, 250])
     #     ax.set_ylim([-250, 250])
     # else:
-    ax.set_xlim([-axlim, axlim])
-    ax.set_ylim([-axlim, axlim])
-
+    #ax.set_xlim([-axlim, axlim])
+    #ax.set_ylim([-axlim, axlim])
+    ax.tick_params(axis='both', which='major', pad=0)
+    
     ax.axvline(0, color=bg_color, linestyle=':', lw=0.5)
     ax.axhline(0, color=bg_color, linestyle=':', lw=0.5)
 
-    ax.set_xlabel('x-pos (pix)')
-    ax.set_ylabel('y-pos (pix)')
+    ax.set_xlabel('Relative x (mm)', labelpad=1)
+    ax.set_ylabel('Relative y (mm)', labelpad=1)
 
 putil.colorbar_from_mappable(ax, norm=norm, cmap=cmap, axes=[0.92, 0.3, 0.01, 0.4],
-                             hue_title=stat)
+                             hue_title=stat, ticks=[0, vmax], ticklabels=[0, vmax], fontsize=6)
 
-pl.subplots_adjust(wspace=0.4, top=0.9)
+pl.subplots_adjust(wspace=0.3, top=0.8)
 fig.suptitle('Female position from male POV (bins-{})\n{}'.format(bins, court_filter_str), 
-             x=0.1, y=0.9, fontsize=10, horizontalalignment='left')
-putil.label_figure(fig, fig_id)
+             x=0.1, y=0.98, fontsize=4, horizontalalignment='left')
+putil.label_figure(fig, fig_id, fontsize=4)
 
 fig_str = '{}_court_{}'.format(stat, court_filter_str)
-figname = 'female-pos-relative-to-male-view_bins-{}_{}'.format(bins, fig_str)
+figname = 'female-pos-relative-to-male-view_{}_{}'.format(bin_str, fig_str)
 pl.savefig(os.path.join(figdir, '{}.png'.format(figname)), dpi=300, bbox_inches='tight')
 #pl.savefig(os.path.join(figdir, '{}.svg'.format(figname))) #, dpi=300, bbox_inches='tight')
 print(figdir)
