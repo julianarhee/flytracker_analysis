@@ -421,7 +421,7 @@ def get_step_shift_index(dary, find_stepup=True, plot=False):
 # get chunks
 
 def get_step_indices(dotdf, speed_var='lin_speed_filt', t_start=20, 
-                     increment=40, n_levels=10):
+                     increment=40, n_levels=10, time_var='time'):
     '''
     Fix DLC tracked dot trajectories with diffspeeds2.csv
     Smooths dot positions, finds indices of steps in velocity. Use these indices to divide trajectories into epochs.
@@ -436,7 +436,7 @@ def get_step_indices(dotdf, speed_var='lin_speed_filt', t_start=20,
     step_dict={}
     for i in range(n_levels):
         t_stop = t_start + increment
-        curr_chunk = tmpdf[ (tmpdf['time']>=t_start) & (tmpdf['time']<=t_stop)].copy().interpolate()
+        curr_chunk = tmpdf[ (tmpdf[time_var]>=t_start) & (tmpdf[time_var]<=t_stop)].copy().interpolate()
         #if i==(n_levels-1):
         find_stepup = i < (n_levels-1)
         # check in case speed does not actually drop at end:
