@@ -1,5 +1,15 @@
 #!/usr/bin/env python3 
 # -*- coding: utf-8 -*-
+'''
+ # @ Author: Juliana Rhee
+ # @ Filename: plot_relative_position.py
+ # @ Create Time: 2025-02-07 20:02:14
+ # @ Modified by: Juliana Rhee
+ # @ Modified time: 2025-06-23 10:12:06
+ # @ Description:
+ Read projector data and plot target position relative to focal fly.
+ '''
+
 #%%
 import os
 import sys
