@@ -105,6 +105,27 @@ def only_if_unique(x):
         return x.iloc[0]
     return pd.NA
 
+def groupby_aggr_if_numeric(f1, groupby_cols=[], 
+                            aggr_type='mean'):
+    '''
+    Group by specified columns and aggregate numeric columns with the specified aggregation type.
+    Non-numeric columns are aggregated using util.only_if_unique.
+    
+    Parameters:
+    - f1: DataFrame to group and aggregate.
+    - groupby_cols: List of columns to group by. 
+    - aggr_type: Aggregation type for numeric columns (default is 'mean').
+    
+    Returns:
+    - meanbouts: DataFrame with aggregated values.
+    '''
+    meanbouts = f1.groupby(groupby_cols, as_index=False).agg(
+                    {col: aggr_type if pd.api.types.is_numeric_dtype(dtype)
+                    else only_if_unique
+                    for col, dtype in f1.dtypes.items()}
+                ).reset_index()
+    return meanbouts
+
 
 #%% bouts
 def get_indices_of_consecutive_rows(passdf):
@@ -1748,3 +1769,27 @@ def custom_filter_events(events):
     return events
 
 # %%
+def add_stim_hz(df0, n_frames=24000, n_epochs=10):
+    '''
+    Assigns a 'stim_hz' column to the DataFrame df0 based on the number of frames (known epoch lengths based on stimulus)
+    '''
+    n_frames_per_epoch = n_frames/n_epochs
+    epoch_starts = np.arange(0, n_frames, n_frames_per_epoch)
+
+    # This is very temporary... 
+    # also see dlc.get_step_indices, which attempts to use velocity of dot
+    # NOTE: check stimulus Hz values in stimulus generation, there might be 
+    # an extra 0 frame in between epochs due to how the rotation is wrapped around
+    stimhz_vals = np.array([0.0, 0.025, 0.05, 0.1, 0.2, 0.4, 0.5, 0.625, 0.8, 1])
+    stimhz_dict = dict((k, v) for k, v in enumerate(stimhz_vals))
+    
+    #d_['epoch'] = 0
+    wstim= []
+    for fn, df_ in df0.groupby('file_name'):
+        df_['stim_hz']=np.nan
+        for i, v in enumerate(epoch_starts):
+            df_.loc[(df_['frame']>=v) & (df_['frame']<v+n_frames_per_epoch), 'stim_hz'] = stimhz_dict[i]
+        wstim.append(df_)
+    df0 = pd.concat(wstim)
+
+    return df0
