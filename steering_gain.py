@@ -1,0 +1,239 @@
+#/usr/bin/env python3
+# -*- coding: utf-8 -*-
+'''
+ # @ Author: Juliana Rhee
+ # @ Filename:
+ # @ Create Time: 2025-07-03 15:12:50
+ # @ Modified by: Juliana Rhee
+ # @ Modified time: 2025-07-03 15:12:56
+ # @ Description:
+ '''
+
+#%%
+import os
+import glob
+
+import numpy as np
+import pandas as pd
+import seaborn as sns
+import matplotlib.pyplot as plt
+
+import plotting as putil
+import utils as util
+import theta_error as the
+
+import transform_data.relative_metrics as rel
+
+def transform_projector_data(rootdir, assay, acqs, processedmat_dir, 
+                            movie_fmt='.avi',subdir=None, flyid1=0, flyid2=1,
+                            create_new=False):
+    """
+    Load transformed projector data for specified acquisitions.
+    """
+    d_list = []
+    errors = []
+    for i, acq in enumerate(acqs):
+        if i % 10 == 0:
+            print('Processing {} of {}: {}'.format(i, len(acqs), acq))
+        acq_dir = os.path.join(rootdir, assay, acq)
+        try:
+            # Load flytracker output
+            calib, trk, feat = util.load_flytracker_data(acq_dir, filter_ori=True)
+            # Transform data to relative coordinates
+            df_ = rel.get_metrics_relative_to_focal_fly(acq_dir,
+                                                        savedir=processedmat_dir,
+                                                        movie_fmt='.avi',
+                                                        mov_is_upstream=None,
+                                                        flyid1=0, flyid2=1,
+                                                        plot_checks=False,
+                                                        create_new=create_new,
+                                                        get_relative_sizes=False)
+        except Exception as e:
+            errors.append((acq, e))
+            print("ERROR: {}".format(e))
+            continue
+        df_['file_name'] = os.path.split(acq)[-1]
+        df_['date_fly'] = ['_'.join([f.split('-')[0], f.split('_')[1]]) for f in df_['file_name']]
+        df_['species'] = 'Dmel' if 'mel' in acq else 'Dyak'
+        df_['acquisition'] = ['_'.join([a, b]) for a, b in df_[['date_fly', 'species']].values]
+       
+        d_list.append(df_)
+
+    df0 = pd.concat(d_list)
+    
+    return df0, errors
+
+def assign_paint_conditions(df0, meta):
+    # Add all paint conditions
+    for fn, df_ in df0.groupby('file_name'):
+        currm = meta[meta['file_name']==fn]
+        assert len(currm)>0, 'No meta data for {}'.format(fn)
+        #df0.loc[df0['file_name']==fn, 'stim_direction'] = currm['stim_direction'].values[0]
+        stim_dir = currm['stim_direction'].unique()[0] #fn.split('_')[-1]
+        df0.loc[df0['file_name']==fn, 'stim_direction'] = stim_dir
+        df0.loc[df0['file_name']==fn, 'paint_coverage'] = currm['painted'].values[0]
+        manipulation_ = currm['manipulation_male'].values[0]
+        if manipulation_.startswith('no '):
+            paint_side = 'none'
+        elif manipulation_.startswith('left '):
+            paint_side = 'left'
+        elif manipulation_.startswith('right '):
+            paint_side = 'right'
+        elif manipulation_.startswith('both '):
+            paint_side = 'both'
+        df0.loc[df0['file_name']==fn, 'paint_side'] = paint_side 
+    df0['date'] = [int(a.split('_')[0]) for a in df0['acquisition']]
+
+    return df0
+#%%
+plot_style='dark'
+min_fontsize=18
+putil.set_sns_style(style=plot_style, min_fontsize=min_fontsize)
+bg_color = [0.7]*3 if plot_style=='dark' else 'k'
+
+
+# Set directories
+# Dropbox/source directory:
+rootdir = '/Users/julianarhee/Dropbox @RU Dropbox/Juliana Rhee/caitlin_data'
+# Main assay containing all the acquisitions
+assay = '38mm_projector'
+# Processed data directory (after running transform_data.py)
+processedmat_dir = '/Volumes/Juliana/2d_projector_analysis/circle_diffspeeds_painted_eyes/FlyTracker/processed_mats'
+if not os.path.exists(processedmat_dir):
+    os.makedirs(processedmat_dir)
+
+# Set output directories: set it upstream of processedmat_dir     
+figdir = os.path.join(os.path.split(processedmat_dir)[0], 'steering_gain')
+if not os.path.exists(figdir):
+    os.makedirs(figdir)
+    
+#%%
+
+# Load meta data: .csv file
+# Assign fly numbers across acquisitions bec multiple acquisitions per fly
+src = os.path.join(rootdir, assay)
+meta_fpath = glob.glob(os.path.join(src, '*.csv'))[0]
+print("Loading meta data from {}".format(meta_fpath))
+meta0 = pd.read_csv(meta_fpath)
+meta1 = meta0[(meta0['tracked in matlab and checked for swaps']==1)
+             & (meta0['exclude']==0) 
+             & (meta0['genotype_male']=='P1a-CsChR')].copy()
+meta1[(meta1['manipulation_male']=='no paint ')].groupby(['species_male', 'stim_direction'])['file_name'].nunique()
+
+# %%
+#from plot_dot_position import transform_projector_data, assign_paint_conditions
+
+# Output filepath for transformed data 
+output_fpath = os.path.join(os.path.split(processedmat_dir)[0], 'transformed_projector_data.pkl')
+# Get list of acquisitions from meta data
+acqs = meta1['file_name'].values
+
+df0, errors = transform_projector_data(rootdir, assay, acqs,
+                                    processedmat_dir, movie_fmt='.avi',
+                                    subdir=None, flyid1=0, flyid2=1,
+                                    create_new=False)
+df0 = assign_paint_conditions(df0, meta0)
+# Load existing data
+# df0 = pd.read_pickle(output_fpath)
+print("Loaded transformed data from {}".format(output_fpath))
+
+#%% Check
+
+df0_fns = sorted(df0['file_name'].unique())
+meta_fns = sorted(meta1['file_name'].unique())
+
+if df0_fns != meta_fns:
+    print("WARNING: File names in df0 and meta1 do not match!")
+    missing_from_df0 = [f for f in meta_fns if f not in df0_fns]
+    missing_from_meta = [f for f in df0_fns if f not in meta_fns]
+    print("Missing from df0: {}".format(len(missing_from_df0)))
+    print("Missing from meta1: {}".format(len(missing_from_meta)))
+    
+
+# %% 
+# Split by STIM_HZ
+df0 = util.add_stim_hz(df0, n_frames=24000, n_epochs=10)
+
+grouper = ['species', 'acquisition'] 
+f1 = df0[(df0['id']==0) & (df0['file_name'].isin(meta1['file_name']))].copy()
+f1 = the.calculate_angle_metrics_focal_fly(f1, winsize=5, grouper=grouper,
+                                           has_size=False)
+
+f1 = the.shift_variables_by_lag(f1, lag=2)
+f1['ang_vel_fly_shifted_abs'] = np.abs(f1['ang_vel_fly_shifted'])
+
+# %%
+#species_colors = ['plum', 'mediumseagreen']
+species_palette = {'Dmel': 'plum', 'Dyak': 'mediumseagreen'}
+
+#%%
+chase_ = f1.copy()
+yvar = 'ang_vel_fly_shifted'
+chase_['theta_error_deg'] = np.rad2deg(chase_['theta_error'])
+start_bin = -180
+end_bin = 180
+bin_size = 20
+chase_['binned_theta_error'] = pd.cut(chase_['theta_error_deg'],
+                                bins=np.arange(start_bin, end_bin, bin_size),
+                                labels=np.arange(start_bin+bin_size/2,
+                                                    end_bin-bin_size/2, bin_size))    
+# Get average ang vel across bins
+avg_ang_vel = chase_.groupby([
+                    'species', 'acquisition', 'stim_direction',
+                    'binned_theta_error' 
+                    ])[yvar].mean().reset_index()
+#%%
+#avg_ang_vel = avg_ang_vel.dropna() 
+fig, axn = plt.subplots(1, 2, figsize=(8, 4), sharex=True, sharey=True)
+for si, (sdir, plotd) in enumerate(avg_ang_vel.groupby('stim_direction')):
+#plotd = avg_ang_vel[avg_ang_vel['stim_direction']=='CW'].copy()
+    ax=axn[si]
+    sns.lineplot(data=plotd, x='binned_theta_error', y=yvar,
+                    hue='species', palette=species_palette, ax=ax,
+                    errorbar='se', marker='o') #errwidth=0.5)
+    ax.axvline(x=0, color=bg_color, linestyle='--', lw=0.5)
+    ax.axhline(y=0, color=bg_color, linestyle='--', lw=0.5)
+    ax.set_xticks(np.linspace(start_bin, end_bin, 5))
+    ax.set_title(sdir)
+    if si==0:
+        ax.legend_.remove()
+    else:
+        sns.move_legend(ax, 'upper left', bbox_to_anchor=(1, 1),
+                        frameon=False, title='species', fontsize=min_fontsize-2)
+    ax.set_xlabel('Object position (deg)')
+    ax.set_ylabel('Ang. vel. shifted (rad/s)')
+  
+figname = 'turns_by_objectpos_{}_by_stimdir'.format(yvar)
+print(figname)
+plt.savefig(os.path.join(figdir, '{}.png'.format(figname)))
+
+#%%
+stim_palette = {'CW': 'cyan', 'CCW': 'magenta'}
+
+fig, axn = plt.subplots(1, 2, figsize=(8, 4), sharex=True, sharey=True)
+for si, (sp, plotd) in enumerate(avg_ang_vel.groupby('species')):
+    #plotd = avg_ang_vel[avg_ang_vel['species']=='Dyak'].copy()
+    ax=axn[si]
+    sns.lineplot(data=plotd, x='binned_theta_error', y=yvar,
+                    hue='stim_direction', palette=stim_palette, ax=ax,
+                    errorbar='se', marker='o') #errwidth=0.5)
+    ax.axvline(x=0, color=bg_color, linestyle='--', lw=0.5)
+    ax.axhline(y=0, color=bg_color, linestyle='--', lw=0.5)
+    ax.set_xticks(np.linspace(start_bin, end_bin, 5))
+    #ax.set_xticklabels(np.arange(start_bin+bin_size/2, end_bin-bin_size/2+1, bin_size))
+    #ax.set_box_aspect(1)
+    ax.set_title(sp)
+    if si==0:
+        ax.legend_.remove()
+    else:
+        sns.move_legend(ax, 'upper left', bbox_to_anchor=(1, 1),
+                        frameon=False, title='movement dir', fontsize=min_fontsize-2)
+    ax.set_xlabel('Object position (deg)')
+    ax.set_ylabel('Ang. vel. shifted (rad/s)')
+    #putil.label_figure(fig, figid) 
+    
+figname = 'turns_by_objectpos_{}_CCW-CW_{}'.format(yvar, sp)
+print(figname)
+plt.savefig(os.path.join(figdir, '{}.png'.format(figname))) 
+    
+# %%
