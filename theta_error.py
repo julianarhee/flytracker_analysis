@@ -349,8 +349,9 @@ def get_turn_bouts(flydf, min_dist_to_other=15, min_ang_acc=100, #min_ang_vel=5,
 
 def shift_variables_by_lag(df, lag=2):
     '''
-    shift fly response variables BACK by lag 
-
+    shift fly response variables BACK by lag, so that the value at time t=0 corresponds to variable's value at lag N frames (future)
+    x 0, y 2 (instead of 0).
+    
     Arguments:
         df -- _description_
 
@@ -414,11 +415,13 @@ def split_theta_error(chase_, theta_error_small=np.deg2rad(10), theta_error_larg
 
 #% PLOTTING
 
-def plot_regr_by_species(chase_, xvar, yvar, hue_var=None, plot_hue=False, plot_grid=True, 
+def plot_regr_by_species(chase_, xvar, yvar, hue_var=None, plot_hue=False, 
+                         plot_grid=True, grid_lw=0.25,
                          cmap='viridis', stimhz_palette=None, bg_color=[0.7]*3, 
                          xlabel=None, ylabel=None, fitstr_xloc=0.1, fitstr_yloc=0.9, annot_fontsize=7,
-                         pearsons_xloc=0.1, pearsons_yloc=0.8, figsize=(5, 4), marker_size=2,
-                         regr_lw=1):
+                         regr_lw=1, scatter_color=None, marker_size=5, figsize=(10, 4),
+                         pearsons_xloc=0.1, pearsons_yloc=0.8):
+                        
     '''
     Do linear regression of yvar on xvar. Plot scatter of xvar vs. yvar, color by hue_var if specified.
 
@@ -448,7 +451,8 @@ def plot_regr_by_species(chase_, xvar, yvar, hue_var=None, plot_hue=False, plot_
     if stimhz_palette is not None:
         vmin = min(list(stimhz_palette.keys()))
         vmax = max(list(stimhz_palette.keys()))
- 
+    if scatter_color is None:
+        scatter_color = bg_color
     # For each species, plot linear regr with fits in a subplot
     n_species = chase_['species'].nunique()
     fig, axn = pl.subplots(1, n_species, sharex=True, sharey=True, figsize=figsize)
@@ -463,12 +467,12 @@ def plot_regr_by_species(chase_, xvar, yvar, hue_var=None, plot_hue=False, plot_
                         hue='stim_hz', palette=stimhz_palette, 
                         legend=0, edgecolor='none', alpha=0.7, s=marker_size)
         else:
-            sns.scatterplot(data=df_, x=xvar, y=yvar, ax=ax, color=bg_color,
+            sns.scatterplot(data=df_, x=xvar, y=yvar, ax=ax, color=scatter_color, #bg_color,
                         legend=0, edgecolor='none', alpha=0.7, s=marker_size)
 
         if plot_grid:
-            ax.axvline(x=0, color=bg_color, linestyle='--', lw=0.25)
-            ax.axhline(y=0, color=bg_color, linestyle='--', lw=0.25)
+            ax.axvline(x=0, color=bg_color, linestyle='--', lw=grid_lw)
+            ax.axhline(y=0, color=bg_color, linestyle='--', lw=grid_lw)
 
         ax.set_title(sp)
 
@@ -502,8 +506,10 @@ def plot_regr_by_species(chase_, xvar, yvar, hue_var=None, plot_hue=False, plot_
 def plot_ang_v_fwd_vel_by_theta_error_size(chase_, var1='vel_shifted', var2='ang_vel_shifted', 
                         lw=1, err_palette={'small': 'r', 'large': 'b'}, 
                         figsize=(10, 4), fly_marker='o', fly_marker_size=5, fly_color='gray',
-                        median_marker_size=3, scatter_size=3, 
-                        axis_off=True, plot_dir='E', use_mm=True):
+                        median_marker_size=3, scatter_size=3, scatter_alpha=0.5,
+                        axis_off=True, plot_dir='E', use_mm=True,
+                        plot_scatter_axes=True, x_scale=5,
+                        scatter_xlim=None, scatter_ylim=None, scatter_int=1):
 
     '''
     3-subplot figure: (1) spatial distribution of small vs. large theta errors, (2) velocity histograms, (3) angular vel histograms
@@ -521,11 +527,31 @@ def plot_ang_v_fwd_vel_by_theta_error_size(chase_, var1='vel_shifted', var2='ang
     elif plot_dir == 'N':
         xvar = 'targ_rel_pos_y_mm' if use_mm else 'targ_rel_pos_y'
         yvar = 'targ_rel_pos_x_mm' if use_mm else 'targ_rel_pos_x'
-    sns.scatterplot(data=chase_, x=xvar, y=yvar, ax=ax, 
-                    hue='error_size', palette=err_palette, s=scatter_size)
-    ax.set_xlabel('Relative x (mm)' if use_mm else 'Relative x (px)', labelpad=2)
-    ax.set_ylabel('Relative y (mm)' if use_mm else 'Relative y (px)', labelpad=2)
-    pl.tick_params(axis='both', which='both', pad=0)    
+    # Scatter plot of relative position
+    sns.scatterplot(data=chase_.iloc[0::scatter_int], x=xvar, y=yvar, ax=ax, 
+                    hue='error_size', palette=err_palette, s=scatter_size,
+                    alpha=scatter_alpha)
+    if plot_scatter_axes:
+        ax.set_xlabel('Relative x (mm)' if use_mm else 'Relative x (px)', labelpad=2)
+        ax.set_ylabel('Relative y (mm)' if use_mm else 'Relative y (px)', labelpad=2)
+        pl.tick_params(axis='both', which='both', pad=0)    
+    else:
+        # only plot scale bar
+        ax.set_xticks([0, x_scale])
+        ax.set_xticklabels(['', '{} mm'.format(x_scale) if use_mm else '{} px'.format(x_scale)])
+        ax.set_xlabel('')
+        ax.set_ylabel('')
+        ax.set_yticks([])
+        sns.despine(ax=ax, bottom=True, left=True, trim=True)
+        ax.spines['left'].set_visible(False)
+    if scatter_xlim is not None:
+        if plot_dir == 'E':
+            ax.set_xlim([0, scatter_xlim])
+            ax.set_ylim([-scatter_ylim, scatter_ylim])
+        else:
+            ax.set_xlim([-scatter_xlim, scatter_xlim])
+            ax.set_ylim([0, scatter_ylim])
+           
     ax.set_aspect(1)
     ax.plot(0, 0, marker=fly_marker, color=fly_color, markersize=fly_marker_size)
     if axis_off==True:
@@ -555,7 +581,7 @@ def plot_ang_v_fwd_vel_by_theta_error_size(chase_, var1='vel_shifted', var2='ang
     for v, ax in zip([var1, var2], [ax1, ax2]):
         med_ = chase_.groupby('error_size')[v].median()
         for mval, cval in err_palette.items():
-            ax.plot(med_[mval], curr_ylim, color=cval, marker='v', markersize=median_marker_size) #ax.axvline(x=m, color=c, linestyle='--')
+           ax.plot(med_[mval], curr_ylim, color=cval, marker='v', markersize=median_marker_size) #ax.axvline(x=m, color=c, linestyle='--')
         #print(med_)
         ax.set_box_aspect(1)
 
@@ -1281,13 +1307,19 @@ def get_R2_ols(plotd, xvar, yvar):
     r2 = lr.score(X.reshape(len(X), 1), y)
     return lr, r2
 
+def annotate_axis(ax, annot_str, fontsize=6, color='k'):
+    ax.annotate(annot_str, xy=(0.5, 0.95), xycoords='axes fraction', 
+                fontsize=fontsize,
+                ha='center', va='center', color=color)
+
 #%%
 
 if __name__ == '__main__':
     #%% 
     # Set plotting
-    plot_style='white'
-    putil.set_sns_style(plot_style, min_fontsize=6)
+    plot_style='dark'
+    min_fontsize=18
+    putil.set_sns_style(plot_style, min_fontsize=min_fontsize)
     bg_color = [0.7]*3 if plot_style=='dark' else 'k'
 
     #% plotting settings
@@ -1304,11 +1336,11 @@ if __name__ == '__main__':
 
     create_new = False
 
-    #assay = '2d_projector' # '38mm-dyad'
-    #experiment = 'circle_diffspeeds'
+    assay = '2d_projector' # '38mm-dyad'
+    experiment = 'circle_diffspeeds'
 
-    assay = '38mm_dyad' 
-    experiment = 'MF'
+    #assay = '38mm_dyad' 
+    #experiment = 'MF'
 
     #%%
     minerva_base = '/Volumes/Juliana'
@@ -1396,11 +1428,12 @@ if __name__ == '__main__':
         # Process df0 for male fly
         winsize = 5
         if assay == '2d_projector':
-            grouper = ['species', 'acquisition', 'fly_pair'] 
+            grouper = ['species', 'acquisition'] 
         else:
-            grouper = ['species', 'acquisition']
+            grouper = ['species', 'acquisition', 'fly_pair']
         f1 = df0[df0['id']==0].copy()
-        f1 = calculate_angle_metrics_focal_fly(f1, winsize=5)
+        f1 = calculate_angle_metrics_focal_fly(f1, winsize=5, grouper=grouper,
+                                               has_size=True)
 
     #%% Add JAABA to flydf
     if new_ftjaaba:
@@ -1417,6 +1450,34 @@ if __name__ == '__main__':
 
     # summarize what we got
     ftjaaba[['species', 'acquisition']].drop_duplicates().groupby('species').count()
+
+    #%%    
+    # Convert pixels to mm?
+    # --------------------------------------------
+    if assay == '2d_projector':
+        video_srcdir = '/Volumes/Giacomo/JAABA_classifiers/projector/changing_dot_size_speed' 
+    elif assay == '38mm_dyad':
+        video_srcdir = '/Volumes/Giacomo/JAABA_classifiers/free_behavior'
+        
+    ftjaaba['PPM'] = np.nan
+    no_calib = []
+    for acq, df_ in ftjaaba.groupby('acquisition'):
+        calib_fpath = glob.glob(os.path.join(video_srcdir, '{}*'.format(acq), 'calibration.mat'))
+        if len(calib_fpath)>0: #os.path.exists(calib_fpath):
+            acq_dir = os.path.split(calib_fpath[0])[0] 
+            calib = util.load_calibration(acq_dir, calib_is_upstream=False)
+            ftjaaba.loc[ftjaaba['acquisition']==acq, 'PPM'] = calib['PPM']
+        else:
+            print("No calibration found for acquisition: {}".format(acq))
+            no_calib.append(acq)
+    # Get average PPM across acquisitions to fill NaNs
+    avg_ppm = ftjaaba['PPM'].mean()
+    print("No calib for {} of {} acquisition. Filling with avg PPM: {:.2f}mm/pixel".format(
+        len(no_calib), ftjaaba['acquisition'].nunique(), avg_ppm))
+    ftjaaba['PPM'] = ftjaaba['PPM'].fillna(avg_ppm)
+    # Convert to mm
+    ftjaaba['targ_rel_pos_x_mm'] = ftjaaba['targ_rel_pos_x'] / ftjaaba['PPM']
+    ftjaaba['targ_rel_pos_y_mm'] = ftjaaba['targ_rel_pos_y'] / ftjaaba['PPM'] 
 
     #%% =====================================================
     # subdivide 
@@ -1469,28 +1530,6 @@ if __name__ == '__main__':
     min_nframes = min_boutdur * 60
     filtdf = filtdf[filtdf.groupby(['species', 'acquisition', 'subboutnum'])['subboutnum'].transform('count')>min_nframes]
     
-    #%%    
-    # Convert pixels to mm?
-    if assay == '2d_projector':
-        video_srcdir = '/Volumes/Giacomo/JAABA_classifiers/projector/changing_dot_size_speed' 
-    elif assay == '38mm_dyad':
-        video_srcdir = '/Volumes/Giacomo/JAABA_classifiers/free_behavior'
-        
-    filtdf['PPM'] = np.nan
-    for acq, df_ in filtdf.groupby('acquisition'):
-        calib_fpath = glob.glob(os.path.join(video_srcdir, '{}*'.format(acq), 'calibration.mat'))
-        if len(calib_fpath)>0: #os.path.exists(calib_fpath):
-            acq_dir = os.path.split(calib_fpath[0])[0] 
-            calib = util.load_calibration(acq_dir, calib_is_upstream=False)
-            filtdf.loc[filtdf['acquisition']==acq, 'PPM'] = calib['PPM']
-
-    # Get average PPM across acquisitions to fill NaNs
-    avg_ppm = filtdf['PPM'].mean()
-    filtdf['PPM'] = filtdf['PPM'].fillna(avg_ppm)
-    # Convert to mm
-    filtdf['targ_rel_pos_x_mm'] = filtdf['targ_rel_pos_x'] / filtdf['PPM']
-    filtdf['targ_rel_pos_y_mm'] = filtdf['targ_rel_pos_y'] / filtdf['PPM'] 
-
     #%%
     # Get mean value of small bouts
 #     if 'strain' in filtdf.columns:
@@ -1510,13 +1549,6 @@ if __name__ == '__main__':
                     else util.only_if_unique
                     for col, dtype in filtdf.dtypes.items()}
                 ).reset_index()
-
-# 
-#         meanbouts = filtdf.groupby(['species', 'acquisition', 'stimsize', 'acq_fly', \
-#                                 'subboutnum']).mean().reset_index()
-#     else:
-#         meanbouts = filtdf.groupby(['species', 'acquisition', \
-#                                 'subboutnum']).mean().reset_index()
     meanbouts.head()
 
     # Make stimulus palette for changing size/speed - PROJECTOR only
@@ -1528,7 +1560,7 @@ if __name__ == '__main__':
         meanbouts['stim_hz'] = meanbouts['stim_hz'].apply(lambda x: min(stimhz_palette.keys(), key=lambda y:abs(y-x)))   
 
     #%% ------------------------------------------------
-    # ANG_VEL vs. THETA_ERROR
+    # PLOT: ANG_VEL vs. THETA_ERROR
     # -------------------------------------------------
     #%
     pl.rcParams['axes.linewidth'] = 0.25
@@ -1538,7 +1570,7 @@ if __name__ == '__main__':
     plot_grid = True
     plot_frames = False
     plot_example_animal = True
-    min_frac_bout = 0.
+    min_frac_bout = 0.0
     species_colors = ['plum', 'lightgreen']
 
     data_type_str = 'FRAMES' if plot_frames else 'BOUTS-min-frac-bout-{}'.format(min_frac_bout)
@@ -1559,9 +1591,7 @@ if __name__ == '__main__':
         
     if assay == '2d-projector':
         chase_ = chase_[chase_['stim_hz']>0]
-                    #    & (meanbouts['ang_vel_fly_shifted']< -25)].copy()
-
-
+    # annotations
     if 'shifted' in yvar:
         figtitle = '{}: {}\nshifted {} frames'.format(behav, data_type_str, nframes_lag)
     else:
@@ -1574,13 +1604,18 @@ if __name__ == '__main__':
         xlabel = r'$\theta_{E}$ (rad)'
     ylabel = '$\omega_{f}$ (rad/s)'
 
+    if min_fontsize==6:
+        figsize=(2.1, 3)
+    else:
+        figsize=(6, 4)
     # SCATTERPLOT:  ANG_VEL vs. THETA_ERROR -- color coded by STIM_HZ
     fig = plot_regr_by_species(chase_, xvar, yvar, hue_var=hue_var, 
-                               plot_hue=plot_hue, plot_grid=plot_grid,
+                            plot_hue=plot_hue, plot_grid=plot_grid, grid_lw=0.5,
                             xlabel=xlabel, ylabel=ylabel, bg_color=bg_color,
-                            fitstr_xloc=0.01, fitstr_yloc=1.5, 
-                            pearsons_xloc=0.01, pearsons_yloc=1.3, 
-                            figsize=(2.1, 3), annot_fontsize=6, marker_size=0.5, regr_lw=0.5)
+                            fitstr_xloc=0.01, fitstr_yloc=1.25,  
+                            pearsons_xloc=0.01, pearsons_yloc=1.2, 
+                            figsize=figsize, annot_fontsize=6, #in_fontsize, 
+                            marker_size=0.5, regr_lw=0.5, scatter_color='w')
     for ax in fig.axes:
         ax.tick_params(pad=-0.1)
     sns.despine(offset=2)
@@ -1594,14 +1629,14 @@ if __name__ == '__main__':
          
         for ai, (sp, sp_df, col) in enumerate(zip(['Dmel', 'Dyak'], [example_mel, example_yak], species_colors)):
             ax=fig.axes[ai]
-            ax.scatter(sp_df[xvar], sp_df[yvar], s=0.1, color=col, alpha=0.5)
+            ax.scatter(sp_df[xvar], sp_df[yvar], s=0.1, color=col, alpha=0.75)
             #ax.set_title(sp, fontsize=4)
     pl.subplots_adjust(wspace=0.25, left=0.2)
-    fig.suptitle(figtitle, fontsize=6, ha='left')
+    fig.text(0.01, 0.9, figtitle, fontsize=6, ha='left')
 
-    for ax in fig.axes:
+    #for ax in fig.axes:
         #ax.invert_yaxis()
-        ax.invert_xaxis()
+    #    ax.invert_xaxis()
 
     putil.label_figure(fig, figid)
     #figname = 'sct_{}_v_{}_stimhz_{}_min-frac-bout-{}'.format(yvar, xvar, species_str, min_frac_bout)
@@ -1609,29 +1644,33 @@ if __name__ == '__main__':
                 yvar, xvar, shift_str, hue_str, species_str, data_type_str)
     pl.savefig(os.path.join(figdir, '{}.png'.format(figname)))
     pl.savefig(os.path.join(figdir, '{}.svg'.format(figname)))
-
     print(figdir, figname)
-
     
 #%%
-    # ------------------------------------------------------
     # Compare steering gain for FAST vs SLOW fwd vel
     # -------------------------------------------------
     # See Collie et al., 2024, Figure 4c
     plot_frames = True
+    frame_subset = 'all'
+    min_frac_bout = 0
+    # ---------------------------------------------------
     data_type = 'FRAMES' if plot_frames else 'BOUTS-min-frac-bout-{}'.format(min_frac_bout)
-    vir_colors = sns.color_palette('viridis', n_colors=5)
-    forward_vel_palette = {'slow': vir_colors[1], 'fast': vir_colors[-2]}
 
-    if plot_frames:
-        chase_ = filtdf[filtdf['{}_binary'.format(behav)]>0].copy().reset_index(drop=True)
+    if plot_frames: 
+        if frame_subset == 'all':
+            chase_ = ftjaaba.copy().reset_index(drop=True)
+        else:
+            frame_subset = 'chase'
+            #chase_ = filtdf[filtdf['{}_binary'.format(behav)]>0].copy().reset_index(drop=True)
+            chase_ = ftjaaba[ftjaaba['{}_binary'.format(behav)]>0].copy().reset_index(drop=True)
+
     else:
         chase_ = meanbouts[ (meanbouts['{}_binary'.format(behav)]>min_frac_bout) ].copy().reset_index(drop=True)
     if 'stim_hz' in chase_.columns: #assay == '2d_projector':
         chase_ = chase_[chase_['stim_hz']>0]
 
     #%%
-    # Plot HISTOGRAM of velocity for each species 
+    # PLOT: HISTOGRAM of velocity for each species 
     # and get upper and lower quartiles for each species
     fwd_vel_var = 'vel_shifted'
 
@@ -1653,22 +1692,31 @@ if __name__ == '__main__':
                                         lower=lower_q, upper=upper_q) 
 
     fig, ax = pl.subplots()
-    sns.histplot(data=chase_, x=fwd_vel_var, 
+    sns.histplot(data=chase_, x=fwd_vel_var, alpha=0.75,
                  hue='species', bins=50, ax=ax, palette=species_palette)
     ax.axvline(mel_lower, color=species_palette['Dmel'], linestyle='--')
     ax.axvline(mel_upper, color=species_palette['Dmel'], linestyle='--')
     ax.axvline(yak_lower, color=species_palette['Dyak'], linestyle='--')
     ax.axvline(yak_upper, color=species_palette['Dyak'], linestyle='--') 
-        
+    sns.move_legend(ax, 'upper left', bbox_to_anchor=(1,1), 
+                    title='species', fontsize=6, frameon=False)     
     vel_ranges = {'Dmel': (mel_lower, mel_upper), 
                   'Dyak': (yak_lower, yak_upper)}
     
     ax.set_box_aspect(1)
-     
+    putil.label_figure(fig, figid)
+    
+    figname = 'vel_hist_by_species_{}-{}'.format(data_type, frame_subset) 
+    pl.savefig(os.path.join(figdir, '{}.png'.format(figname)))
+        
     #%%  
-    # Linear regression of steering gain:  ang_vel @ lag vs. theta_error
-    # Compare slopes for FAST vs. SLOW forward velocity
+    # PLOT: Linear regression of steering gain:  ang_vel @ lag vs. theta_error
+    # Compare slopes for FAST vs. SLOW forward velocity in each species
     # ------------------------------------------------
+    vir_colors = sns.color_palette('viridis', n_colors=5)
+    forward_vel_palette = {'slow': vir_colors[1], 'fast': vir_colors[-2]}
+
+    yvar = 'ang_vel_fly_shifted'
     chase_['forward_vel_type'] = None
     for sp, sp_chase in chase_.groupby('species'): 
         fwd_vel_slow, fwd_vel_fast = vel_ranges[sp]
@@ -1678,14 +1726,18 @@ if __name__ == '__main__':
                      & (chase_[fwd_vel_var]>fwd_vel_fast)), 'forward_vel_type'] = 'fast' 
                  
     # Plot steering gain by forward velocity (linear regression)    
-    fig, axn =pl.subplots(1, 2, sharex=True, sharey=False,
-                          figsize=(4,2), dpi=300)
+    if min_fontsize==6:
+        figsize=(4,2)
+    else:
+        figsize=(6,4)
+    fig, axn =pl.subplots(1, 2, sharex=True, sharey=True,
+                          figsize=figsize, dpi=300)
     for si, (sp, sp_chase) in enumerate(chase_.groupby('species')):
 
         ax = axn[si] 
         for fwd_vel, vel_df in sp_chase.groupby('forward_vel_type'):
             sns.regplot(data=vel_df, ax=ax,
-                        x='theta_error', y='ang_vel_fly_shifted', 
+                        x='theta_error', y=yvar, 
                         color=forward_vel_palette[fwd_vel],
                         scatter=False, label=fwd_vel,
                         scatter_kws={'s': 0.5, 'alpha': 0.2,
@@ -1697,18 +1749,18 @@ if __name__ == '__main__':
             ax.legend(title='forward vel', fontsize=6, frameon=False,
                   bbox_to_anchor=(1,1), loc='upper left')
         ax.set_box_aspect(1)
-        ax.set_xlabel('error (object position, rad)')
-        ax.set_ylabel('angular velocity, lag 2 (rad/s)')
-    fig.text(0.1, 0.92, 'Steering gain by forward vel:', fontsize=6) 
-
+        ax.set_xlabel('error (object pos., rad)')
+        ax.set_ylabel(yvar)
+    fig.text(0.1, 0.92, 'Steering gain by vel ({}, frame subset: {})'.format(data_type, frame_subset), 
+             fontsize=6) 
     pl.subplots_adjust(wspace=0.5, top=0.85)
      
     putil.label_figure(fig, figid)
-    figname = 'sct_{}_v_{}_by_forward_vel_{}'.format(yvar, xvar, data_type)
-    
+    figname = 'regr_gain_fast_v_slow_{}-{}'.format(data_type, frame_subset) 
     pl.savefig(os.path.join(figdir, '{}.png'.format(figname)))
+    
     #%% 
-    # Fit linear regression to get steering gain per fly
+    # Fit linear regression to get steering gain for SLOW vs. FAST vel per fly
     from sklearn import linear_model
     import sklearn.metrics as skmetrics
     
@@ -1740,8 +1792,8 @@ if __name__ == '__main__':
             #print(f"Species: {sp}, Acquisition: {acq}, Forward Velocity: {fwd_vel}, Gain: {gain}, Intercept: {intercept}")
     gain_df = pd.concat(d_list, ignore_index=True).reset_index(drop=True)
      
-    #%% plot     
-    # For each fly, plot pairwise gain for slow vs. fast velocity 
+    #%% 
+    # PLOT:  For each fly, plot pairwise gain for slow vs. fast velocity 
     # --------------------------------------
     fig, ax = pl.subplots()     
     sns.stripplot(data=gain_df, x='species', y='gain', 
@@ -1765,20 +1817,77 @@ if __name__ == '__main__':
                 y2 = slow_data['gain'].values[0]
                 y1 = fast_data['gain'].values[0]
                 ax.plot([x1, x2], [y1, y2], 
-                        color='gray', alpha=0.3, linewidth=0.75)
+                        color=bg_color, alpha=0.5, linewidth=1)
                 
    # Add pointplot to show group statistics (mean and CI)
     sns.pointplot(data=gain_df, x='species', y='gain', hue='forward_vel_type',
               palette=forward_vel_palette, dodge=dodge, join=False,
               markers='o', scale=1.2, ci=95, ax=ax)
- 
-    ax.set_title('Steering gain by forward velocity')
+
+    sns.move_legend(ax, "upper left", bbox_to_anchor=(1, 1), title='forward vel',
+                   frameon=False)
+    ax.set_xlabel('')
+    ax.set_box_aspect(1)
+    ax.set_title('Steering gain, {}, frame subset: {}'.format(data_type, frame_subset), 
+                 fontsize=6)
     
     putil.label_figure(fig, figid)
-    figname = 'gain_by_forward_vel_by_fly'
+    figname = 'gain_by_forward_vel_by_fly_{}-{}'.format(data_type, frame_subset)
     pl.savefig(os.path.join(figdir, '{}.png'.format(figname)))
-    pl.savefig(os.path.join(figdir, '{}.svg'.format(figname)))
+    #pl.savefig(os.path.join(figdir, '{}.svg'.format(figname)))
+    print(figname)
+    
+    #%%
+    # PLOT: TURNS in response to OBJECT POSITION
+    # ------------------------------------------------
+    # plot ang_vel_fly vs. binned theta_error
+    #chase_ = ftjaaba.copy()
+    
+    #chase_['ang_vel_fly_shifted'] = chase_['ang_vel_fly_shifted'].interpolate().ffill().bfill() 
+
+    yvar = 'ang_vel_fly_shifted'
+    chase_['theta_error_deg'] = np.rad2deg(chase_['theta_error'])
+    start_bin = -180
+    end_bin = 180
+    bin_size = 20
+    chase_['binned_theta_error'] = pd.cut(chase_['theta_error_deg'],
+                                    bins=np.arange(start_bin, end_bin, bin_size),
+                                    labels=np.arange(start_bin+bin_size/2,
+                                                        end_bin-bin_size/2, bin_size))    
+    # Get average ang vel across bins
+    avg_ang_vel = chase_.groupby([
+                        'species', 'acquisition', 'binned_theta_error', 
+                        ])[yvar].mean().reset_index()
+    #avg_ang_vel = avg_ang_vel.dropna() 
+    fig, ax = pl.subplots(figsize=(5, 4))
+    sns.lineplot(data=avg_ang_vel, x='binned_theta_error', y=yvar,
+                    hue='species', palette=species_palette, ax=ax,
+                    errorbar='se', marker='o') #errwidth=0.5)
+    ax.axvline(x=0, color=bg_color, linestyle='--', lw=0.5)
+    ax.axhline(y=0, color=bg_color, linestyle='--', lw=0.5)
+    ax.set_xticks(np.linspace(start_bin, end_bin, 7))
+    #ax.set_xticklabels(np.arange(start_bin+bin_size/2, end_bin-bin_size/2+1, bin_size))
+    #ax.set_box_aspect(1)
+    sns.move_legend(ax, 'upper left', bbox_to_anchor=(1, 1),
+                    frameon=False, title='species', fontsize=min_fontsize-2)
+    ax.set_title('Avg. ang vel. by object pos ({}, frame_subset: {})'.format(data_type, frame_subset),
+                 fontsize=8)
+   
+    putil.label_figure(fig, figid) 
+    figname = 'turns-{}_by_objectpos_{}'.format(yvar, data_type_str)
+    pl.savefig(os.path.join(figdir, '{}.png'.format(figname))) 
      
+    #%%
+    # is ang_vel < 0 leftward or rightward turn?
+    hue_var = 'ang_vel_fly'
+    fig, ax = pl.subplots()
+    sns.scatterplot(data=chase_.iloc[0::5], x='targ_rel_pos_x', y='targ_rel_pos_y',
+                    hue='ang_vel_fly', ax=ax, palette='coolwarm',
+                    edgecolor='none', s=5, alpha=0.9)
+    sns.move_legend(ax, 'upper left', bbox_to_anchor=(1, 1),
+                    frameon=False, title=hue_var, fontsize=min_fontsize-2) 
+    ax.set_aspect(1)
+    
     #%%
     # plot log_gain vs. forward velocity:
     # Is there a difference in gain for near vs. far theta?
@@ -1797,7 +1906,7 @@ if __name__ == '__main__':
     pl.savefig(os.path.join(figdir, '{}.png'.format(figname)))
 
     #%% 
-    # Check that ang_vel vs. theta_error is linear for EACH fly pair
+    # PLOT: individuals, Check that ang_vel vs. theta_error is linear for EACH fly pair
     # ang vel vs. theta error - 1 fly
     # ------------------------------------------------ 
     chase_ = filtdf[filtdf['{}_binary'.format(behav)]>0].copy().reset_index(drop=True)
@@ -1839,11 +1948,11 @@ if __name__ == '__main__':
         figname = '{}_{}_{}_by_acquisition'.format(curr_species, yvar, xvar) 
         pl.savefig(os.path.join(figdir, '{}.png'.format(figname)))
     
+    #%% 
+    # Big vs. Small theta error
+    # ------------------------------------------------- 
     #%%
-        
-         
-    #%%
-    # Compare ANG vs. FWD velocity:  small vs. large theta -error
+    # PLOT: Compare ANG vs. FWD velocity:  small vs. large theta -error
     # -------------------------------------------------
     chase_ = filtdf[filtdf['{}_binary'.format(behav)]>0].copy().reset_index(drop=True)
 
@@ -1854,38 +1963,57 @@ if __name__ == '__main__':
     use_bouts = True
     data_type = 'BOUTS' if use_bouts else 'FRAMES'
 
-    theta_error_small_deg = 15
-    theta_error_large_deg = 30 #35
+    theta_error_small_deg = 10
+    theta_error_large_deg = 35 #35
     theta_error_small = np.deg2rad(theta_error_small_deg)
     theta_error_large = np.deg2rad(theta_error_large_deg)
+    
+    nframes_lag_plot = 2 if 'shifted' in var1 or 'shifted' in var2 else 0
 
+    if min_fontsize < 10:
+        figsize = (5.5, 2.5)
+    else:
+        figsize = (8, 4)
     for curr_species in ftjaaba['species'].unique():
-
-        nframes_lag_plot = 2 if 'shifted' in var1 or 'shifted' in var2 else 0
-
         if use_bouts:
             chase_ = meanbouts[(meanbouts['{}_binary'.format(behav)]>min_frac_bout)
                         & (meanbouts['species']==curr_species)].copy().reset_index(drop=True)
         else:
             chase_ = filtdf[(filtdf['{}_binary'.format(behav)]>min_frac_bout)
                         & (filtdf['species']==curr_species)].copy().reset_index(drop=True)
-        chase_ = split_theta_error(chase_, theta_error_small=theta_error_small, theta_error_large=theta_error_large)
+        chase_ = split_theta_error(chase_, theta_error_small=theta_error_small, 
+                                   theta_error_large=theta_error_large)
         if 'stim_hz' in chase_.columns: #assay == '2d_projector':
             chase_ = chase_[chase_['stim_hz']>0]
                     #    & (meanbouts['ang_vel_fly_shifted']< -25)].copy()
-
         # plot ------------------------------------------------
-        fig = plot_ang_v_fwd_vel_by_theta_error_size(chase_, figsize=(5.5, 2.5),
+        if assay == '2d_projector':
+            scatter_int = 2
+            scatter_size = 0.5
+            scatter_alpha=0.3
+            plot_dir = 'N'
+            fly_marker = '^'
+        else:
+            scatter_int = 1
+            scatter_size = 0.5
+            scatter_alpha=0.5
+            plot_dir = 'N'
+            fly_marker = '^'
+        fig = plot_ang_v_fwd_vel_by_theta_error_size(chase_, figsize=figsize,
                             var1=var1, var2=var2, err_palette=err_palette, lw=1, 
-                            fly_marker='^', fly_marker_size=1, median_marker_size=2, scatter_size=1,
-                            plot_dir='N', axis_off=False, use_mm=True)
+                            scatter_size=scatter_size, scatter_alpha=scatter_alpha, 
+                            fly_marker=fly_marker, fly_marker_size=1, 
+                            median_marker_size=2, 
+                            plot_dir=plot_dir, axis_off=False, use_mm=True,
+                            plot_scatter_axes=False, x_scale=5,
+                            scatter_ylim=30, scatter_xlim=30, scatter_int=scatter_int)
         for ax in fig.axes:
             sns.despine(ax=ax, offset=2)
         fig.text(0.1, 0.92, 
                  '{} bouts, frac. of {} > {:.1f}, lag {} frames (small=+/-{}, large=+/-{})'.format(
                 behav, data_type, min_frac_bout, nframes_lag_plot, theta_error_small_deg, theta_error_large_deg), fontsize=4)
 
-        fig.text(0.1, 0.85, curr_species, fontsize=6)
+        fig.text(0.1, 0.8, curr_species, fontsize=min_fontsize)
         pl.subplots_adjust(wspace=0.5, left=0.1, right=0.9, top=0.9)
 
         putil.label_figure(fig, figid)
@@ -1899,8 +2027,15 @@ if __name__ == '__main__':
     #%%
  
     #%%
-    # ANG vs. FWD VEL: compare BIG v SMALL error -- AVERAGE BY FLY.
+    # PLOT: ANG vs. FWD VEL: compare BIG v SMALL error -- AVERAGE BY FLY.
     # -------------------------------------------------
+    theta_error_small_deg = 10
+    theta_error_large_deg = 35 #35
+    theta_error_small = np.deg2rad(theta_error_small_deg)
+    theta_error_large = np.deg2rad(theta_error_large_deg)
+    
+    nframes_lag_plot = 2 if 'shifted' in var1 or 'shifted' in var2 else 0
+
     use_bouts = True
     set_axes = True 
     axes_str  = '_sharey' if set_axes else ''
@@ -1930,27 +2065,33 @@ if __name__ == '__main__':
                         id_vars=['species', 'acquisition', 'error_size'],
                         value_vars=[var1, var2], 
                         var_name='vel_type', value_name='vel_value')
-    
+   
+    ylim_var1 = 35 if assay == '2d_projector' else 25 
+    ylim_var2 = 6 if assay == '2d_projector' else 4 
     #%plot 
     stat_test = 'mwtest' # 'ttest' # 'kstest'
-    stat_fontsize=8
+    stat_fontsize = 8
+    if min_fontsize < 10:
+        figsize==(2, 1.1)
+    else:
+        figsize=(5, 3)
     err_palette={'small': 'r', 'large': 'cornflowerblue'}
     for si, (sp, sp_df) in enumerate(mean_by_fly.groupby('species')):
-        fig, axn = pl.subplots(1, 2, figsize=(2, 1.1), sharex=True)
+        fig, axn = pl.subplots(1, 2, figsize=figsize, sharex=True)
         for ai, (plot_var, plot_name) in enumerate(zip([var1, var2], ['Forward vel (mm/s)', 'Angular vel (rad/s)'])):
             ax=axn[ai] 
             sns.stripplot(data=sp_df, y=plot_var, ax=ax, 
                     hue='error_size', palette=err_palette, dodge=True, 
                     legend=0, linewidth=0.25, s=3) 
             sns.barplot(data=sp_df, y=plot_var, ax=ax,
-                        hue='error_size', dodge=True, palette=err_palette, alpha=0.5,
-                        legend=ai==1)
+                        hue='error_size', dodge=True, palette=err_palette, 
+                        alpha=1.0, legend=ai==1, errcolor=bg_color)
             
             if set_axes:
                 if plot_var == var1:
-                    ax.set_ylim([0, 40]) 
+                    ax.set_ylim([0, ylim_var1]) 
                 if plot_var == var2:
-                    ax.set_ylim([0, 8])
+                    ax.set_ylim([0, ylim_var2])
             ax.set_ylabel(plot_name, labelpad=2)
             ax.set_xlabel(sp, labelpad=0)
             sns.despine(offset=2, ax=ax, bottom=True)
@@ -1974,21 +2115,18 @@ if __name__ == '__main__':
             print('p-value:', pval)
             # Draw significance stars over the bars
             if pval < 0.01:
-                ax.text(0.5, 0.95, '**', fontsize=stat_fontsize, ha='center', va='center',
-                        transform=ax.transAxes, color='k')
+                annotate_axis(ax, '**', color=bg_color, fontsize=10)
             elif pval < 0.05:
-                ax.text(0.5, 0.95, '*', fontsize=stat_fontsize, ha='center', va='center', 
-                        transform=ax.transAxes, color='k')
+                annotate_axis(ax, '*', color=bg_color, fontsize=10)
             else:
-                ax.text(0.5, 0.95, 'ns', fontsize=stat_fontsize, ha='center', va='center', 
-                        transform=ax.transAxes, color='k')           
+                annotate_axis(ax, 'ns', color=bg_color, fontsize=10)
             # Check if the distributions are significantly different
             if pval < 0.05:
                 print('The distributions are significantly different (reject H0)')
             else:
                 print('The distributions are not significantly different (fail to reject H0)')
 
-        pl.subplots_adjust(wspace=0.6, left=0.1, right=0.9, top=0.85)
+        pl.subplots_adjust(wspace=0.6, left=0.15, right=0.9, top=0.85)
         fig.text(0.1, 0.92, 
                  '{} bouts, frac. of {} > {:.1f}, lag {} frames (small=+/-{}, large=+/-{})'.format(
                 behav, data_type, min_frac_bout, nframes_lag_plot, theta_error_small_deg, theta_error_large_deg), fontsize=4)
@@ -2006,7 +2144,7 @@ if __name__ == '__main__':
     # Is there a DISTANCE difference for small theta in yak? 
     plot_per_fly = True
     plot_strip = False 
-    plot_alpha=1 if assay == '2d_projector' else 0.5
+    plot_alpha=1 if assay == '2d_projector' else 1.
     
     binned_var = 'targ_ang_size_deg' #'dist_to_other'
     # -------------------------------------------------
@@ -2020,7 +2158,7 @@ if __name__ == '__main__':
         chase_ = chase_[chase_['stim_hz']>0]
         
     # bin distane 
-    bin_size = 10 if binned_var=='targ_ang_size_deg' else 5
+    bin_size = 5 if binned_var=='targ_ang_size_deg' else 5
     max_dist = 40 if binned_var=='targt_ang_size_deg' else 30 #np.ceil(ftjaaba['dist_to_other'].max())
     dist_bins = np.arange(0, max_dist+bin_size, bin_size)
 
@@ -2038,9 +2176,13 @@ if __name__ == '__main__':
                     for col, dtype in filtdf.dtypes.items()}
                 ).reset_index()
     # Plot
+    if min_fontsize==6:
+        figsize=(3, 2)
+    else:
+        figsize=(6, 4)
     #curr_df = chase_[chase_['species']=='Dmel'].copy() 
     for curr_species, curr_df in chase_.groupby('species'):
-        fig, axn = pl.subplots(2, 2, figsize=(3, 2))
+        fig, axn = pl.subplots(2, 2, figsize=figsize)
         for ai, (plot_var) in enumerate([var1, var2]):
             ax=axn[ai, 0]
             sns.histplot(data=curr_df, x=plot_var, hue='error_size', ax=ax,
@@ -2072,8 +2214,8 @@ if __name__ == '__main__':
             sns.barplot(data=plotd, #[curr_df['error_size']=='small'], 
                             y=plot_var, x='binned_{}'.format(binned_var), ax=ax,
                             hue='error_size', palette=err_palette, alpha=plot_alpha,
-                            legend=1, errorbar='se', errwidth=0.5,
-                            hue_order=['small', 'large'])
+                            legend=1, errorbar='se', errwidth=0.5, errcolor=bg_color,
+                            hue_order=['small', 'large'], edgecolor=bg_color)
             if plot_strip:
                 sns.stripplot(data=plotd, y=plot_var, x='binned_{}'.format(binned_var), ax=ax,
                             hue='error_size', palette=err_palette, dodge=True, legend=0,
@@ -2106,15 +2248,14 @@ if __name__ == '__main__':
     # Compare # of small-error and # of large-error frames
     # -------------------------------------------------
     import pingouin as pg 
-   
+
     species_palette = {'Dmel': species_colors[0], 
                        'Dyak': species_colors[1]} 
    
-
     chase_ = filtdf[(filtdf['{}_binary'.format(behav)]>0)].copy()
-    #chase_ = filtdf[filtdf['courting']==1].copy()
+
     theta_error_small_deg = 10
-    theta_error_large_deg = 20 #35
+    theta_error_large_deg = 35 #35
     theta_error_small = np.deg2rad(theta_error_small_deg)
     theta_error_large = np.deg2rad(theta_error_large_deg) 
     chase_ = split_theta_error(chase_, theta_error_small=theta_error_small, 
@@ -2126,8 +2267,7 @@ if __name__ == '__main__':
     counts_by_fly = counts_by_fly.merge(courtship_frames[['species', 'acquisition', 'frame']],
                                         on=['species', 'acquisition'], 
                                         suffixes=('', '_courtship'), how='left')
-    
-     
+       
     # Convert to SEC from frames 
     fps = 60.
     counts_by_fly['sec'] = counts_by_fly['frame'] / fps
@@ -2136,25 +2276,34 @@ if __name__ == '__main__':
     count_var = 'frac' 
     if count_var == 'frac':
         ylabel = "Fraction of time"
+    if min_fontsize < 10:
+        figheight = 1.5
+        markersize=3
+    else:
+        figheight = 3
+        markersize = 5 
     g = sns.catplot(data=counts_by_fly, x='species', y=count_var, 
-                     col='error_size', hue='species',
-                kind='bar', height=1.5, aspect=0.67, sharey=False,
-                palette=species_palette, legend=False,
-                errorbar='se', errwidth=0.5)
+                    col='error_size', hue='species', 
+                    #col_order=['small', 'large'],
+                    kind='bar', height=figheight, aspect=0.8, sharey=False,
+                    palette=species_palette, legend=False,
+                    errorbar='se', errwidth=0.5, errcolor=bg_color)
     fig = g.figure
     for i, (error_size, err_df) in enumerate(counts_by_fly.groupby('error_size')):
         ai = 0 if error_size=='large' else 1
         ax = g.axes[0, ai]
         sns.stripplot(data=err_df, x='species', y=count_var, 
                     hue='species', palette=species_palette, 
-                    dodge=True, jitter=True, s=2,
+                    dodge=True, jitter=True, s=markersize,
                     linewidth=0.25, ax=ax, alpha=0.5)
         ax.set_xlabel('')
-        #ax.set_ylim([-500, ax.get_ylim()[1]])
         sns.despine(ax=ax, offset=2, bottom=True)
     for ax in fig.axes:
         ax.tick_params(which='both', pad=0)
         ax.set_ylabel(ylabel, labelpad=2)
+    # Rename facetgrid columns to not have the variable name
+    g.set_titles(col_template='{col_name}', row_template='{row_name}')
+    
     #sns.histplot(data=n_frames_per_cond, x='frame', hue='error_size', ax=ax)
     # Stats
     results_df, aov = mixed_anova_stats(counts_by_fly, yvar='frame',
@@ -2166,20 +2315,21 @@ if __name__ == '__main__':
     large_p = results_df[results_df['frequency']=='large'][mc].values[0]  
     small_p = results_df[results_df['frequency']=='small'][mc].values[0]
     if large_p < 0.01:
-        g.axes[0, 0].annotate('**', xy=(0.5, 0.95), xycoords='axes fraction', fontsize=6,
-                            ha='center', va='center', color='k')
+        annotate_axis(g.axes[0, 0], '**', color=bg_color, fontsize=10)
     elif large_p < 0.05:
-        g.axes[0, 0].annotate('*', xy=(0.5, 0.95), xycoords='axes fraction', fontsize=6,
-                            ha='center', va='center', color='k')
+        annotate_axis(g.axes[0, 0], '*',  color=bg_color, fontsize=10)        
+    else:
+        annotate_axis(g.axes[0, 0], 'ns', color=bg_color, fontsize=10)
     if small_p < 0.01:
-        g.axes[0, 1].annotate('**', xy=(0.5, 0.95), xycoords='axes fraction', fontsize=6,
-                            ha='center', va='center', color='k')
-    elif small_p < 0.05:
-        g.axes[0, 1].annotate('*', xy=(0.5, 0.95), xycoords='axes fraction', fontsize=6,
-                            ha='center', va='center', color='k') 
+        annotate_axis(g.axes[0, 1], '**', color=bg_color, fontsize=10)
+    elif small_p < 0.05: 
+        annotate_axis(g.axes[0, 1], '*', color=bg_color, fontsize=10)
+    else:
+        annotate_axis(g.axes[0, 1], 'ns', color=bg_color, fontsize=10)
     pl.subplots_adjust(wspace=1)
-    fig.text(0.05, 0.92, 'Proportion of time ({}) out of courtship with large({})/small({}) err (mixed anova, {})'.format(count_var, large_error_deg, small_error_deg, mc), 
-             fontsize=6)
+    fig.text(0.01, 0.95, 
+             'Proportion of courtship ({}) with large({})/small({}) err (mixed anova, {})'.format(count_var, theta_error_large_deg, theta_error_small_deg, mc), 
+             fontsize=4)
     putil.label_figure(fig, figid, fontsize=4)
     figname = 'nframes_by_error-size'
     pl.savefig(os.path.join(figdir, '{}.png'.format(figname)))
@@ -2192,7 +2342,7 @@ if __name__ == '__main__':
     from sklearn import linear_model
     
     #%%
-    # Check linear fits
+    # REGR: Compare theta_error vs. theta_error_dt for small vs. large errors
     # ------------------------------------------------
     #min_frac_bout = 0.
     curr_species = 'Dmel' 
@@ -2207,8 +2357,8 @@ if __name__ == '__main__':
     if 'stim_hz' in chase_.columns: #assay == '2d_projector':
         chase_ = chase_[chase_['stim_hz']>0]
         
-    small_error_deg = 15
-    large_error_deg = 35 
+    small_error_deg = 10
+    large_error_deg = 25 
     theta_error_small = np.deg2rad(small_error_deg)
     theta_error_large = np.deg2rad(large_error_deg) #np.rad2deg(theta_error_small), np.rad2deg(theta_error_large)
     
@@ -2253,26 +2403,10 @@ if __name__ == '__main__':
     pl.subplots_adjust(wspace=0.5, hspace=0.5, top=0.85)
 
 
-    #%%
-    chase_['ang_vel_fly_shifted'] = chase_['ang_vel_fly_shifted'].interpolate().ffill().bfill() 
-
-    chase_['theta_error_deg'] = np.rad2deg(chase_['theta_error'])
-    start_bin = -120
-    end_bin = 120
-    bin_size = 10
-    chase_['binned_theta_error'] = pd.cut(chase_['theta_error_deg'],
-                                        bins=np.arange(-120, 120, 10), 
-                                        labels=np.arange(start_bin+bin_size/2,
-                                                         end_bin-bin_size/2, bin_size))    
-    avg_ang_vel = chase_.groupby(['species', 'acquisition', 
-                    'binned_theta_error'])['ang_vel_fly_shifted'].mean().reset_index()
-    avg_ang_vel = avg_ang_vel.dropna() 
-    fig, ax = pl.subplots()
-    sns.pointplot(data=avg_ang_vel, x='binned_theta_error', y='ang_vel_fly_shifted', 
-                    hue='species', palette=species_palette, ax=ax,
-                    dodge=True, errorbar='se', errwidth=0.5)
-    ax.axvline(x=0, color='k', linestyle='--', lw=0.5)
-    
+     
+   #%%
+   
+   # END OF 38mm_DYAD, FREE BEHAVIOR
     
 #%%
     hue_var = 'stim_hz'
@@ -2525,7 +2659,7 @@ if __name__ == '__main__':
 #%%
     # Pointplots:  Do some sumamry stats: ERROR / DISTANCE vs. STIMULUS SPEED 
     # ------------------------------------------------------------------------
-
+    import re 
     import pingouin as pg
     average_fly = True 
     is_flytracker = True
@@ -2551,7 +2685,7 @@ if __name__ == '__main__':
     frames_['facing_angle_abs'] = np.abs(frames_['facing_angle']) 
     frames_['facing_angle_abs_deg'] = np.rad2deg(frames_['facing_angle_abs'])
     # Convert pixels to mm
-    ppm = 23 #(mostly 25.7, some 22.2)
+    #ppm = 23 #(mostly 25.7, some 22.2)
     frames_['targ_pos_radius_mm'] = frames_['targ_pos_radius'] / frames_['PPM']
     
     # get mean 
@@ -2575,7 +2709,11 @@ if __name__ == '__main__':
     stimhz_means = stimhz_means[~stimhz_means['stim_hz'].isin(exclude_levels)]
      
     errorbar = 'se'
-    fig, axn = pl.subplots(1, 2, sharex=True, figsize=(2, 0.9))
+    if min_fontsize < 10:
+        figsize = (2, 0.9)
+    else:
+        figsize = (8, 4)
+    fig, axn = pl.subplots(1, 2, sharex=True, figsize=figsize)
        
     #% stats?       
     for ai, yvar in enumerate(['facing_angle_abs_deg', 'targ_pos_radius_mm']):
@@ -2625,7 +2763,7 @@ if __name__ == '__main__':
         #ax.set_xticks([curr_ticks[0]] + [curr_ticks[i] for i in range(1, len(curr_ticks)-1, 2)] + [curr_ticks[-1]])     
     axn[0].tick_params(axis='both', which='major', pad=0)
     axn[1].tick_params(axis='both', which='major', pad=0) 
-    pl.subplots_adjust(wspace=0.7)
+    pl.subplots_adjust(wspace=0.7, left=0.15, right=0.8)
     sns.despine(offset=2, trim=False)
     
     putil.label_figure(fig, figid)
