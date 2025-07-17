@@ -77,6 +77,9 @@ def calculate_angle_metrics_focal_fly(df0, winsize=5, grouper='acquisition',
                                     smooth_var='theta_error', vel_var='theta_error_dt', 
                                     time_var='sec', winsize=winsize)
             assert all(np.isnan(df_tmp['theta_error']))==False
+        except AssertionError as e:
+            print("AssertionError: {}".format(e))
+            df_['theta_error_dt'] = np.nan
         except Exception as e:
             print("Error calculating theta error: {}".format(e))
             df_['theta_error_dt'] = np.nan
@@ -1336,11 +1339,11 @@ if __name__ == '__main__':
 
     create_new = False
 
-    assay = '2d_projector' # '38mm-dyad'
-    experiment = 'circle_diffspeeds'
+    #assay = '2d_projector' # '38mm-dyad'
+    #experiment = 'circle_diffspeeds'
 
-    #assay = '38mm_dyad' 
-    #experiment = 'MF'
+    assay = '38mm_dyad' 
+    experiment = 'MF'
 
     #%%
     minerva_base = '/Volumes/Juliana'
