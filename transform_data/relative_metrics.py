@@ -432,10 +432,10 @@ def do_transformations_on_df(trk_, frame_width, frame_height,
     if feat_ is None:
         assert 'dist_to_other' in trk_.columns, "No feat df provided. Need dist_to_other."
 
-    print("Doing transformations:") #.format(acq))
 
     # center x- and y-coordinates
     if verbose:
+        print("Doing transformations:") #.format(acq)) 
         print("... centering coordinates")
     trk_ = util.center_coordinates(trk_, frame_width, frame_height) 
 
