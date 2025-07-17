@@ -1769,9 +1769,20 @@ def custom_filter_events(events):
     return events
 
 # %%
-def add_stim_hz(df0, n_frames=24000, n_epochs=10):
+def add_stim_hz(df0, n_frames=24000, n_epochs=10, file_grouper='file_name'):
     '''
     Assigns a 'stim_hz' column to the DataFrame df0 based on the number of frames (known epoch lengths based on stimulus)
+    
+    Args:
+    -----
+    df0: (pd.DataFrame)
+        DataFrame with a 'frame' column, which is used to assign stimulus Hz values.
+    n_frames: (int)
+        Total number of frames in the dataset.
+    n_epochs: (int)
+        Number of epochs in the dataset, which is used to calculate the number of frames per epoch.
+    file_grouper: (str)
+        Column name used to group the DataFrame, typically the file name or acquisition identifier.    
     '''
     n_frames_per_epoch = n_frames/n_epochs
     epoch_starts = np.arange(0, n_frames, n_frames_per_epoch)
@@ -1785,7 +1796,7 @@ def add_stim_hz(df0, n_frames=24000, n_epochs=10):
     
     #d_['epoch'] = 0
     wstim= []
-    for fn, df_ in df0.groupby('file_name'):
+    for fn, df_ in df0.groupby(file_grouper):
         df_['stim_hz']=np.nan
         for i, v in enumerate(epoch_starts):
             df_.loc[(df_['frame']>=v) & (df_['frame']<v+n_frames_per_epoch), 'stim_hz'] = stimhz_dict[i]
