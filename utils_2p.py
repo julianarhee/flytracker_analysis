@@ -33,6 +33,8 @@ def virmen_to_df(session, acqnum, rootdir='/Volumes/juliana/2p-data'):
     '''
     virmen_dir = os.path.join(rootdir, session, 'virmen')
     mat_files = glob.glob(os.path.join(virmen_dir, '*{:03d}.mat'.format(acqnum)))
+
+    assert len(mat_files) == 1, "Expected exactly one .mat file for acquisition {}, found {}".format(acqnum, len(mat_files))
     mat_fpath = mat_files[0]
     #mat_fpath = processed_mats[0]
     #print(mat_fpath)
@@ -89,6 +91,9 @@ def virmen_to_df(session, acqnum, rootdir='/Volumes/juliana/2p-data'):
         ]
 
     df = pd.DataFrame(data=mat['expr'], columns=columns)
+    df['acquisition'] = acq
+    df['session'] = session
+    df['acqnum'] = acqnum
 
     # Save to csv
     savedir = os.path.join(rootdir, session, 'processed', 'matlab-files')
@@ -251,3 +256,20 @@ def get_pulse_offset(pulseRCD, pulseSent):
 
     return mean_offset
 
+#%%
+
+# Visualizing fov
+def adjust_image_contrast(img, clip_limit=2.0, tile_size=10):#(10,10)):
+    import cv2
+    img[img<-50] = 0
+    normed = cv2.normalize(img, None, 0, 255, cv2.NORM_MINMAX)
+
+    # Convert to 8-bit
+    img8 = cv2.convertScaleAbs(normed)
+
+    # Equalize hist:
+    tg = tile_size if isinstance(tile_size, tuple) else (tile_size, tile_size)
+    clahe = cv2.createCLAHE(clipLimit=clip_limit, tileGridSize=tg)
+    eq = clahe.apply(img8)
+
+    return eq
