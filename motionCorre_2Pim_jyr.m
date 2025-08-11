@@ -5,16 +5,28 @@ addpath(genpath('/Users/julianarhee/Documents/MATLAB/CVX-master'));
 addpath(genpath('/Users/julianarhee/Documents/MATLAB/NoRMCorre-master'));
 
 %%
-rootdir = '/Volumes/Juliana/2p-data';
-session = '20240905';
+rootdir = '/Volumes/Juliana/2p-data-to-20250501';
+show_results=0;
+%session = ['20250424']; %['20240531']; %'20240905';
+%session = ['20250418']; filenum = 6;
+% session = '20240828' filenum = 19;
+session = '20250418';
+filenum = 7;
+is_volumetric=true;
 
-currdir = fullfile(rootdir, session, 'processed');
-clear names
+if is_volumetric
+    currdir = fullfile(rootdir, session, 'processed', sprintf('*%03d', filenum), sprintf('*%03d*slice*', filenum));
+else
+    currdir = fullfile(rootdir, session, 'processed', sprintf('*%03d*', filenum));
+end
+
+%clear names
 allFiles = dir(currdir); 
 ctr = 1; 
 for i = 1:length(allFiles)
-    if contains(allFiles(i).name,'.tif') && ~allFiles(i).isdir...
-            && ~contains(allFiles(i).name, 'STD') && ~contains(allFiles(i).name, 'Channel02')
+    if contains(allFiles(i).name, '.tif') && ~allFiles(i).isdir...
+            && ~contains(allFiles(i).name, 'STD') && ~contains(allFiles(i).name, 'Channel02') ...
+            && ~contains(allFiles(i).name, 'nrAligned')
         names{ctr} = [allFiles(i).folder '/' allFiles(i).name]; ctr = ctr+1; 
     end
 end
@@ -25,7 +37,15 @@ celldisp(names)
 
 for i = 1:length(names)
     name = names{i};
-    
+    % check if exists
+    outFname = strrep(name,'.tif','_nrAligned.tif');
+    %outPname = [pwd '/' outFname];
+    outPname = [outFname];
+    if isfile(outFname)
+        fprintf('Already MCed: %s\n', outFname)
+        continue
+    end
+
     tic; Y = read_file(name); toc; % read the file 
     Y = single(Y);                 % convert to single precision
     T = size(Y,ndims(Y));
@@ -53,16 +73,14 @@ for i = 1:length(names)
     
     % save data
     display('Saving files...');
-    outFname = strrep(name,'.tif','_nrAligned.tif');
-    %outPname = [pwd '/' outFname];
-    outPname = [outFname];
+
     saveastiff(M2,outPname);
     close all; %clearvars -except names i;
 end
     %% plot a movie with the results
-    
+if show_results==1
     figure;
-    for t = 1:1:T
+    for t = 1000:1:T
         subplot(121);imagesc(Y(:,:,t),[nnY,mmY]); xlabel('raw data','fontsize',14,'fontweight','bold'); axis equal; axis tight;
         title(sprintf('Frame %i out of %i',t,T),'fontweight','bold','fontsize',14); colormap('bone')
         set(gca,'XTick',[],'YTick',[]);
@@ -72,3 +90,4 @@ end
         drawnow;
         pause(0.02);
     end
+end
