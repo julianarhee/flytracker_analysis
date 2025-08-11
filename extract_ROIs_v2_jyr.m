@@ -1,49 +1,146 @@
 %% Retrieve behavioral data and imaging time stamps
-clearvars -except store
+clearvars %-except store
 
+close all; clear all; clc;
 %load('121020_splitP1CsX_LC10LexAGCaMP6s_largeDot_Stim_f3.mat')
 %fname = '121020_VT29314GC6m_splitP1CsX_MultiPanel_Stim_largeDot_f3-001.xml';
 %vname = '121020_VT29314GC6m_splitP1CsX_MultiPanel_Stim_largeDot_f3-001_Cycle00001_VoltageRecording_001.csv';
 %videoName = '121020_VT29314GC6m_splitP1CsX_MultiPanel_Stim_largeDot_f3-001_DN_nrAligned.tif';
-basedir = '/Volumes/Juliana/2p-data';
-session = '20240905';
-virmen_fname = '20240905_Dmel-ChAT-GCaMP6f-tdTomato_f3v1_OL-SimpleOscillatingTarget_018';
+basedir = '/Volumes/Juliana/2p-data-to-20250501';
+
+%%
+% Dyak, volumetric
+session = '20250418'; %'20240531'; %'20240905';
+acqnum = 7; %2;
+flyid = 'f2';
+slicenum = 3;
+is_volumetric = true;
+no_trigger = false;
+has_stimulation = false;
+
+%%
+% Dyak, volumetric
+session = '20250424'; %'20240531'; %'20240905';
+acqnum = 29; %2;
+flyid = 'f4';
+slicenum = 4;
+is_volumetric = true;
+no_trigger = false;
+has_stimulation = false;
+
+%%
+% Dmel, volumetric
+session = '20250218';
+acqnum = 10; %2;
+flyid = 'f3';
+slicenum = 4;
+is_volumetric = true;
+no_trigger = false;
+has_stimulation = false;
+
+%%
+% Dyak, planar
+session = '20250418';
+acqnum = 6; %2;
+flyid = 'f2';
+slicenum = 6;
+is_volumetric = false;
+no_trigger = false;
+has_stimulation = false;
+
+%%
+% session = '20240905'
+% acqnum = 18
+
+% K = 500; %500; %200;                                           % number of components to be found
+% tau = 2; %0.75; %0.75; %0.75; %0.75;                                          % std of gaussian kernel (half size of neuron)
+% p = 2;
+
+found_virmen = dir(fullfile(basedir, session, 'virmen', ...
+                   sprintf('*_%03d.mat', acqnum)));
+virmen_fname = extractBefore(found_virmen.name, '.');
+%virmen_fname = '20240905_Dmel-ChAT-GCaMP6f-tdTomato_f3v1_OL-SimpleOscillatingTarget_018';
 virmenpath = fullfile(basedir, session, 'virmen', sprintf('%s.mat', virmen_fname));
 load(virmenpath)
 
-imdir = '20240905_Dmel-ChAT-sytGCaMP6f-tdTomato_f3v1-018';
-fname = fullfile(basedir, session, 'raw', imdir, '20240905_Dmel-ChAT-sytGCaMP6f-tdTomato_f3v1-018.xml');
-vname = fullfile(basedir, session, 'raw', imdir, '20240905_Dmel-ChAT-sytGCaMP6f-tdTomato_f3v1-018_Cycle00001_VoltageRecording_001.csv');
-videoName = fullfile(basedir, session, 'processed', '20240905_Dmel-ChAT-sytGCaMP6f-tdTomato_f3v1-018_Channel01_nrAligned.tif');
+%%
+found_imdir = dir(fullfile(basedir, session, 'raw', flyid, ...
+                    sprintf('*-%03d', acqnum)));
+imdir = fullfile(found_imdir.folder, found_imdir.name); % '20240905_Dmel-ChAT-sytGCaMP6f-tdTomato_f3v1-018';
+fname = fullfile(imdir, dir(fullfile(imdir, sprintf('*-%03d.xml', acqnum))).name);
+vname = fullfile(imdir, dir(fullfile(imdir, sprintf('*-%03d*_VoltageRecording_001.csv', acqnum))).name);
+
+% Get processed/motion-corrected .tif
+if is_volumetric
+    found_tifs = dir(fullfile(basedir, session, 'processed', sprintf('*%03d', acqnum), sprintf('*%03d*_slice%03d_nrAligned.tif', acqnum, slicenum)));
+else
+    found_tifs = dir(fullfile(basedir, session, 'processed', sprintf('*%03d*_nrAligned.tif', acqnum)));
+end
+found_tifs
+%%
+if length(found_tifs) > 1
+    % likely more than 1 channel
+    for i=1:length(found_tifs)
+        if strfind(found_tifs(i).name, 'Channel01')
+            found_tifs = found_tifs(i);
+            break
+        elseif strfind(found_tifs(i).name, 'TSeries')
+            found_tifs = found_tifs(i);
+            break
+        end
+    end
+end
+videoName = fullfile(found_tifs.folder, found_tifs.name);
 
 %%
 metaIm = xml2struct(fname);
 voltage = csvread(vname,1,1);
 
-%find start times of behavior and imaging;
-imStart = strsplit(metaIm.PVScan.Sequence.Attributes.time,':');
-imStart = [str2double(imStart{1}) str2double(imStart{2}) str2double(imStart{3})];
-nIms = numel(metaIm.PVScan.Sequence.Frame);
-for i = 1:nIms
-    absFrameTimes(i) = str2double(metaIm.PVScan.Sequence.Frame{i}.Attributes.absoluteTime);
+if is_volumetric
+    %find start times of behavior and imaging;
+    imStart = strsplit(metaIm.PVScan.Sequence{1}.Attributes.time,':');
+    imStart = [str2double(imStart{1}) str2double(imStart{2}) str2double(imStart{3})];
+    nIms = numel(metaIm.PVScan.Sequence);
+    for i = 1:nIms
+        absFrameTimes(i) = str2double(metaIm.PVScan.Sequence{i}.Frame{slicenum}.Attributes.absoluteTime);
+    end
+else
+    %find start times of behavior and imaging;
+    imStart = strsplit(metaIm.PVScan.Sequence.Attributes.time,':');
+    imStart = [str2double(imStart{1}) str2double(imStart{2}) str2double(imStart{3})];
+    nIms = numel(metaIm.PVScan.Sequence.Frame);
+    for i = 1:nIms
+        absFrameTimes(i) = str2double(metaIm.PVScan.Sequence.Frame{i}.Attributes.absoluteTime);
+    end
 end
 behStart = expr(1,8:10);
 bTime = [0;expr(2:end,1)];
 
-%find voltage times for syncing
-[~,id] = findpeaks(diff(voltage(:,1)),'MinPeakHeight',1);
-id = id+1;
-pulseRCD = id./1000;
-id_ML = find(expr(:,11) == 1);
-pulseSent = expr(id_ML,1);
-
-clear offset
-for i = 1:size(pulseRCD,1)
-    offset(i) = pulseSent(i) - pulseRCD(i);
+if no_trigger
+    %find voltage times for syncing
+    [~,id] = findpeaks(diff(voltage(:,1)),'MinPeakHeight',1);
+    id = id+1;
+    pulseRCD = id./1000;
+    id_ML = find(expr(:,11) == 1);
+    pulseSent = expr(id_ML,1);
+    
+    if length(pulseRCD) > length(pulseSent)
+        pulseRCD = pulseRCD(1:length(pulseSent));
+    elseif length(pulseSent) > length(pulseRCD)
+        pulseSent = pulseSent(1:length(pulseRCD));
+    end
+    
+    %clear offset
+    for i = 1:size(pulseRCD,1)
+        offset(i) = pulseSent(i) - pulseRCD(i);
+    end
+    %align behavior and imaging;
+    iTime = absFrameTimes + mean(offset(1));
+else
+    iTime = absFrameTimes;
 end
+%%
 
-%align behavior and imaging;
-iTime = absFrameTimes + mean(offset(1));
 inversion = expr(:,12);
 
 stim.pos = expr(:,6:7); %female position in ViRMEn coords
@@ -66,15 +163,18 @@ addpath(genpath('/Users/julianarhee/Documents/MATLAB/CaImAn-MATLAB-master'));
 
 Y = read_file(videoName);
 meanFLC = squeeze(mean(mean(Y,2),1));
-shutterClosed = find(meanFLC < (mean(meanFLC) - std(meanFLC)));
-Y(:,:,shutterClosed) = [];
-iTime(shutterClosed) = [];
 
-%discard inverted frames
-lastStim = bTime(stimLROnsets(end-1)); % bTime(stimLROnsets(10));
-[~,idxlastLR] = min(abs(iTime-lastStim));
-Y = Y(:,:,1:idxlastLR);
-iTime = iTime(1:idxlastLR);
+if has_stimulation
+    shutterClosed = find(meanFLC < (mean(meanFLC) - std(meanFLC)));
+    Y(:,:,shutterClosed) = [];
+    iTime(shutterClosed) = [];
+    
+    %discard inverted frames
+    lastStim = bTime(stimLROnsets(end-1)); % bTime(stimLROnsets(10));
+    [~,idxlastLR] = min(abs(iTime-lastStim));
+    Y = Y(:,:,1:idxlastLR);
+    iTime = iTime(1:idxlastLR);
+end
 
 %%
 %discard image edges; 
@@ -83,9 +183,13 @@ Y = Y(buffer:end-buffer,buffer:end-buffer,:);
 
 [d1,d2,T] = size(Y);                                % dimensions of dataset
 d = d1*d2;
+% 
+% K = 500; %500; %200;                                           % number of components to be found
+% tau = 0.75; %0.75; %0.75;                                          % std of gaussian kernel (half size of neuron)
+% p = 2;
 
-K = 500; %200;                                           % number of components to be found
-tau = 0.75; %0.75;                                          % std of gaussian kernel (half size of neuron)
+K = 300; %500; %200;                                           % number of components to be found
+tau = 2; %0.75; %0.75; %0.75; %0.75;                                          % std of gaussian kernel (half size of neuron)
 p = 2;
 
 options = CNMFSetParms(...
@@ -203,11 +307,11 @@ maxTime = stimLROnsets(end-1); %stimLROnsets(10);
 timeBins = [-2:0.1:4];
 
 tc = CFull;
-clear meanRespLR meanRespRL
+clear meanRespLR meanRespRL idxI
 %compute response to LR sweeps
 for j = 1:length(stimLROnsets)
     relTimeB = bTime - bTime(stimLROnsets(j));
-    relTimeI = iTime - bTime(stimLROnsets(j));
+    relTimeI = iTime(1:length(tc)) - bTime(stimLROnsets(j));
         for i = 1:length(timeBins)-1;
             idxI = find(relTimeI > timeBins(i) & relTimeI < timeBins(i+1)); 
             meanRespLR(i,j,:) = nanmean(tc(:,idxI),2);
@@ -215,9 +319,9 @@ for j = 1:length(stimLROnsets)
 end
 
 %compute response to RL sweeps
-for j = 1:length(stimLROnsets)
+for j = 1:length(stimRLOnsets)
     relTimeB = bTime - bTime(stimRLOnsets(j));
-    relTimeI = iTime - bTime(stimRLOnsets(j));
+    relTimeI = iTime(1:length(tc)) - bTime(stimRLOnsets(j));
         for i = 1:length(timeBins)-1
             idxI = find(relTimeI > timeBins(i) & relTimeI < timeBins(i+1)); 
             meanRespRL(i,j,:) = nanmean(tc(:,idxI),2);
@@ -256,8 +360,8 @@ nframes_post = round(nsec_post * iTime_fps);
 clear timecoursemat_lr timecoursemat_rl
 %compute response to LR sweeps
 for j = 1:length(stimLROnsets)
-    relTimeI = iTime - bTime(stimLROnsets(j));
-    [c iTime_ix] = min(abs(iTime - bTime(stimLROnsets(j))));
+    relTimeI = iTime(1:length(tc)) - bTime(stimLROnsets(j));
+    [c iTime_ix] = min(abs(iTime(1:length(tc)) - bTime(stimLROnsets(j))));
     start_frame = iTime_ix - nframes_pre;
     stop_frame = iTime_ix + nframes_post;
     if stop_frame > length(iTime)
@@ -270,11 +374,11 @@ for j = 1:length(stimLROnsets)
 end
 %compute response to LR sweeps
 for j = 1:length(stimRLOnsets)
-    relTimeI = iTime - bTime(stimRLOnsets(j));
-    [c iTime_ix] = min(abs(iTime - bTime(stimRLOnsets(j))));
+    relTimeI = iTime(1:length(tc))  - bTime(stimRLOnsets(j));
+    [c iTime_ix] = min(abs(iTime(1:length(tc)) - bTime(stimRLOnsets(j))));
     start_frame = iTime_ix - nframes_pre;
     stop_frame = iTime_ix + nframes_post;
-    if stop_frame > length(iTime)
+    if stop_frame > length(iTime(1:length(tc)) )
         break
     end
     tstamps = iTime(start_frame:stop_frame);
@@ -349,7 +453,6 @@ plotdata = [];
 
 plotdata.name = videoName;
 
-plotdata.name = videoName;
 plotdata.time_bins = timeBins; 
 plotdata.neural_timecourse = tc; 
 plotdata.A_or = A_or(:,keep); 
@@ -360,7 +463,6 @@ plotdata.options = options;
 plotdata.selIndex = selectivityIndex; 
 plotdata.evoked_RL = EVOO_RL; % check the direction
 plotdata.evoked_LR = EVOO_LR; 
-
 
 plotdata.stimLROnsets = stimLROnsets;
 plotdata.stimRLOnsets = stimRLOnsets;
@@ -382,7 +484,8 @@ plotdata.rel_tstamps = rel_tstamps;
 
 %plot_outfile = fullfile(savedir, 'plotvars.mat');
 outdir = fullfile(basedir, session, 'processed', 'matlab-files');
-plot_outfile = fullfile(outdir, sprintf('%s.mat', virmen_fname));
+[par, vid_fname, ext] = fileparts(videoName);
+plot_outfile = fullfile(outdir, sprintf('%s.mat', vid_fname)); %virmen_fname));
 if ~exist(outdir, 'dir')
    mkdir(outdir)
 end
@@ -390,37 +493,47 @@ end
 save(plot_outfile, '-v7.3', 'plotdata'); % easier for simple struct, can use mat73 to load dict
 %save(plot_outfile, '-struct', 'plotdata'); 
 
-fprintf('Saved to:\n %s\n', plot_outfile)
+fprintf('Saved all plotdata to:\n %s\n', plot_outfile)
 
 %%
-nnY = quantile(Y(:),0.0005);
-mmY = quantile(Y(:),0.995);
-figure;
-for t = 500:1:T
-    imagesc(Y(:,:,t),[nnY,mmY]); xlabel('raw data','fontsize',14,'fontweight','bold'); axis equal; axis tight;
-    title(sprintf('Frame %i out of %i',t,T),'fontweight','bold','fontsize',14); colormap('bone')
-    set(gca,'XTick',[],'YTick',[]);
-    %subplot(122);imagesc(M2(:,:,t),[nnY,mmY]); xlabel('non-rigid corrected','fontsize',14,'fontweight','bold'); axis equal; axis tight;
-    %title(sprintf('Frame %i out of %i',t,T),'fontweight','bold','fontsize',14); colormap('bone')
-    %set(gca,'XTick',[],'YTick',[]);
-    drawnow;
-    pause(0.02);
-end
+% 
+% nnY = quantile(Y(:),0.0005);
+% mmY = quantile(Y(:),0.995);
+% figure;
+% for t = 500:1:T
+%     imagesc(Y(:,:,t),[nnY,mmY]); xlabel('raw data','fontsize',14,'fontweight','bold'); axis equal; axis tight;
+%     title(sprintf('Frame %i out of %i',t,T),'fontweight','bold','fontsize',14); colormap('bone')
+%     set(gca,'XTick',[],'YTick',[]);
+%     %subplot(122);imagesc(M2(:,:,t),[nnY,mmY]); xlabel('non-rigid corrected','fontsize',14,'fontweight','bold'); axis equal; axis tight;
+%     %title(sprintf('Frame %i out of %i',t,T),'fontweight','bold','fontsize',14); colormap('bone')
+%     %set(gca,'XTick',[],'YTick',[]);
+%     drawnow;
+%     pause(0.02);
+% end
 
 %%
+
+
+%plot_outfile = fullfile(savedir, 'plotvars.mat');
+outdir = fullfile(basedir, session, 'processed', 'matlab-files');
+
+neural_t= mean(diff(iTime));
+
 nnY = min(Y(:)); %quantile(Y(:),0.0001);
-mmY = quantile(Y(:),0.999); %max(Y(:)); %quantile(Y(:),0.995);
+mmY = 1000; %quantile(Y(:),0.999); %max(Y(:)); %quantile(Y(:),0.995);
 
- [y, x] = ndgrid(1:256);
- mov_outfpath = fullfile(outdir, 'testmovie.mp4');
+[y, x] = ndgrid(1:256);
+mov_outfpath = fullfile(outdir, sprintf('%s.mp4', virmen_fname));
 
- figure;
- vidfile = VideoWriter(mov_outfpath,'MPEG-4');
- open(vidfile);
+figure;
+vidfile = VideoWriter(mov_outfpath,'MPEG-4');
+open(vidfile);
 
- clear F
- frames_to_plot = [600:1:round(T/2)];
- for i = 1:length(frames_to_plot)
+ %clear F
+ frames_to_plot = [round(T/4):round(T/2)];
+ %frames_to_plot = [600:1:T];
+ %frames_to_plot = [1200:1:2500]; %round(T/2)];
+for i = 1:length(frames_to_plot)
     t = frames_to_plot(i);
     im = imagesc(Y(:,:,t), [nnY,mmY]);
     xlabel('raw data','fontsize',14,'fontweight','bold'); 
@@ -436,7 +549,7 @@ mmY = quantile(Y(:),0.999); %max(Y(:)); %quantile(Y(:),0.995);
     thisFrame = getframe(gca);
     F(i) = thisFrame;
     pause(neural_t/2); %(0.02);
- end
+end
  writeVideo(vidfile, F);
  % for ind = 1:256
  %    z = sin(x*2*pi/ind)+cos(y*2*pi/ind);
@@ -447,17 +560,13 @@ close(vidfile)
 
 %%
 
-plotdata.CoM = CoM;
-plotdata.n_trials = n_trials;
-plotdata.n_rois = n_rois;
-
-%plot_outfile = fullfile(savedir, 'plotvars.mat');
-outdir = fullfile(basedir, session, 'processed', 'matlab-files');
-sprintf('virft_%s', virmen_fname);
-
-expr_outfile = fullfile(outdir, sprintf('%s.mat', virmen_fname));
-if ~exist(outdir, 'dir')
-   mkdir(outdir)
-end
-
-save(expr_outfile, '-v7.3', 'expr'); 
+% %plot_outfile = fullfile(savedir, 'plotvars.mat');
+% outdir = fullfile(basedir, session, 'processed', 'matlab-files');
+% expr_name = sprintf('virft_%s', virmen_fname);
+% 
+% expr_outfile = fullfile(outdir, sprintf('%s.mat', expr_name));
+% if ~exist(outdir, 'dir')
+%    mkdir(outdir)
+% end
+% 
+% save(expr_outfile, '-v7.3', 'expr'); 
