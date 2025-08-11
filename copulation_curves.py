@@ -21,28 +21,33 @@ import utils as util
 import plotting as putil
 
 #%%
-plot_style='white'
+plot_style='dark'
 putil.set_sns_style(plot_style, min_fontsize=18)
 bg_color = [0.7]*3 if plot_style=='dark' else 'k'
 
 # %%
 # basedir = '/Users/julianarhee/Documents/rutalab/projects/courtship/data'
 #basedir = '/Users/julianarhee/Dropbox @RU Dropbox/Juliana Rhee/MF-winged-wingless-20mm'
-basedir = '/Users/julianarhee/Dropbox @RU Dropbox/Juliana Rhee/caitlin_data'
-experiment = 'multichamber_20mm_winged_v_wingless'
+#basedir = '/Users/julianarhee/Dropbox @RU Dropbox/Juliana Rhee/caitlin_data'
+#experiment = 'multichamber_20mm_winged_v_wingless'
+basedir = '/Users/julianarhee/Dropbox @RU Dropbox/Juliana Rhee/free_behavior_analysis/ht_winged_vs_wingless'
+experiment = '20mm_3x3_elegans_winged_v_wingless'
 
 #experiment = 'winged-wingless'
 
-csv_fpaths = glob.glob(os.path.join(basedir, experiment, '*.csv'))
+csv_fpaths = glob.glob(os.path.join(basedir, '*{}.csv'.format(experiment)))
 print(csv_fpaths)
 
+
 #%% Set output dirs
-figdir = os.path.join(basedir, 'figures', experiment, 'copulation_curves')
+figdir = os.path.join(basedir, 'figures', 'copulation_curves')
 if not os.path.exists(figdir):
     os.makedirs(figdir)
+print(figdir)
+
 
 # %%
-with_food = True 
+with_food = False
 # Without food
 exp_type = 'food' if with_food else 'nofood'
 if with_food:
@@ -58,11 +63,13 @@ df0.loc[df0['manipulation_male'].isnull(), 'manipulation_male'] = 'winged'
 
 #%%a
 incl_start_ix = 20 - 2 if exp_type=='nofood' else 0 # subtract 2 for 1-indexing + header
-df = df0[(df0['species_male']=='Dyak')
+species = 'Dele'
+df = df0[(df0['species_male']==species)
        #& (df0['manipulation_male'].isin([np.nan, 'wingless']))
        & (df0['courtship']==1) 
        & (df0['genotype_male']=='WT')
     ].loc[incl_start_ix:].copy()
+print(df.shape)
 
 # %
 # df.loc[df['manipulation_male'].isnull(), 'manipulation_male'] = 'winged'
@@ -83,16 +90,16 @@ for p in ax.patches:
                 (p.get_x() + p.get_width()/2 - 0.12, 5))
 #                (p.get_x()+0.15, p.get_height()+1))
 
-ax.set_title("Dyak: N copulations for courting pairs",
+ax.set_title("{}: N copulations for courting pairs".format(species),
              loc='left', fontsize=1)
 
 putil.label_figure(fig, csv_fpath)
 # Save
-figname = 'copulation_counts_{}'.format(exp_type)
+figname = '{}_copulation_counts_{}'.format(species, exp_type)
 pl.savefig(os.path.join(figdir, '{}.png'.format(figname)))
 pl.savefig(os.path.join(figdir, '{}.svg'.format(figname)))
 
-print(os.path.join(figdir, 'copulation_counts{}.png'.format(exp_type)))
+print(os.path.join(figdir, '{}_copulation_counts{}.png'.format(species, exp_type)))
 
 #%%
 # Convert copulation_onset from MM:SS to seconds
@@ -100,6 +107,7 @@ def convert_time_to_seconds(time_str):
     h, m, s = time_str.split(':')
     return int(h)*60 + int(m)*60 + int(s)
 
+df['copulation_onset'] = df['copulation_onset'].astype(str)
 df['copulation_onset_sec'] = 0
 df.loc[df['copulation']==1, 'copulation_onset_sec'] = df.loc[df['copulation']==1, 'copulation_onset'].apply(convert_time_to_seconds)
 df['copulation_onset_min'] = df['copulation_onset_sec'] / 60
@@ -136,8 +144,10 @@ def cumulative_copulations_by_minute(df_, bins, normalize=False,
     return cum_, bins_ 
 
 #% plot N copulations by minute:
-c1 = 'mediumorchid'
-c2 = 'thistle'
+#c1 = 'mediumorchid'
+#c2 = 'thistle'
+c1 = 'green'
+c2 = 'lightgreen'
 cond1 = 'winged'
 cond2 = 'wingless'
 # ------
@@ -160,20 +170,20 @@ cum2, _ = cumulative_copulations_by_minute(df[df['manipulation_male']==cond2],
 fig, ax =pl.subplots()
 ax.step(bins, cum1, label=label1, color=c1, lw=2)
 ax.step(bins, cum2, label=label2, color=c2, lw=2)
-ax.legend(bbox_to_anchor=(1, 1), loc='upper right', frameon=False)
+ax.legend(bbox_to_anchor=(1, 0), loc='lower right', frameon=False, fontsize=16)
 ax.set_box_aspect(1)
 ax.set_xlabel('time ({})'.format(unit))
 if normalize:
     ax.set_ylabel('Normalized copulation count')
 else:
     ax.set_ylabel('Cum. copulation count')
-ax.set_ylim([-0.01, 0.5])
+ax.set_ylim([-0.01, 0.65])
 sns.despine(offset=4, trim=True)
 
 putil.label_figure(fig, csv_fpath)
 
 # save
-figname = 'cumulative_copulations_by_minute_{}'.format(exp_type)
+figname = '{}_cumulative_copulations_by_minute_{}'.format(species, exp_type)
 pl.savefig(os.path.join(figdir, '{}.png'.format(figname)))
 pl.savefig(os.path.join(figdir, '{}.svg'.format(figname)))
 
