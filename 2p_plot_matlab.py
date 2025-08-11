@@ -17,7 +17,7 @@ import pandas as pd
 
 import matplotlib as mpl
 import seaborn as sns
-import pylab as pl
+import matplotlib.pyplot as plt
 
 import utils as util
 import plotting as putil
@@ -26,17 +26,38 @@ import utils_2p as util2p
 import mat73
 
 #%%
-plot_style='dark'
-putil.set_sns_style(plot_style, min_fontsize=16)
+plot_style='white'
+putil.set_sns_style(plot_style, min_fontsize=6)
 bg_color = [0.7]*3 if plot_style=='dark' else 'k'
 
 #%%
 
 rootdir = '/Volumes/juliana/2p-data'
-session = '20240531'
-# acq = 'example-yak-P1-1'
-acqnum = 9
+# example = 'Dyak3'
+example = 'Dmel'
+if example == 'Dmel':
+    session = '20240905' #'20240531'
+    # acq = 'example-yak-P1-1'
+    acqnum = 6
+    no_trigger = True
+# -------------------------
+elif example == 'Dyak':
+    session = '20250424'
+    flynum = 4
+    acqnum = 29
+    no_trigger = False
+elif example == 'Dyak2':
+    session = '20250418'
+    flynum = 2
+    acqnum = 6
+    no_trigger = False
+elif example == 'Dyak3': # Good
+    session = '20240828'
+    flynum = 3
+    acqnum = 19
+    no_trigger=True
 
+    
 #%%
 processed_dir = os.path.join(rootdir, session, 'processed')
 acq = os.path.splitext(os.path.split(glob.glob(os.path.join(rootdir, session, 
@@ -66,106 +87,235 @@ ft = util2p.virmen_to_df(session, acqnum, rootdir=rootdir)
 #%% Load ROI extracted traces
 
 processed_mats = glob.glob(os.path.join( processed_dir,
-                        'matlab-files', '*{:03d}.mat'.format(acqnum)))
+                        'matlab-files', '*{:03d}*_nrAligned.mat'.format(acqnum)))
+for p in processed_mats:
+    print(os.path.split(p)[-1])
+
+#%%
 # Get matlab CAIMAN results
+# assert len(processed_mats) == 1, "Expected exactly one processed .mat file for acquisition {}, found {}".format(acqnum, len(processed_mats))
 mat_fpath = processed_mats[0]
-#%
+
+#mat_fpath = [c for c in processed_mats if 'slice%03d'.format(slicenum) in c][0]
+
+#m_list = []
+#for mat_fpath in processed_mats:
+    #%
 # Load mat
 mdata = util2p.load_caimin_matlab(mat_fpath)
-#%x
-# mat = mat73.loadmat(mat_fpath)
+
 # mdata = mat['plotdata']
 
 #%%
-# Sort ROIs by peak response time
-
-roi_to_argmax0 = dict(mdata['roi_by_argmax'])
-roi_to_argmax = {int(k)-1: int(v) for k, v in roi_to_argmax0.items()}
+# Sort ROIs by POSITION
+# get index of CoMs sorted by position
+coms = pd.DataFrame({'x': mdata['CoM'][:, 0],
+            'y': mdata['CoM'][:, 1]},
+            index=np.arange(0, len(mdata['CoM'])))
 
 # Filter by responses
-min_dff = 0.2
-timecourse = mdata['mean_across_trials_lr']
-max_vals = np.max(timecourse, axis=1)
-incl_ixs = np.where(max_vals > min_dff)[0]
+min_dff = 0.15 if 'Dmel' in example else 0.1
+timecourse = mdata['mean_across_trials_lr'].copy()
+# subtract the min value from each ROI timecourse
+# to normalize the dF/F
+timecourse = timecourse - timecourse.min(axis=1, keepdims=True)
+rel_tstamps = mdata['rel_tstamps']
 
-sorted_by_peak = np.array([int(i)-1 for i in mdata['roi_sorted_by_response_time']])
-incl_rois = [r for r in sorted_by_peak if r in incl_ixs]
+tc = pd.DataFrame(data=timecourse.T,
+            columns=coms.index, 
+            index=rel_tstamps) #range(timecourse.shape[1]))
+
+max_vals = np.max(timecourse, axis=1)
+min_vals = np.min(timecourse, axis=1)
+diff_vals = max_vals - min_vals
+incl_ixs = np.where(diff_vals > min_dff)[0]
+
+all_rois = np.array(coms.index.tolist())
+incl_rois = [r for r in all_rois[incl_ixs] if r in tc.columns]
+ndata = tc[incl_rois].copy()
 
 print("There are {}/{} ROIs with dF/F > {}".format(len(incl_rois), len(max_vals), min_dff))
+
+#%%
+time_at_max = []
+
+tstamp_ixs = ndata.index.tolist()
+# Get actual peak response values
+peaks =[]
+for roi in incl_rois:
+    # Find index of max valuue in timecourse
+    time_at_max = ndata[roi].idxmax()
+    # Get corresponding time
+    #roi_tstamp = ndata.index[roi_ix]
+    #time_at_max.append(roi_tstamp)
+    ix_max = tstamp_ixs.index(time_at_max)
+    d_ = pd.DataFrame({'roi': roi,
+                  'ix_max': ix_max,
+                  'max_value': time_at_max},
+                  index=[roi])
+    peaks.append(d_)
+
+peaks = pd.concat(peaks)
+
 # %%a
+cmap = plt.get_cmap('viridis_r')
+
+plot_by_pos=False
+sort_type = 'by_pos' if plot_by_pos else 'by_peak_response_time'
 
 # Overlay ROI positions and color by their peak resppnse time
-
-CoM = mdata['CoM']
-N = int(mdata['n_rois'])
 # Create list of colors from colormap jet
-cmap = pl.get_cmap('jet')
+if plot_by_pos:
+    sorted_by_pos = coms.sort_values(by=[ 'y', 'x']).index
+    incl_rois = [roi for roi in sorted_by_pos if roi in ndata.columns]
+    n_colors = len(incl_rois) 
 
-unique_argmax = np.unique([roi_to_argmax[roi] for roi in incl_rois]) #np.unique([v for k, v in roi_to_argmax.items()])
-n_argmaxs = len(unique_argmax) #[v for k, v in roi_to_argmax.items()]).size
+    color_list = cmap(np.linspace(0, 1, n_colors)) #len(rel_tstamps))) #n_argmaxs))
+    cdict = dict((v, c) for v, c in zip(incl_rois, color_list))
+    colors = [cdict[i] for i in incl_rois]
+    color_dict = cdict
+else:
+    #sorted_by_peak = np.array([int(i)-1 for i in mdata['roi_sorted_by_response_time']])
+    sorted_by_peak = peaks.sort_values(by='ix_max')['roi'].values
+    incl_rois = [r for r in sorted_by_peak if r in incl_ixs]
 
-rel_tstamps = mdata['rel_tstamps']
-color_list = cmap(np.linspace(0, 1, n_argmaxs)) #len(rel_tstamps))) #n_argmaxs))
-cdict = dict((v, c) for v, c in zip(unique_argmax, color_list))
-colors = [cdict[roi_to_argmax[i]] for i in incl_rois]
+    # sort by peak response time:
+    #roi_to_argmax0 = dict(mdata['roi_by_argmax'])
+    #roi_to_argmax = {int(k)-1: int(v) for k, v in roi_to_argmax0.items()}
+    # Create list of colors from colormap jet
+    #unique_argmax = np.unique([roi_to_argmax[roi] for roi in incl_rois]) #np.unique([v for k, v in roi_to_argmax.items()])
+    #n_argmax = len(unique_argmax) #[v for k, v in roi_to_argmax.items()]).size
+    unique_peaks = sorted(peaks['max_value'].unique())
+    n_colors = peaks['max_value'].nunique() 
+    min_t = peaks['max_value'].min()
+    max_t = peaks['max_value'].max()
+    color_list = cmap(np.linspace(0, 1, n_colors)) #n_argmax)) #len(rel_tstamps))) #n_argmaxs)0)
+    #color_list = cmap(np.linspace(min_t, max_t, n_colors))
+    cdict = dict((v, c) for v, c in zip(unique_peaks, color_list))
+    #colors = [cdict[roi_to_argmax[i]] for i in incl_rois]
+    colors = [cdict[peaks.loc[roi, 'max_value']] for roi in incl_rois]
+    # Create a dictionary mapping each ROI to its color
+
+    color_dict = dict((v, c) for v, c in zip(incl_rois, colors))    
 
 # Make continuous colorbar
-norm = pl.Normalize(0, n_argmaxs) #min(rel_tstamps), max(rel_tstamps)) #min(unique_argmax), max(unique_argmax))
-clist = mpl.colors.LinearSegmentedColormap.from_list('jet', color_list)
-sm = pl.cm.ScalarMappable(cmap=clist, norm=norm)
+norm = plt.Normalize(min_t, max_t) #0, n_colors) #n_argmaxs) #min(rel_tstamps), max(rel_tstamps)) #min(unique_argmax), max(unique_argmax))
+clist = mpl.colors.LinearSegmentedColormap.from_list(cmap, color_list)
+sm = plt.cm.ScalarMappable(cmap=clist, norm=norm)
 
 # PLOT
-fig, ax =pl.subplots()
-ax.imshow(mdata['Y_mean'], cmap='gray')
+if 'Dyak' in example:
+    fig, ax =plt.subplots(figsize=(1.7,1.7))
+else:
+    fig, ax =plt.subplots(figsize=(2.,2.), dpi=300)
+marker_size=3
+# Adjust contrast of mdata['Y_mean']:
+img = mdata['Y_mean'].copy()
+# Locally adjust contrast so background is brighter
+if 'Dyak' in example:
+    im = util2p.adjust_image_contrast(img, clip_limit=0.01,
+                                   tile_size=(10,10)) 
+else:
+    im = img.copy()
+ax.imshow(im, cmap='gray')
 ax.set_aspect(1)
 
 # Plot ROIs colored by peak response time
-im = ax.scatter(CoM[incl_rois, 1], CoM[incl_rois, 0], s=10, c=colors)
+im = ax.scatter(coms.loc[incl_rois]['y'], 
+                coms.loc[incl_rois]['x'], s=marker_size, c=colors)
 ax.axis('off')
 
+#%
 # Add colorbar for peak response time
-cbar = pl.colorbar(sm, label='time (s)', shrink=0.5) #im, ax=ax, cmap=clist, norm=norm)
+cmap_label = 'ROI position' if plot_by_pos else 'time of peak (s)'
+cbar = plt.colorbar(sm, label=cmap_label, shrink=0.5, pad=0.03) #im, ax=ax, cmap=clist, norm=norm)
 
 putil.label_figure(fig, acq)
 
-figname = 'overlay_ROIs_by_peak_response_time'
-pl.savefig(os.path.join(figdir, '{}.png'.format(figname)), bbox_inches='tight')
+figname = 'overlay_ROIs_{}'.format(sort_type)
+plt.savefig(os.path.join(figdir, '{}.png'.format(figname)), bbox_inches='tight')
+plt.savefig(os.path.join(figdir, '{}.svg'.format(figname)), bbox_inches='tight')
+
 # %%
+sorted_by_peak = np.array([int(i)-1 for i in mdata['roi_sorted_by_response_time']])
+incl_rois_by_peak = [r for r in sorted_by_peak if r in incl_ixs]
+
+plot_by_pos=False
+sort_type = 'by_pos' if plot_by_pos else 'by_peak_response_time'
+
+# Overlay ROI positions and color by their peak resppnse time
+# Create list of colors from colormap jet
+if plot_by_pos:
+    sorted_by_pos = coms.sort_values(by=[ 'y', 'x']).index
+    incl_rois = [roi for roi in sorted_by_pos if roi in ndata.columns]
+    n_colors = len(incl_rois) 
+
+    color_list = cmap(np.linspace(0, 1, n_colors)) #len(rel_tstamps))) #n_argmaxs))
+    cdict = dict((v, c) for v, c in zip(incl_rois, color_list))
+    colors = [cdict[i] for i in incl_rois]
+    color_dict = cdict
+else:
+    sorted_by_peak = np.array([int(i)-1 for i in mdata['roi_sorted_by_response_time']])
+    incl_rois = [r for r in sorted_by_peak if r in incl_ixs]
+
+    # sort by peak response time:
+    roi_to_argmax0 = dict(mdata['roi_by_argmax'])
+    roi_to_argmax = {int(k)-1: int(v) for k, v in roi_to_argmax0.items()}
+    # Create list of colors from colormap jet
+    unique_argmax = np.unique([roi_to_argmax[roi] for roi in incl_rois]) #np.unique([v for k, v in roi_to_argmax.items()])
+    n_argmax = len(unique_argmax) #[v for k, v in roi_to_argmax.items()]).size
+
+    color_list = cmap(np.linspace(0, 1, n_argmax)) #len(rel_tstamps))) #n_argmaxs)0)
+    cdict = dict((v, c) for v, c in zip(unique_argmax, color_list))
+    colors = [cdict[roi_to_argmax[i]] for i in incl_rois]
+    color_dict = dict((v, c) for v, c in zip(incl_rois, colors))    
+
+# Make continuous colorbar
+norm = plt.Normalize(0, n_colors) #n_argmaxs) #min(rel_tstamps), max(rel_tstamps)) #min(unique_argmax), max(unique_argmax))
+clist = mpl.colors.LinearSegmentedColormap.from_list(cmap, color_list)
+sm = plt.cm.ScalarMappable(cmap=clist, norm=norm)
+
 
 # Plot waterfall plot of ROI timecourses, sorted by peak response time
 neural_fps = 1/np.mean(np.diff((mdata['iTime'])))
 nsec_legend = 1 
-nframes_legend = nsec_legend * neural_fps
+nframes_legend = nsec_legend #* neural_fps
 
-fig, ax = pl.subplots()
+fig, ax = plt.subplots(figsize=(2.3, 2.3), dpi=300)
 offset=0
-gap = 0.1
+gap = 0.15
+interval = 2 if 'Dyak' in example else 4
 ax.set_aspect(10)
-for roi in incl_rois[0::3]: #sorted_by_peak[incl_ixs]:
-    ax.plot(timecourse[roi, :]+offset, c=cdict[roi_to_argmax[roi]],
+#for roi in incl_rois_by_peak[0::2]: 
+for roi in incl_rois[0::interval]: #sorted_by_peak[incl_ixs]:
+    ax.plot(ndata.index.tolist(), ndata[roi].values+offset, 
+            #timecourse[roi, :]+offset, 
+            c=color_dict[roi], #cdict[roi_to_argmax[roi]],
             alpha=1, lw=1)
     offset+=gap
     #plt.xlim([1325,1375])
-ax.set_xlim([ax.get_xlim()[0], timecourse.shape[1]])
+ax.set_aspect(1.)
+ax.set_xlim([ax.get_xlim()[0], 4]) #timecourse.shape[1]])
 ax.set_ylim([0, ax.get_ylim()[1]])
-
+#%
 # Add legend
 dff_legend = 0.5
 ax.set_yticks([0, dff_legend])
 ax.set_xticks([ax.get_xlim()[0], nframes_legend])
 sns.despine(offset=0, trim=True)
 
-ax.set_xticklabels(['1 sec', ''], rotation=0, fontsize=10,
+ax.set_xticklabels(['1 sec', ''], rotation=0, fontsize=6,
                    ha='left', va='top')
 ax.set_yticklabels(['{} dF/F'.format(dff_legend), ''], rotation=90, 
-                   ha='right', va='bottom', fontsize=10)
+                   ha='right', va='bottom', fontsize=6)
 
 #pl.figure()
 #pl.hist(max_vals)
 putil.label_figure(fig, acq)
 
-figname = 'waterfall_timecourses_by_peak_response_time'
-pl.savefig(os.path.join(figdir, '{}.png'.format(figname)), bbox_inches='tight')
+figname = 'waterfall_timecourses_{}'.format(sort_type)
+plt.savefig(os.path.join(figdir, '{}.png'.format(figname)), bbox_inches='tight')
+plt.savefig(os.path.join(figdir, '{}.svg'.format(figname)), bbox_inches='tight')
 
 #%%
 # average time course
@@ -175,28 +325,36 @@ sum_timecourse = mdata['neural_timecourse'].sum(axis=0)
 neural_tstamps = mdata['iTime']
 print(mean_timecourse.shape)
 
-pl.figure()
-pl.plot(neural_tstamps, mean_timecourse, lw=1, c=bg_color)
+plt.figure()
+plt.plot(neural_tstamps, mean_timecourse, lw=1, c=bg_color)
 #pl.plot(neural_tstamps, sum_timecourse, lw=1, c=bg_color)
 
 #%%
 
+# PLOT BEHAVIOR
+# ---------------------------------------------------------
 # 2p meta info
 xml_fname = glob.glob(os.path.join(rootdir, session, 'raw', 
-                        '*{:03d}'.format(acqnum),
+                       'f{:01d}'.format(flynum),
+                       '*{:03d}'.format(acqnum),
                        '*-{:03d}.xml'.format(acqnum)))[0]
 # frame trigger info
 voltage_fname = glob.glob(os.path.join(rootdir, session, 
-                        'raw', '*{:03d}'.format(acqnum),
+                        'raw', 
+                        'f{:01d}'.format(flynum),
+                        '*{:03d}'.format(acqnum),
                        '*{:03d}_*VoltageRecording_001.csv'.format(acqnum)))[0]
 
 # Get absolute frame times for 2p images
 absFrameTimes = util2p.get_timestamps_from_xml(xml_fname, verbose=True)
 
-# Find pulses sent in the experiment data
-pulseRCD = util2p.get_pulse_frames(voltage_fname)
-pulseSent = ft[ft['pulse_sent']==1]['toc'] #expr[id_ML, 0]
-mean_offset = util2p.get_pulse_offset(pulseRCD, pulseSent)
+if no_trigger:
+    # Find pulses sent in the experiment data
+    pulseRCD = util2p.get_pulse_frames(voltage_fname)
+    pulseSent = ft[ft['pulse_sent']==1]['toc'] #expr[id_ML, 0]
+    mean_offset = util2p.get_pulse_offset(pulseRCD, pulseSent)
+else:
+    mean_offset = 0
 
 # Align behavior and imaging
 iTime = np.array(absFrameTimes) + mean_offset
@@ -209,21 +367,25 @@ try:
                         '*{:03d}*.csv'.format(acqnum)))[0]
 
     # Load 2p timecourse data
-    tc = pd.read_csv(tc_acquisition)['Mean'].values
+    tc_csv = pd.read_csv(tc_acquisition)
+    if 'Mean' in tc_csv.columns:
+        tc = tc_csv['Mean'].values
+    else:
+        tc = tc_csv['Y'].values
     #
     # Ensure the same length vectors
     len_tc = min(len(tc), len(iTime))
     tc = tc[:len_tc]
     iTime = iTime[:len_tc]
 
-    pl.figure()
-    pl.plot(iTime, tc, lw=1, c=bg_color)
+    plt.figure()
+    plt.plot(iTime, tc, lw=1, c=bg_color)
 except IndexError:
     pass
 
 # %%
 
-fig, ax = pl.subplots()
+fig, ax = plt.subplots()
 sns.scatterplot(data=ft, x='pos_x', y='pos_y', ax=ax,
                 hue='animal_movement_speed_lab', palette='viridis', 
                 edgecolor=None, s=1)
@@ -316,7 +478,7 @@ ti0.extend(R)
 ft['tracking_index'] = ti0
 
 #%%
-fig, axn =pl.subplots(1, 2, sharex=True, sharey=True)
+fig, axn =plt.subplots(1, 2, sharex=True, sharey=True)
 ax=axn[0]
 ax.imshow(mean_phase, cmap='viridis', vmin=-0.1, vmax=0.1,
           interpolation='none')
@@ -331,11 +493,11 @@ for ax in axn:
 
 putil.label_figure(fig, acq)
 figname = 'mean_phase_v_stim_phase'
-pl.savefig(os.path.join(figdir, '{}.png'.format(figname)), bbox_inches='tight')
+plt.savefig(os.path.join(figdir, '{}.png'.format(figname)), bbox_inches='tight')
 
 #%%
-pl.figure()
-pl.plot(R)
+plt.figure()
+plt.plot(R)
 
 #util2p.compute_ti()
 
@@ -346,31 +508,40 @@ zoom_pre = 50 #25
 zoom_post = 150 #125 #100 #150
 
 # Create figure
-fig, axn = pl.subplots(4, 1, sharex=True,
-                       figsize=(12, 8))
+fig, axn = plt.subplots(4, 1, sharex=True,
+                    figsize=(1.8, 2))
+lw=0.25
+#%
 # Target angle
 ax = axn[0] #ax1.twinx()
-ax.plot(behav_time[1:], ft['target_angle'][1:], color=bg_color)
-ax.set_ylabel('Target angle', color=bg_color)
+ax.plot(behav_time[1:], ft['target_angle'][1:], 
+        color=bg_color, lw=lw)
+ax.set_ylabel('Target\npos.', color=bg_color, ha='center')
 
 # Delta heading
 ax=axn[1]
-ax.plot(behav_time[1:], heading_diff, color=bg_color)
-ax.set_ylim([-0.5, 0.5])
-ax.set_ylabel(r'$\Delta$ heading', color=bg_color)
+ax.plot(behav_time[1:], heading_diff, color=bg_color,
+        lw=lw)
+ax.set_ylim([-0.23, 0.23])
+#ax.set_ylabel(r'$\Delta$ Heading', color=bg_color)
+ax.set_ylabel('Heading')
 ax.set_xticks(np.linspace(0, behav_time[-1], 5))
 
 # Tracking index
 ax=axn[2]
-ax.plot(behav_time[1:], R, color=bg_color)
-ax.set_ylabel('Tracking index')
+ax.plot(behav_time[1:], R, color=bg_color, lw=lw)
+ax.set_ylabel('Tracking\nstrength')
 
 # Neural timecourse
 ax=axn[3]
-ax.plot(neural_tstamps, mean_timecourse, lw=1, c=bg_color)
+ax.plot(neural_tstamps, mean_timecourse, lw=lw, c=bg_color)
 ax.set_ylabel('dF/F')
-#
-pl.subplots_adjust(hspace=0.1)
+ax.set_yticks(np.linspace(0.0, 0.4, 3)) #[-0.1, 0.4])
+ax.set_xlim([zoom_pre, zoom_post])
+ax.set_xticks(np.linspace(zoom_pre, zoom_post, 5))
+ax.set_xlabel('Time (s)')
+#%#
+plt.subplots_adjust(hspace=0.0)
 
 sns.despine(offset=0, trim=True)
 
@@ -391,6 +562,7 @@ fig.savefig(os.path.join(figdir, f'{figname}.png')) #, bbox_inches='tight')
 ax.set_xlim([zoom_pre, zoom_post])
 figname_zoom = 'summary_timecourse_ZOOM' #'delta-heading_v_stimulus_ZOOM'
 fig.savefig(os.path.join(figdir, f'{figname_zoom}.png')) #, bbox_inches='tight')
+fig.savefig(os.path.join(figdir, f'{figname_zoom}.svg')) #, bbox_inches='tight')
 
 # Optionally show the plot (comment out if not needed)
 # plt.show()
