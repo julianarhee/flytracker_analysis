@@ -21,8 +21,8 @@ import utils as util
 # ----------------------------------------------------------------------
 # Visualization 
 # ----------------------------------------------------------------------
-def label_figure(fig, fig_id, x=0.01, y=0.98):
-    fig.text(x, y, fig_id, fontsize=8)
+def label_figure(fig, fig_id, x=0.01, y=0.98, fontsize=8):
+    fig.text(x, y, fig_id, fontsize=fontsize)
 
 def set_sns_style(style='dark', min_fontsize=6):
     font_styles = {
@@ -156,9 +156,10 @@ def annotate_regr(data, ax, x='facing_angle', y='ang_vel',
 
     r, p = spstats.pearsonr(data[x].interpolate().ffill().bfill(), 
                             data[y].interpolate().ffill().bfill())
-    ax.text(xloc, yloc, 'r={:.2f}, p={:.2g}'.format(r, p),
+    ax.text(xloc, yloc, 'pearson r={:.2f}, p={:.2g}'.format(r, p),
             transform=ax.transAxes, fontsize=fontsize)
 
+    return (r, p)
 
 #%%
 
@@ -342,7 +343,7 @@ def add_colorbar(fig, ax, vmin, vmax, shrink=0.1, pad=0.2,
     return
 
 def colorbar_from_mappable(ax, norm, cmap, hue_title='', axes=[0.85, 0.3, 0.01, 0.4],
-                            fontsize=7): #pad=0.05):
+                            fontsize=7, ticks=None, ticklabels=None): #pad=0.05):
     from mpl_toolkits.axes_grid1 import make_axes_locatable
 
     fig = ax.figure
@@ -356,7 +357,9 @@ def colorbar_from_mappable(ax, norm, cmap, hue_title='', axes=[0.85, 0.3, 0.01, 
     cbar = fig.colorbar(sm, cax=cax) #ax=ax)
     cbar.ax.set_ylabel(hue_title, fontsize=fontsize)
     cbar.ax.tick_params(labelsize=fontsize)
-
+    if ticks is not None:
+        cbar.set_ticks(ticks)
+        cbar.set_ticklabels(ticklabels)
     #pl.colorbar(im, cax=cax)
 
 def get_palette_dict(df, huevar, cmap='viridis'):

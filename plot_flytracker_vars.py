@@ -28,17 +28,16 @@ import utils as util
 import plotting as putil
 
 #%%
-plot_style='dark'
+plot_style='white'
 putil.set_sns_style(plot_style, min_fontsize=12)
 bg_color = [0.7]*3 if plot_style=='dark' else 'k'
 
 #%%
-create_new = False
 
 # Set sourcedirs
 # srcdir = '/Volumes/Juliana/2d-projector-analysis/FlyTracker/processed_mats' #relative_metrics'
 #srcdir = '/Volumes/Juliana/free_behavior_analysis/MF/FlyTracker/38mm_dyad/processed'
-srcdir = '/Volumes/Juliana/free_behavior_analysis/38mm_dyad/MF/FlyTracker/processed'
+srcdir = '/Volumes/Juliana/free_behavior_analysis/38mm_dyad/MF/FlyTracker/processed_mats'
 
 if plot_style == 'white':
     figdir = os.path.join(os.path.split(srcdir)[0], 'plot_flytracker_vars', 'white')
@@ -67,7 +66,7 @@ assert os.path.exists(out_fpath_local)
 
 #%%
 importlib.reload(util)
-create_new = False
+create_new = True
 
 if not create_new:
     if os.path.exists(out_fpath_local):
@@ -130,6 +129,33 @@ print(ftjaaba.groupby('species')['acquisition'].nunique())
 
 #%%
 
+acq = '20240129-1213-fly1-melWT_3do_sh_melWT_3do_gh'
+
+ja = jaaba[jaaba['acquisition']==acq].copy()
+ja.columns
+
+ja['chasing_binary'] = ja['chasing'].ge(5)
+
+chase_ = ja[ja['chasing_binary']==1].copy()
+cmap = 'viridis'
+vmin=None
+vmax=None
+bins=100
+stat='probability'
+
+import matplotlib.pyplot as plt
+fig, ax = plt.subplots()
+#x='fly_x'
+#y='fly_y'
+x = 'fem_x_transformed'
+y = 'fem_y_transformed'
+sns.histplot(data=chase_, x=x, y=y, ax=ax, 
+        cmap=cmap, stat=stat, vmin=0, vmax=vmax, bins=bins) # %%
+ax.plot(0, 0, 'k', markersize=5, marker='>')
+ax.set_aspect(1)
+
+#%%
+
 if jaaba['chasing'].max() == 1:
     jaaba_thresh_dict = {'orienting': 0, 
                         'chasing': 0,
@@ -142,6 +168,13 @@ else:
 ftjaaba = util.binarize_behaviors(ftjaaba, jaaba_thresh_dict=jaaba_thresh_dict)
 
 ftjaaba.loc[(ftjaaba['chasing_binary']==1) | (ftjaaba['singing_binary']==1) | (ftjaaba['orienting_binary']==1), 'courtship'] = 1   
+
+#%% Save
+
+ftjaaba_fpath_local = os.path.join(localdir, 'ftjaaba.pkl')
+# save local, too
+ftjaaba.to_pickle(ftjaaba_fpath_local)
+
 
 #%%
 # Compare velocity during singing and chasing vs. chasing only bouts
@@ -351,8 +384,24 @@ pl.subplots_adjust(wspace=0.6, right=0.9)
 putil.label_figure(fig, figid)
 
 figname = 'dist_to_other_frac-{}_p(sing_vs_chase_if_courting)_hist__{}'.format(bout_type, dataid)
-pl.savefig(os.path.join(figdir, '{}.png'.format(figname)))
+#pl.savefig(os.path.join(figdir, '{}.png'.format(figname)))
 print(figdir, figname)
+
+#%%
+# Check boxplots
+meanbouts_courting_nodist = courting.groupby(['species', 'acquisition'#'behavior', 
+                                            ]).mean().reset_index()
+
+fig, ax = plt.subplots()
+sns.boxplot(data=meanbouts_courting_nodist,
+            x='species', y='singing_binary', ax=ax,
+            hue='species', palette=species_palette, legend=0)
+sns.stripplot(data=meanbouts_courting_nodist,
+            x='species', y='singing_binary', ax=ax,
+            hue='acquisition', color='k', 
+            legend=0, jitter=False, dodge=True) #palette=species_palette, legend=1)
+ax.set_box_aspect(1)
+ax.set_ylim([0, 1])
 
 #%%
 

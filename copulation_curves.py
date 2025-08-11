@@ -21,32 +21,34 @@ import utils as util
 import plotting as putil
 
 #%%
-plot_style='dark'
+plot_style='white'
 putil.set_sns_style(plot_style, min_fontsize=18)
 bg_color = [0.7]*3 if plot_style=='dark' else 'k'
 
-#%%
-
-
 # %%
 # basedir = '/Users/julianarhee/Documents/rutalab/projects/courtship/data'
-basedir = '/Users/julianarhee/Dropbox @RU Dropbox/Juliana Rhee/MF-winged-wingless-20mm'
+#basedir = '/Users/julianarhee/Dropbox @RU Dropbox/Juliana Rhee/MF-winged-wingless-20mm'
+basedir = '/Users/julianarhee/Dropbox @RU Dropbox/Juliana Rhee/caitlin_data'
+experiment = 'multichamber_20mm_winged_v_wingless'
+
 #experiment = 'winged-wingless'
 
-csv_fpaths = glob.glob(os.path.join(basedir , '*.csv'))
+csv_fpaths = glob.glob(os.path.join(basedir, experiment, '*.csv'))
 print(csv_fpaths)
 
 #%% Set output dirs
-figdir = os.path.join(basedir, 'figures', 'copulation_curves')
+figdir = os.path.join(basedir, 'figures', experiment, 'copulation_curves')
 if not os.path.exists(figdir):
     os.makedirs(figdir)
 
 # %%
-
+with_food = True 
 # Without food
-exp_type = '_food'
-#csv_fpath = [c for c in csv_fpaths if 'food' not in c][0]
-csv_fpath = [c for c in csv_fpaths if 'food' in c][0]
+exp_type = 'food' if with_food else 'nofood'
+if with_food:
+    csv_fpath = [c for c in csv_fpaths if 'food' in c][0]
+else:
+    csv_fpath = [c for c in csv_fpaths if 'food' not in c][0]
 
 print(csv_fpath)
 df0 = pd.read_csv(csv_fpath)
@@ -82,11 +84,14 @@ for p in ax.patches:
 #                (p.get_x()+0.15, p.get_height()+1))
 
 ax.set_title("Dyak: N copulations for courting pairs",
-             loc='left', fontsize=16)
+             loc='left', fontsize=1)
 
 putil.label_figure(fig, csv_fpath)
 # Save
-pl.savefig(os.path.join(figdir, 'copulation_counts{}.png'.format(exp_type)))
+figname = 'copulation_counts_{}'.format(exp_type)
+pl.savefig(os.path.join(figdir, '{}.png'.format(figname)))
+pl.savefig(os.path.join(figdir, '{}.svg'.format(figname)))
+
 print(os.path.join(figdir, 'copulation_counts{}.png'.format(exp_type)))
 
 #%%
@@ -168,12 +173,9 @@ sns.despine(offset=4, trim=True)
 putil.label_figure(fig, csv_fpath)
 
 # save
-pl.savefig(os.path.join(figdir, 'cumulative_copulations_by_minute{}.png'.format(exp_type)))
-
-
-#%%
-
-
+figname = 'cumulative_copulations_by_minute_{}'.format(exp_type)
+pl.savefig(os.path.join(figdir, '{}.png'.format(figname)))
+pl.savefig(os.path.join(figdir, '{}.svg'.format(figname)))
 
 
 #%%

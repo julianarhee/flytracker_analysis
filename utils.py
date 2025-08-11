@@ -88,6 +88,22 @@ def circ_dist(x, y):
     r = np.angle(np.exp(1j * x) / np.exp(1j * y))
     return r
 
+# Function to keep value if all are the same, else return NaN
+def only_if_unique(x):
+    ''' 
+    Use in df.groupby().mean() type of functions to return the same value if all values are unique and non-numeric
+    
+    # Apply custom aggregation
+    result = df.groupby('group').agg(
+        {col: 'mean' if pd.api.types.is_numeric_dtype(dtype)
+        else only_if_unique
+        for col, dtype in df.dtypes.items()}
+    ).reset_index()
+
+    '''
+    if x.nunique() == 1:
+        return x.iloc[0]
+    return pd.NA
 
 
 #%% bouts
@@ -461,11 +477,14 @@ def pol2cart(rho, phi):
 # ---------------------------------------------------------------------
 # Data loading and formatting
 # ---------------------------------------------------------------------
-def load_ft_actions(found_actions_paths):
+def load_ft_actions(found_actions_paths, split_end=False):
     a_ = []
     for fp in found_actions_paths:
         actions_ = ft_actions_to_bout_df(fp)
-        basename = '_'.join(os.path.split(fp)[-1].split('_')[0:-1])
+        if split_end:
+            basename = '_'.join(os.path.split(fp)[-1].split('_')[0:-1])
+        else:
+            basename = os.path.split(fp)[-1].split('-actions')[0]
         print(basename)
         actions_['acquisition'] = basename
         #actions_['ction_num'] = actions_.index.tolist()
@@ -1272,17 +1291,20 @@ def load_flytracker_data(acq_dir, calib_is_upstream=False, fps=60,
         calib['FPS'] = fps
 
     #% Load feature mat
-    feat_ = load_feat(acq_dir, subfolder=subfolder)
-    trk_ = load_tracks(acq_dir, subfolder=subfolder)
+    try:
+        feat_ = load_feat(acq_dir, subfolder=subfolder)
+        trk_ = load_tracks(acq_dir, subfolder=subfolder)
 
-    trackdf = add_frame_nums(trk_, fps=calib['FPS'])
-    featdf = add_frame_nums(feat_, fps=calib['FPS'])
+        trackdf = add_frame_nums(trk_, fps=calib['FPS'])
+        featdf = add_frame_nums(feat_, fps=calib['FPS'])
 
-    if filter_ori:
-        # find locs where ORI info can't be trusted
-        no_wing_info = trk_[trk_[['wing_l_x', 'wing_l_y', 'wing_r_x', 'wing_r_y']].isna().sum(axis=1) == 4 ].index
-        trk_.loc[no_wing_info, 'ori'] = np.nan
-
+        if filter_ori:
+            # find locs where ORI info can't be trusted
+            no_wing_info = trk_[trk_[['wing_l_x', 'wing_l_y', 'wing_r_x', 'wing_r_y']].isna().sum(axis=1) == 4 ].index
+            trk_.loc[no_wing_info, 'ori'] = np.nan
+    except Exception as e:
+        print("ERROR: No TRACKS for {}".format(acq_dir))
+    
     return calib, trk_, feat_
 
 
