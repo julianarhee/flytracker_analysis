@@ -14,7 +14,7 @@ import pylab as pl
 import matplotlib as mpl
 import matplotlib.gridspec as gridspec
 
-from transform_data.relative_metrics import load_processed_data
+from transform_data.relative_metrics import load_processed_data, calculate_angle_metrics_focal_fly 
 import utils as util
 import plotting as putil
 
@@ -54,106 +54,129 @@ import scipy.stats as spstats
 #    df0 = pd.concat(d_list)
 #    return df0
 
-def calculate_angle_metrics_focal_fly(df0, winsize=5, grouper='acquisition',
-                                      has_size=True, fps=60):
-    assert df0['id'].nunique()==1, "Too many fly IDs, specify 1"
-
-    # df_ = df[df['acquisition']==acq].copy()
-    d_list = []
-    for acq, df_ in df0.groupby(grouper):
-        #print(acq)
-        # Calculate target angular vel
-        df_ = util.smooth_and_calculate_velocity_circvar(df_, 
-                                smooth_var='targ_pos_theta', vel_var='targ_ang_vel',
-                                time_var='sec', winsize=winsize)
-
-        # Calculate facing angle vel
-        df_ = util.smooth_and_calculate_velocity_circvar(df_, 
-                                smooth_var='facing_angle', vel_var='facing_angle_vel',)
-
-        # Calculate "theta-error"
-        try:
-            df_tmp = util.smooth_and_calculate_velocity_circvar(df_, 
-                                    smooth_var='theta_error', vel_var='theta_error_dt', 
-                                    time_var='sec', winsize=winsize)
-            assert all(np.isnan(df_tmp['theta_error']))==False
-        except AssertionError as e:
-            print("AssertionError: {}".format(e))
-            df_['theta_error_dt'] = np.nan
-        except Exception as e:
-            print("Error calculating theta error: {}".format(e))
-            df_['theta_error_dt'] = np.nan
-
-        # TMP splitiom to get vel into mm/s
-        df_['vel_fly'] = np.concatenate(
-                            (np.zeros(1), 
-                            np.sqrt(np.sum(np.square(np.diff(df_[['pos_x_smoothed', 'pos_y_smoothed']], axis=0)), 
-                            axis=1)))) / (winsize*4/fps)# /4 
-        df_.loc[df_['vel_fly']>50, 'vel_fly'] = np.nan 
-        df_['vel_fly'] = df_['vel_fly'].interpolate().ffill().bfill()
-         
-        df_ = util.smooth_and_calculate_velocity_circvar(df_, smooth_var='ori', 
-                                                            vel_var='ang_vel_fly', 
-                                                            time_var='sec', winsize=winsize)            
-        # Calculate difference in ori between consecutive rows 
-        df_['turn_size'] = df_.groupby('id')['ori'].transform(lambda x: x.diff())
-
-        # Calculate relative vel
-        df_['rel_vel'] = df_['dist_to_other'].interpolate().diff() / df_['sec'].diff().mean()
-
-        df_['ang_acc'] = df_['ang_vel'].diff() / df_['sec_diff'].mean()
-        df_['ang_acc_smoothed'] = util.smooth_orientations_pandas(df_['ang_acc'], winsize=3) 
-
-        df_['facing_angle_acc'] = df_['facing_angle_vel'].diff() / df_['sec_diff'].mean()
-
-        df_['ang_acc_fly'] = df_['ang_vel_fly'].diff() / df_['sec_diff'].mean()
-        df_['ang_acc_fly_smoothed'] = df_['ang_vel_fly_smoothed'].diff() / df_['sec_diff'].mean()
-
-        df_['theta_error_acc'] = df_['theta_error_dt'].diff() / df_['sec_diff'].mean()
-
-        d_list.append(df_)
-
-    df = pd.concat(d_list)
-
-    #%
-    df.loc[(df['ang_vel_fly']>80) | (df['ang_vel_fly']<-80), 'ang_vel_fly'] = np.nan
-
-    #% and get abs values
-    df['targ_pos_theta_deg'] = np.rad2deg(df['targ_pos_theta'])
-    df['facing_angle_deg'] = np.rad2deg(df['facing_angle'])
-    df['rel_vel'] = np.nan
-
-    df['rel_vel_abs'] = np.abs(df['rel_vel']) 
-    df['targ_ang_vel_abs'] = np.abs(df['targ_ang_vel'])
-    df['targ_pos_theta_abs'] = np.abs(df['targ_pos_theta'])
-    if has_size:
-        df['targ_ang_size_deg'] = np.rad2deg(df['targ_ang_size'])
-    df['targ_ang_vel_deg'] = np.rad2deg(df['targ_ang_vel'])
-    df['targ_ang_vel_deg_abs'] = np.abs(df['targ_ang_vel_deg'])
-    df['facing_angle_deg'] = np.rad2deg(df['facing_angle'])
-    df['ang_vel_fly_abs'] = np.abs(df['ang_vel_fly'])
-
-    df['facing_angle_vel_abs'] = np.abs(df['facing_angle_vel'])
-    df['facing_angle_vel_deg'] = np.rad2deg(df['facing_angle_vel'])
-    df['facing_angle_vel_deg_abs'] = np.abs(df['facing_angle_vel_deg'])
-
-    df['theta_error_deg'] = np.rad2deg(df['theta_error'])
-    df['theta_error_dt_deg'] = np.rad2deg(df['theta_error_dt'])
-    df['theta_error_abs'] = np.abs(df['theta_error'])
-
-    df['ang_vel_abs'] = np.abs(df['ang_vel'])
-    df['ang_vel_deg'] = np.rad2deg(df['ang_vel'])
-
-    # ftjaaba['ang_vel_abs'] = np.abs(ftjaaba['ang_vel'])
-    df['ang_vel_deg'] = np.rad2deg(df['ang_vel'])
-
-    df['ang_vel_fly_abs'] = np.abs(df['ang_vel_fly'])
-    df['ang_vel_fly_deg'] = np.rad2deg(df['ang_vel_fly'])
-    df['ang_vel_fly_abs_deg'] = np.rad2deg(df['ang_vel_fly_abs'])
-
-    return df
-
-
+# def addtional_angle_metrics_single(df_, winsize=5, fps=60, filter_funky=True):
+#     '''
+#     Calculate additional angle metrics for a single dataframe of a focal fly.
+#     Arguments:
+#         df_ -- dataframe with focal fly data
+#         winsize -- smoothing window size (default: 5)
+#         fps -- frames per second (default: 60)
+#         filter_funky -- whether to filter out funky values (default: True)
+#     '''
+#     # Calculate target angular vel
+#     df_ = util.smooth_and_calculate_velocity_circvar(df_, 
+#                             smooth_var='targ_pos_theta', vel_var='targ_ang_vel',
+#                             time_var='sec', winsize=winsize)
+# 
+#     # Calculate facing angle vel
+#     df_ = util.smooth_and_calculate_velocity_circvar(df_, 
+#                             smooth_var='facing_angle', vel_var='facing_angle_vel',)
+# 
+#     # Calculate "theta-error"
+#     try:
+#         df_tmp = util.smooth_and_calculate_velocity_circvar(df_, 
+#                                 smooth_var='theta_error', vel_var='theta_error_dt', 
+#                                 time_var='sec', winsize=winsize)
+#         assert all(np.isnan(df_tmp['theta_error']))==False
+#     except AssertionError as e:
+#         print("AssertionError: {}".format(e))
+#         df_['theta_error_dt'] = np.nan
+#     except Exception as e:
+#         print("Error calculating theta error: {}".format(e))
+#         df_['theta_error_dt'] = np.nan
+# 
+#     # TMP splitiom to get vel into mm/s
+#     df_['vel_fly'] = np.concatenate(
+#                         (np.zeros(1), 
+#                         np.sqrt(np.sum(np.square(np.diff(df_[['pos_x_smoothed', 'pos_y_smoothed']], axis=0)), 
+#                         axis=1)))) / (winsize*4/fps)# /4 
+#     df_.loc[df_['vel_fly']>50, 'vel_fly'] = np.nan 
+#     df_['vel_fly'] = df_['vel_fly'].interpolate().ffill().bfill()
+#         
+#     df_ = util.smooth_and_calculate_velocity_circvar(df_, smooth_var='ori', 
+#                                                         vel_var='ang_vel_fly', 
+#                                                         time_var='sec', winsize=winsize)            
+#     # Calculate difference in ori between consecutive rows 
+#     df_['turn_size'] = df_.groupby('id')['ori'].transform(lambda x: x.diff())
+# 
+#     # Calculate relative vel
+#     df_['rel_vel'] = df_['dist_to_other'].interpolate().diff() / df_['sec'].diff().mean()
+# 
+#     df_['ang_acc'] = df_['ang_vel'].diff() / df_['sec_diff'].mean()
+#     df_['ang_acc_smoothed'] = util.smooth_orientations_pandas(df_['ang_acc'], winsize=3) 
+# 
+#     df_['facing_angle_acc'] = df_['facing_angle_vel'].diff() / df_['sec_diff'].mean()
+# 
+#     df_['ang_acc_fly'] = df_['ang_vel_fly'].diff() / df_['sec_diff'].mean()
+#     df_['ang_acc_fly_smoothed'] = df_['ang_vel_fly_smoothed'].diff() / df_['sec_diff'].mean()
+# 
+#     df_['theta_error_acc'] = df_['theta_error_dt'].diff() / df_['sec_diff'].mean()
+# 
+#     if filter_funky:    
+#         df_.loc[(df_['ang_vel_fly']>80) | (df_['ang_vel_fly']<-80), 'ang_vel_fly'] = np.nan
+# 
+#     return df_
+  
+# def calculate_angle_metrics_focal_fly(df0, winsize=5, grouper='acquisition',
+#                                       fps=60, filter_funky=True):
+#     '''
+#     Loop through all the acquisitions (or specified by grouper) to calculate additional angle metrics for a focal fly.
+#     Arguments:
+#         df0 -- dataframe with focal fly data
+#         winsize -- smoothing window size (default: 5)
+#         grouper -- column to group by (default: 'acquisition')
+#         fps -- frames per second (default: 60)
+#         filter_funky -- whether to filter out funky values of ang vel (default: True)
+#     '''
+#     assert df0['id'].nunique()==1, "Too many fly IDs, specify 1"
+# 
+#     # df_ = df[df['acquisition']==acq].copy()
+#     d_list = []
+#     for acq, df_ in df0.groupby(grouper):
+#         #print(acq)
+#        df_ = additional_angle_metrics_single(df_, winsize=winsize, fps=fps, filter_funky=filter_funky) 
+#        d_list.append(df_)
+# 
+#     df = pd.concat(d_list)
+#     #%
+#     #df.loc[(df['ang_vel_fly']>80) | (df['ang_vel_fly']<-80), 'ang_vel_fly'] = np.nan
+# 
+#     #% and get abs values
+#     df['targ_pos_theta_deg'] = np.rad2deg(df['targ_pos_theta'])
+#     df['facing_angle_deg'] = np.rad2deg(df['facing_angle'])
+#     #df['rel_vel'] = np.nan
+# 
+#     df['rel_vel_abs'] = np.abs(df['rel_vel']) 
+#     df['targ_ang_vel_abs'] = np.abs(df['targ_ang_vel'])
+#     df['targ_pos_theta_abs'] = np.abs(df['targ_pos_theta'])
+#     if 'targ_ang_size' in df.columns: #has_size:
+#         df['targ_ang_size_deg'] = np.rad2deg(df['targ_ang_size'])
+#     df['targ_ang_vel_deg'] = np.rad2deg(df['targ_ang_vel'])
+#     df['targ_ang_vel_deg_abs'] = np.abs(df['targ_ang_vel_deg'])
+#     df['facing_angle_deg'] = np.rad2deg(df['facing_angle'])
+#     df['ang_vel_fly_abs'] = np.abs(df['ang_vel_fly'])
+# 
+#     df['facing_angle_vel_abs'] = np.abs(df['facing_angle_vel'])
+#     df['facing_angle_vel_deg'] = np.rad2deg(df['facing_angle_vel'])
+#     df['facing_angle_vel_deg_abs'] = np.abs(df['facing_angle_vel_deg'])
+# 
+#     df['theta_error_deg'] = np.rad2deg(df['theta_error'])
+#     df['theta_error_dt_deg'] = np.rad2deg(df['theta_error_dt'])
+#     df['theta_error_abs'] = np.abs(df['theta_error'])
+# 
+#     df['ang_vel_abs'] = np.abs(df['ang_vel'])
+#     df['ang_vel_deg'] = np.rad2deg(df['ang_vel'])
+# 
+#     # ftjaaba['ang_vel_abs'] = np.abs(ftjaaba['ang_vel'])
+#     df['ang_vel_deg'] = np.rad2deg(df['ang_vel'])
+# 
+#     df['ang_vel_fly_abs'] = np.abs(df['ang_vel_fly'])
+#     df['ang_vel_fly_deg'] = np.rad2deg(df['ang_vel_fly'])
+#     df['ang_vel_fly_abs_deg'] = np.rad2deg(df['ang_vel_fly_abs'])
+# 
+#     return df
+# 
+ 
 def add_jaaba_to_flydf(df, jaaba): #$jaaba_fpath) #jaaba_fname='projector_data_mel_yak_20240330'):
     #jaaba_fname = 'free_behavior_data_mel_yak_20240403' if assay=='38mm-dyad' else None
     '''
@@ -1315,6 +1338,21 @@ def annotate_axis(ax, annot_str, fontsize=6, color='k'):
                 fontsize=fontsize,
                 ha='center', va='center', color=color)
 
+
+def count_chasing_frames(ftjaaba, grouper=['species', 'acquisition']):
+    # N frames of chasing each out of all frames by acquisition in ftjaaba 
+    n_frames_chasing = ftjaaba[ftjaaba['chasing_binary']>0].groupby(grouper)['frame'].count().reset_index()
+    n_frames_chasing.rename(columns={'frame': 'n_frames_chasing'}, inplace=True)
+    
+    n_frames_total = ftjaaba.groupby(grouper)['frame'].count().reset_index()
+    n_frames_total.rename(columns={'frame': 'n_frames_total'}, inplace=True)
+    # Merge the two dataframes
+    chase_counts = n_frames_chasing.merge(n_frames_total, on=grouper, how='left')  
+    chase_counts['frac_frames_chasing'] = chase_counts['n_frames_chasing'] / chase_counts['n_frames_total']
+   
+    return chase_counts
+
+
 #%%
 
 if __name__ == '__main__':
@@ -1339,11 +1377,11 @@ if __name__ == '__main__':
 
     create_new = False
 
-    #assay = '2d_projector' # '38mm-dyad'
-    #experiment = 'circle_diffspeeds'
+    assay = '2d_projector' # '38mm-dyad'
+    experiment = 'circle_diffspeeds'
 
-    assay = '38mm_dyad' 
-    experiment = 'MF'
+    #assay = '38mm_dyad' 
+    #experiment = 'MF'
 
     #%%
     minerva_base = '/Volumes/Juliana'
@@ -1353,7 +1391,7 @@ if __name__ == '__main__':
 
     # Specify local dirs
     #local_basedir = '/Users/julianarhee/Documents/rutalab/projects/courtship/data'
-    local_basedir = '/Users/julianarhee/Dropbox @RU Dropbox/Juliana Rhee/free_behavior' 
+    local_basedir = '/Users/julianarhee/Dropbox @RU Dropbox/Juliana Rhee/free_behavior_analysis' 
     localdir = os.path.join(local_basedir, assay, experiment, 'FlyTracker')
 
     if assay == '2d_projector':
@@ -1367,7 +1405,9 @@ if __name__ == '__main__':
         srcpath= 'free_behavior_analysis/38mm_dyad/MF/FlyTracker'
         # local jaaba_file
         jaaba_fname = 'jaaba_20240403' #'jaaba_free_behavior_data_mel_yak_20240403'
-
+        # Meta fpath
+        meta_fpath = '/Volumes/Juliana/free_behavior_analysis/38mm_dyad/MF/meta/courtship-free-behavior-GG (Responses) - Form Responses 1.csv'
+        
     srcdir =  os.path.join(minerva_base, srcpath)
 
     # get local file for aggregated data
@@ -1386,6 +1426,7 @@ if __name__ == '__main__':
 
     #% Set fig id
     figid = srcdir  
+
 
     #%% Load aggregate relative metrics 
     print("Loading processed data from:", out_fpath_local)
@@ -1435,7 +1476,7 @@ if __name__ == '__main__':
         else:
             grouper = ['species', 'acquisition', 'fly_pair']
         f1 = df0[df0['id']==0].copy()
-        f1 = calculate_angle_metrics_focal_fly(f1, winsize=5, grouper=grouper,
+        f1 = rel.calculate_angle_metrics_focal_fly(f1, winsize=5, grouper=grouper,
                                                has_size=True)
 
     #%% Add JAABA to flydf
@@ -1454,6 +1495,19 @@ if __name__ == '__main__':
     # summarize what we got
     ftjaaba[['species', 'acquisition']].drop_duplicates().groupby('species').count()
 
+    #%% 
+    if assay == '38mm_dyad':
+        # Strain info
+        # Load GG metadata
+        meta = pd.read_csv(meta_fpath)
+        meta.head() 
+        incl_strains = ['WT', 'SD105N']
+        incl_acqs = meta[meta['genotype_male'].isin(incl_strains)]['logfile'].unique()
+        print(len(incl_acqs), "acquisitions with strains:", incl_strains) 
+        
+        ftjaaba = ftjaaba[ftjaaba['acquisition'].isin(incl_acqs)].copy()
+        # ftjaaba[ftjaaba['acquisition'].isin(incl_acqs)][['species', 'acquisition']].drop_duplicates().groupby('species').count()     
+    
     #%%    
     # Convert pixels to mm?
     # --------------------------------------------
@@ -1520,18 +1574,16 @@ if __name__ == '__main__':
                         & (ftjaaba['led_level']>0)    # only for PROJECTOR
                         ].copy() #.reset_index(drop=True)
     else:
-        filtdf = ftjaaba[(ftjaaba['id']==0)
-                        & (ftjaaba['targ_pos_theta']>=min_pos_theta) 
-                        & (ftjaaba['targ_pos_theta']<=max_pos_theta)
-                        & (ftjaaba['dist_to_other']>=min_dist_to_other)
-                        #& (ftjaaba['boutdur']>=min_boutdur)
-                        #& (ftjaaba['good_frames']==1) # only for PROJECTOR
-                        #& (ftjaaba['led_level']>0)    # only for PROJECTOR
-                        ].copy() #.reset_index(drop=True)
-       
+        filtdf = ftjaaba[(ftjaaba['id']==0)].copy() 
+        
+#                         & (ftjaaba['targ_pos_theta']>=min_pos_theta) 
+#                         & (ftjaaba['targ_pos_theta']<=max_pos_theta)
+#                         & (ftjaaba['dist_to_other']>=min_dist_to_other)
+#                         ].copy() #.reset_index(drop=True)
+        
     # drop rows with only 1 instance of a given subboutnum
     min_nframes = min_boutdur * 60
-    filtdf = filtdf[filtdf.groupby(['species', 'acquisition', 'subboutnum'])['subboutnum'].transform('count')>min_nframes]
+    #filtdf = filtdf[filtdf.groupby(['species', 'acquisition', 'subboutnum'])['subboutnum'].transform('count')>min_nframes]
     
     #%%
     # Get mean value of small bouts
@@ -1563,9 +1615,8 @@ if __name__ == '__main__':
         meanbouts['stim_hz'] = meanbouts['stim_hz'].apply(lambda x: min(stimhz_palette.keys(), key=lambda y:abs(y-x)))   
 
     #%% ------------------------------------------------
-    # PLOT: ANG_VEL vs. THETA_ERROR
-    # -------------------------------------------------
-    #%
+    # SCATTER PLOT: ANG_VEL vs. THETA_ERROR
+    # ------------------------------------------------- 
     pl.rcParams['axes.linewidth'] = 0.25
     xvar = 'theta_error'
     yvar = 'ang_vel_fly_shifted' #_shifted' #'ang_vel_fly_shifted' #'ang_vel' #'ang_vel_fly'
@@ -1574,6 +1625,7 @@ if __name__ == '__main__':
     plot_frames = False
     plot_example_animal = True
     min_frac_bout = 0.0
+    # ---------------------------------------------------
     species_colors = ['plum', 'lightgreen']
 
     data_type_str = 'FRAMES' if plot_frames else 'BOUTS-min-frac-bout-{}'.format(min_frac_bout)
@@ -1619,8 +1671,11 @@ if __name__ == '__main__':
                             pearsons_xloc=0.01, pearsons_yloc=1.2, 
                             figsize=figsize, annot_fontsize=6, #in_fontsize, 
                             marker_size=0.5, regr_lw=0.5, scatter_color='w')
+    
     for ax in fig.axes:
         ax.tick_params(pad=-0.1)
+        ax.set_xlim([-1.5, 1.5])
+        ax.set_ylim([-10, 10])
     sns.despine(offset=2)
      
     if plot_example_animal:    
@@ -1640,7 +1695,6 @@ if __name__ == '__main__':
     #for ax in fig.axes:
         #ax.invert_yaxis()
     #    ax.invert_xaxis()
-
     putil.label_figure(fig, figid)
     #figname = 'sct_{}_v_{}_stimhz_{}_min-frac-bout-{}'.format(yvar, xvar, species_str, min_frac_bout)
     figname = 'scatter-with-ex_{}_v_{}_{}{}_{}_{}'.format(\
@@ -1648,13 +1702,89 @@ if __name__ == '__main__':
     pl.savefig(os.path.join(figdir, '{}.png'.format(figname)))
     pl.savefig(os.path.join(figdir, '{}.svg'.format(figname)))
     print(figdir, figname)
-    
+
+    #%% 
+    # ANG_VEL vs. ERROR: Fit EACH fly pair
+    # -------------------------------------------------
+    xvar = 'theta_error'
+    yvar = 'ang_vel_fly_shifted' #_shifted' #'ang
+    fits_ = []
+    for acq, df_ in chase_.groupby('acquisition'):    
+        # Fit linear regression for each acquisition
+        lr, r2 = get_R2_ols(df_, xvar, yvar)
+        fit_tmp = pd.DataFrame({'species': df_['species'].unique()[0],
+                                'acquisition': acq,
+                                'coef': lr.coef_[0],
+                                'intercept': lr.intercept_,
+                                'r2': r2}, index=[0])
+        fits_.append(fit_tmp)        
+
+    gain_fits = pd.concat(fits_).reset_index(drop=True)
+    gain_fits['species'] = gain_fits['species'].astype('category')
+    gain_fits['acquisition'] = gain_fits['acquisition'].astype('category')
+    gain_fits['coef'] = gain_fits['coef'].astype(float)     
+     
+    # Plot
+    norm = pl.Normalize( np.floor(gain_fits['r2'].min()), 
+                         np.ceil(gain_fits['r2'].max()) )
+
+    fig, axn = pl.subplots(1, 2, figsize=(5,3), sharex=True) #, dpi=300)
+    #sns.boxplot(data=gain_fits, x='species', y='coef', ax=ax, 
+    #             palette=species_palette, linewidth=0.5, fliersize=0.5)
+    for ai, yvar in enumerate(['coef', 'intercept']):
+        ax=axn[ai]
+        sns.stripplot(data=gain_fits, x='species', y=yvar, ax=ax, 
+                    hue='r2', hue_norm=norm, palette='viridis', alpha=1, size=8, 
+                    linewidth=0.5, edgecolor=bg_color, jitter=True, legend=0)
+        ax.set_xlabel('')
+        ax.set_box_aspect(1)
+        sns.despine(ax=ax, offset=2)
+        if assay == '38mm_dyad':
+            if yvar=='coef':
+                ax.set_ylim([0, 10.5]) 
+            elif yvar == 'intercept':
+                ax.set_ylim([-0.6, 0.6])
+
+        v1 = gain_fits[gain_fits['species']=='Dyak'][yvar].values
+        v2 = gain_fits[gain_fits['species']=='Dmel'][yvar].values 
+        # Test if the two distributions are different
+        # Use the Kolmogorov-Smirnov test
+        # Use the t-test:
+        stat, pval = spstats.mannwhitneyu(v1, v2, alternative='two-sided')
+        print(yvar, stat, pval)
+        # Annotate stats with stars
+        if pval < 0.001:
+            annot_str = '***'
+        elif pval < 0.01:
+            annot_str = '**'
+        elif pval < 0.05:
+            annot_str = '*'
+        else:
+            annot_str = 'ns'
+        annotate_axis(ax, annot_str, fontsize=min_fontsize-2, color=bg_color)
+    # Plot continuous colorbar for hue variable
+    # Plot colorbar, keep subplot axes the same size
+    ax = fig.add_axes([0.92, 0.15, 0.1, 0.7])  # [left, bottom, width, height]
+    ax.axis('off')
+    sm = pl.cm.ScalarMappable(cmap='viridis', norm=norm)
+    sm.set_array([])  # Only needed for older versions of matplotlib
+    cbar = pl.colorbar(sm, ax=ax)#, fontsize=min_fontsize-4) #, pad=0.01) #shrink=1)
+    cbar.set_label('R2', fontsize=min_fontsize-2)
+    cbar.ax.tick_params(labelsize=min_fontsize-2) 
+    pl.subplots_adjust(wspace=0.7)      
+   
+    # Save 
+    putil.label_figure(fig, figid) 
+    figname = 'gain-linfits_{}_{}_{}{}_{}'.format(yvar, xvar, shift_str, hue_str, data_type_str)
+    pl.savefig(os.path.join(figdir, '{}.png'.format(figname)))
+    print(figdir, figname) 
+     
 #%%
     # Compare steering gain for FAST vs SLOW fwd vel
     # -------------------------------------------------
     # See Collie et al., 2024, Figure 4c
     plot_frames = True
-    frame_subset = 'all'
+    frame_subset = 'chase'
     min_frac_bout = 0
     # ---------------------------------------------------
     data_type = 'FRAMES' if plot_frames else 'BOUTS-min-frac-bout-{}'.format(min_frac_bout)
@@ -1675,7 +1805,7 @@ if __name__ == '__main__':
     #%%
     # PLOT: HISTOGRAM of velocity for each species 
     # and get upper and lower quartiles for each species
-    fwd_vel_var = 'vel_shifted'
+    fwd_vel_var = 'vel'
 
     # First, get top and bottom quartile of vel_shifted for each species separately
     def get_upper_lower_quartiles(mel_vel, lower=0.25, upper=0.75):
@@ -1695,8 +1825,9 @@ if __name__ == '__main__':
                                         lower=lower_q, upper=upper_q) 
 
     fig, ax = pl.subplots()
-    sns.histplot(data=chase_, x=fwd_vel_var, alpha=0.75,
-                 hue='species', bins=50, ax=ax, palette=species_palette)
+    sns.histplot(data=chase_, x=fwd_vel_var, alpha=0.6,
+                 hue='species', bins=50, ax=ax, palette=species_palette,
+                 )
     ax.axvline(mel_lower, color=species_palette['Dmel'], linestyle='--')
     ax.axvline(mel_upper, color=species_palette['Dmel'], linestyle='--')
     ax.axvline(yak_lower, color=species_palette['Dyak'], linestyle='--')
@@ -1711,7 +1842,22 @@ if __name__ == '__main__':
     
     figname = 'vel_hist_by_species_{}-{}'.format(data_type, frame_subset) 
     pl.savefig(os.path.join(figdir, '{}.png'.format(figname)))
-        
+    #%%
+    
+    chase_counts = count_chasing_frames(ftjaaba)
+    # Plot results
+    fig, ax = pl.subplots(figsize=(2, 2), dpi=300)
+    sns.barplot(data=chase_counts, x='species', y='frac_frames_chasing', 
+                 palette=species_palette, ax=ax)
+    ax.set_ylabel('Frac. chasing')
+    ax.set_xlabel('')
+    
+    putil.label_figure(fig, figid)
+    figname = 'frac_frames_chasing' 
+    pl.savefig(os.path.join(figdir, '{}.png'.format(figname)))
+    print(figdir, figname)
+    
+     
     #%%  
     # PLOT: Linear regression of steering gain:  ang_vel @ lag vs. theta_error
     # Compare slopes for FAST vs. SLOW forward velocity in each species
@@ -1957,7 +2103,8 @@ if __name__ == '__main__':
     #%%
     # PLOT: Compare ANG vs. FWD velocity:  small vs. large theta -error
     # -------------------------------------------------
-    chase_ = filtdf[filtdf['{}_binary'.format(behav)]>0].copy().reset_index(drop=True)
+    behav = 'chasing'
+    chase_ = ftjaaba[ftjaaba['{}_binary'.format(behav)]>0].copy().reset_index(drop=True)
 
     var1 = 'vel_shifted'
     var2 = 'ang_vel_shifted' #'ang_vel_fly_shifted'
@@ -1967,7 +2114,7 @@ if __name__ == '__main__':
     data_type = 'BOUTS' if use_bouts else 'FRAMES'
 
     theta_error_small_deg = 10
-    theta_error_large_deg = 35 #35
+    theta_error_large_deg = 25 #35
     theta_error_small = np.deg2rad(theta_error_small_deg)
     theta_error_large = np.deg2rad(theta_error_large_deg)
     
@@ -2006,7 +2153,7 @@ if __name__ == '__main__':
                             var1=var1, var2=var2, err_palette=err_palette, lw=1, 
                             scatter_size=scatter_size, scatter_alpha=scatter_alpha, 
                             fly_marker=fly_marker, fly_marker_size=1, 
-                            median_marker_size=2, 
+                            median_marker_size=5, 
                             plot_dir=plot_dir, axis_off=False, use_mm=True,
                             plot_scatter_axes=False, x_scale=5,
                             scatter_ylim=30, scatter_xlim=30, scatter_int=scatter_int)
@@ -2014,7 +2161,7 @@ if __name__ == '__main__':
             sns.despine(ax=ax, offset=2)
         fig.text(0.1, 0.92, 
                  '{} bouts, frac. of {} > {:.1f}, lag {} frames (small=+/-{}, large=+/-{})'.format(
-                behav, data_type, min_frac_bout, nframes_lag_plot, theta_error_small_deg, theta_error_large_deg), fontsize=4)
+                behav, data_type, min_frac_bout, nframes_lag_plot, theta_error_small_deg, theta_error_large_deg), fontsize=8)
 
         fig.text(0.1, 0.8, curr_species, fontsize=min_fontsize)
         pl.subplots_adjust(wspace=0.5, left=0.1, right=0.9, top=0.9)
@@ -2033,7 +2180,7 @@ if __name__ == '__main__':
     # PLOT: ANG vs. FWD VEL: compare BIG v SMALL error -- AVERAGE BY FLY.
     # -------------------------------------------------
     theta_error_small_deg = 10
-    theta_error_large_deg = 35 #35
+    theta_error_large_deg = 25 #35
     theta_error_small = np.deg2rad(theta_error_small_deg)
     theta_error_large = np.deg2rad(theta_error_large_deg)
     
@@ -2047,7 +2194,7 @@ if __name__ == '__main__':
     if use_bouts:
         chase_ = meanbouts[(meanbouts['{}_binary'.format(behav)]>min_frac_bout)].copy().reset_index(drop=True)
     else:
-        chase_ = filtdf[(filtdf['{}_binary'.format(behav)]>min_frac_bout)].copy().reset_index(drop=True)
+        chase_ = ftjaaba[(ftjaaba['{}_binary'.format(behav)]>min_frac_bout)].copy().reset_index(drop=True)
     chase_ = split_theta_error(chase_, theta_error_small=theta_error_small, 
                                        theta_error_large=theta_error_large)
     if 'stim_hz' in chase_.columns: #assay == '2d_projector':
@@ -2058,7 +2205,7 @@ if __name__ == '__main__':
     # Compare small vs. large theta error by fly
     # get mean from groupby, ignore non-numeric columns for mean 
     mean_by_fly = chase_.groupby(['species', 'acquisition', 'error_size'], as_index=False).agg(
-                    {col: 'mean' if pd.api.types.is_numeric_dtype(dtype)
+                    {col: 'median' if pd.api.types.is_numeric_dtype(dtype)
                     else util.only_if_unique
                     for col, dtype in filtdf.dtypes.items()}
                 ).reset_index()
@@ -2132,7 +2279,7 @@ if __name__ == '__main__':
         pl.subplots_adjust(wspace=0.6, left=0.15, right=0.9, top=0.85)
         fig.text(0.1, 0.92, 
                  '{} bouts, frac. of {} > {:.1f}, lag {} frames (small=+/-{}, large=+/-{})'.format(
-                behav, data_type, min_frac_bout, nframes_lag_plot, theta_error_small_deg, theta_error_large_deg), fontsize=4)
+                behav, data_type, min_frac_bout, nframes_lag_plot, theta_error_small_deg, theta_error_large_deg), fontsize=8)
 
         axn[0].tick_params(axis='y', which='both', pad=0)
         axn[1].tick_params(axis='y', which='both', pad=0)
@@ -2252,13 +2399,13 @@ if __name__ == '__main__':
     # -------------------------------------------------
     import pingouin as pg 
 
-    species_palette = {'Dmel': species_colors[0], 
-                       'Dyak': species_colors[1]} 
+    species_palette = {'Dmel': 'plum', 
+                       'Dyak': 'mediumseagreen'} 
    
     chase_ = filtdf[(filtdf['{}_binary'.format(behav)]>0)].copy()
 
     theta_error_small_deg = 10
-    theta_error_large_deg = 35 #35
+    theta_error_large_deg = 25 #35
     theta_error_small = np.deg2rad(theta_error_small_deg)
     theta_error_large = np.deg2rad(theta_error_large_deg) 
     chase_ = split_theta_error(chase_, theta_error_small=theta_error_small, 
@@ -2298,9 +2445,9 @@ if __name__ == '__main__':
         sns.stripplot(data=err_df, x='species', y=count_var, 
                     hue='species', palette=species_palette, 
                     dodge=True, jitter=True, s=markersize,
-                    linewidth=0.25, ax=ax, alpha=0.5)
+                    linewidth=0.25, ax=ax, alpha=1)
         ax.set_xlabel('')
-        sns.despine(ax=ax, offset=2, bottom=True)
+        sns.despine(ax=ax, offset=2, bottom=True, trim=False)
     for ax in fig.axes:
         ax.tick_params(which='both', pad=0)
         ax.set_ylabel(ylabel, labelpad=2)
@@ -2816,21 +2963,27 @@ if __name__ == '__main__':
     speed_palette = sns.color_palette('flare', n_colors=3)
     stimsize_palette = dict((k, c) for k, c in zip(sorted(means_by_stim['stimsize'].unique()),
                                                    speed_palette))
-    fig, axn = pl.subplots(1, 2, sharex=True, sharey=False, figsize=(5,3))
+    fig, axn = pl.subplots(1, 2, sharex=True, sharey=False, figsize=(6, 3))
     for ai, (sp, spdf) in enumerate(means_by_stim.groupby('species')):
         ax=axn[ai]
         sns.lineplot(data=spdf, x='stim_hz', y='chasing_binary', ax=ax,
                     hue='stimsize', errorbar='se', palette=stimsize_palette,
                     legend=ai==1)
         if ai==1:
-            sns.move_legend(ax, loc='upper right', bbox_to_anchor=(1,1), frameon=False,
+            sns.move_legend(ax, loc='upper left', bbox_to_anchor=(1,1), frameon=False,
                             title='dot size')
         ax.set_title(sp)
         ax.set_ylim([0, 0.6])
+        xlabels =['{:.1f}'.format(i) for i in np.linspace(0, 1, 6)]
+        ax.set_xticks(np.linspace(0, 1, 6), xlabels, fontsize=6)
+        ax.tick_params(axis='both', which='major', labelsize=14)
         ax.set_box_aspect(1)
-        ax.set_xlabel('Stimulus frequency (Hz)')
+        ax.set_xlabel('Stim. freq. (Hz)')
         ax.set_ylabel('p(chasing)') 
     sns.despine(offset=2, trim=False) 
+    pl.subplots_adjust(wspace=0.5, left=0.1, right=0.9)
+    
+    #pl.xticks(fontsize=10) 
    
     putil.label_figure(fig, figid)
     figname = 'pChasing_vs_stimsize_{}_{}'.format(behav, data_type)

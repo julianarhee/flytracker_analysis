@@ -486,7 +486,7 @@ def calculate_angle_metrics_focal_fly(df0, winsize=5, grouper='acquisition',
     d_list = []
     for acq, df_ in df0.groupby(grouper):
         #print(acq)
-       df_ = addtional_angle_metrics_single(df_, winsize=winsize, fps=fps, filter_funky=filter_funky) 
+       df_ = additional_angle_metrics_single(df_, winsize=winsize, fps=fps, filter_funky=filter_funky) 
        d_list.append(df_)
 
     df = pd.concat(d_list)
@@ -496,7 +496,7 @@ def calculate_angle_metrics_focal_fly(df0, winsize=5, grouper='acquisition',
     #% and get abs values
     df['targ_pos_theta_deg'] = np.rad2deg(df['targ_pos_theta'])
     df['facing_angle_deg'] = np.rad2deg(df['facing_angle'])
-    df['rel_vel'] = np.nan
+    #df['rel_vel'] = np.nan
 
     df['rel_vel_abs'] = np.abs(df['rel_vel']) 
     df['targ_ang_vel_abs'] = np.abs(df['targ_ang_vel'])

@@ -86,8 +86,10 @@ def assign_paint_conditions(df0, meta):
         elif manipulation_.startswith('both '):
             paint_side = 'both'
         df0.loc[df0['file_name']==fn, 'paint_side'] = paint_side 
-    df0['date'] = [int(a.split('_')[0]) for a in df0['acquisition']]
+        df0.loc[df0['file_name']==fn, 'genotype'] = currm['genotype_male']
 
+    df0['date'] = [int(a.split('_')[0]) for a in df0['acquisition']]
+    print("Adding genotype: {}".format(currm['genotype_male']))
     return df0
 
 
@@ -204,9 +206,9 @@ meta = meta0[(meta0['tracked in matlab and checked for swaps']==1)
 meta['acquisition'] = ['_'.join( [f.split('-')[0], f.split('_')[1]] ) for f in meta['file_name']]
 meta.head()
 
-meta1 = meta0[(meta0['tracked in matlab and checked for swaps']==1)
-             & (meta0['exclude']==0) ].copy()
-meta1[(meta1['manipulation_male']=='no paint ')].groupby(['species_male', 'stim_direction'])['file_name'].nunique()
+#meta1 = meta0[(meta0['tracked in matlab and checked for swaps']==1)
+#             & (meta0['exclude']==0) ].copy()
+#meta1[(meta1['manipulation_male']=='no paint ')].groupby(['species_male', 'stim_direction'])['file_name'].nunique()
 
 #%%
 # Found all video directories for this experiment
@@ -229,7 +231,7 @@ else:
 
 #%%
 # Load transformed data
-create_new=False
+create_new=True
 retransform_data = False
 # --------------------------------
 # Output filepath for transformed data 
@@ -256,6 +258,7 @@ if create_new:
         print(counter)        
         
     # Assign paint conditions
+    print("Assigning paint conditions to DataFrame")
     df0 = assign_paint_conditions(df0, meta0)
     
     # Save the DataFrame to a pickle file
@@ -266,7 +269,9 @@ else:
     # Load existing data
     df0 = pd.read_pickle(output_fpath)
     print("Loaded transformed data from {}".format(output_fpath))
-    
+
+print(df0['genotype'].unique())
+  
 #%%
 # Check counts
 def print_condition_counts(df0):
@@ -283,7 +288,13 @@ df0 = util.add_stim_hz(df0, n_frames=24000, n_epochs=10)
 bout_dur = 0.20
 df0 = util.subdivide_into_subbouts(df0, bout_dur=bout_dur, grouper='file_name')
 
+
 #%%
+
+fn = '20250701-1613_fly3_Dmel-LC10aS-KIR_1do_gh_1dR'
+#lots of NaNs in first half of array, but correct dur (48000, i.e., 24000 frames per ID)
+
+
 #%%
 # Assign manual chasing labels
 # --------------------------------
@@ -295,7 +306,7 @@ df0['file_name'] = df0['file_name'].astype('category')
 chase_meta = []
 has_jaaba = []
 for fn, df_ in df0.groupby('file_name'):
-    fp = df_['fpath'].unique()[0]
+    fp = [i for i in df_['fpath'].unique() if isinstance(i, str)][0]
     # Find actions path
     action_fpath = fp.replace('-track', '-actions')
     if os.path.exists(action_fpath):
@@ -376,16 +387,21 @@ annotated = [
 #df1.groupby(['paint_side', 'paint_coverage'])['acquisition'].nunique()
 
 # species  paint_side  paint_coverage    
-# Dmel     left        whole eye             1
-#          right       whole eye             1
-# Dyak     both        back 1/2 vertical     4
-#                      front 1/2 vertical    2
-#          left        whole eye             6
-#          right       whole eye             7
+# Dmel     both        front 1/4 vertical     6
+#          left        whole eye              1
+#          none        none                   8
+#          right       whole eye              1
+# Dyak     both        back 1/2 vertical      6
+#                      front 1/2 vertical     5
+#                      front 1/4 parallel     3
+#                      front 1/4 vertical     4
+#          left        whole eye              7
+#          none        none                  13
+#          right       whole eye              8
 # Name: acquisition, dtype: int64
  
 #%%
-coverage = 'back 1/2 vertical' # 'whole eye ' # 'front 1/2 vertical' #'whole eye '
+coverage = 'front 1/4 parallel' # 'whole eye ' # 'front 1/2 vertical' #'whole eye '
 side = 'both'
 df = df0[(df0['paint_side']==side)
        & (df0['paint_coverage']==coverage)].copy()
@@ -403,8 +419,7 @@ for fn, df_ in df.groupby('file_name'):
 # Add additional metrics
 import theta_error as the
 f1 = df[df['id']==0].copy()
-f1 = the.calculate_angle_metrics_focal_fly(f1, winsize=5, grouper='file_name',
-                                           has_size=False)
+f1 = rel.calculate_angle_metrics_focal_fly(f1, winsize=5, grouper='file_name')
 f1['targ_ang_vel_abs'] = np.abs(f1['targ_ang_vel'])
 f1 = the.shift_variables_by_lag(f1, lag=2)
     
@@ -522,7 +537,10 @@ for sp, tmpdf in plotd.groupby('species'):
                                 markersize=markersize, plot_com=plot_com,
                                 bg_color=bg_color, cmap=cmap, alpha=0.75,
                                 edgecolor=bg_color, lw=0.1)
-            
+            # plot grid
+            ax.axvline(x=0, color=bg_color, linestyle='--', lw=0.5)
+            ax.axhline(y=0, color=bg_color, linestyle='--', lw=0.5)
+           
             paint_coverage = df_['paint_coverage'].unique()[0]
             paint_side = df_['paint_side'].unique()[0]
             cond_str = '{}_{}_{}'.format(sp, paint_coverage, paint_side) 
@@ -543,8 +561,7 @@ for sp, tmpdf in plotd.groupby('species'):
     plt.subplots_adjust(hspace=0.2, wspace=0.5, top=0.8, left=0.1)
     fig.text(0.1, 0.96, 
             '{}: Chasing frames, min stim_hz: {:.3f}'.format(cond_str, min_courted_stimhz), fontsize=8)
-     
-     
+      
     # save 
     putil.label_figure(fig, figid, fontsize=4, y=1.0)
     figname = '{}_{}_egoc_hue-stimhz_{}'.format(cond_str.replace('/', '-'), sp, clf_str)

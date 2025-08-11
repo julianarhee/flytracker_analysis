@@ -95,7 +95,8 @@ bg_color = [0.7]*3 if plot_style=='dark' else 'k'
 
 # Set directories
 # Main assay containing all the acquisitions
-assay = '38mm_dyad' #'38mm_projector'
+#assay = '38mm_dyad' #'38mm_projector'
+assay = '38mm_projector'
 
 if assay == '38mm_projector':
     # Dropbox/source directory:
@@ -157,7 +158,7 @@ if not os.path.exists(figdir):
 print("saving figures to {}".format(figdir))
 
 #%% 
-create_new = True
+create_new = False
 reassign_acquisition = assay == '38mm_projector'
 if create_new:
     # Transform data 
@@ -206,8 +207,8 @@ else:
     f1 = df0[df0['id']==0].copy()
 #%%
 # Add additional metrics
-f1 = the.calculate_angle_metrics_focal_fly(f1, winsize=5, grouper=grouper,
-                                           has_size=False)
+f1 = rel.calculate_angle_metrics_focal_fly(f1, winsize=5, grouper=grouper)
+
 #%%
 f1 = the.shift_variables_by_lag(f1, lag=2)
 f1['ang_vel_fly_shifted_abs'] = np.abs(f1['ang_vel_fly_shifted'])
@@ -217,7 +218,25 @@ f1['ang_vel_fly_shifted_abs'] = np.abs(f1['ang_vel_fly_shifted'])
 species_palette = {'Dmel': 'plum', 'Dyak': 'mediumseagreen'}
 
 #%%
-chase_ = f1.copy()
+#chase_ = f1.copy()
+
+min_vel = 5
+max_targ_pos_theta = 180
+min_targ_pos_theta = -180
+max_facing_angle = 45
+min_wing_ang = 0
+max_dist_to_other = 20
+
+chase_ = f1[ #(f1['sex']=='m') #(tdf['id']%2==0)
+         (f1['vel'] >= min_vel)
+        & (f1['targ_pos_theta'] <= max_targ_pos_theta)
+        & (f1['targ_pos_theta'] >= min_targ_pos_theta)
+        & (f1['facing_angle'] <= max_facing_angle)
+        & (f1['max_wing_ang'] >= min_wing_ang)
+        & (f1['dist_to_other'] <= max_dist_to_other)
+        ].copy()
+        
+#%%
 yvar = 'ang_vel_fly_shifted'
 chase_['theta_error_deg'] = np.rad2deg(chase_['theta_error'])
 start_bin = -180
@@ -255,7 +274,7 @@ for si, (sdir, plotd) in enumerate(avg_ang_vel.groupby('stim_direction')):
     ax.set_ylabel('Ang. vel. shifted (rad/s)')
   
 figname = 'turns_by_objectpos_{}_by_stimdir'.format(yvar)
-print(figname)
+print(figdir, figname)
 #plt.savefig(os.path.join(figdir, '{}.png'.format(figname)))
 
 #%%
@@ -265,7 +284,12 @@ fig, axn = plt.subplots(1, 2, figsize=(8, 4), sharex=True, sharey=True)
 for si, (sp, plotd) in enumerate(avg_ang_vel.groupby('species')):
     #plotd = avg_ang_vel[avg_ang_vel['species']=='Dyak'].copy()
     ax=axn[si]
-    sns.lineplot(data=plotd, x='binned_theta_error', y=yvar, ax=ax,
+    if assay == '38mm_projector':
+        sns.lineplot(data=plotd, x='binned_theta_error', y=yvar, ax=ax,
+                    hue='stim_direction', palette=stim_palette, 
+                    errorbar='se', marker='o') #errwidth=0.5)
+    else:
+        sns.lineplot(data=plotd, x='binned_theta_error', y=yvar, ax=ax,
                     #hue='stim_direction', palette=stim_palette, ax=ax,
                     errorbar='se', marker='o') #errwidth=0.5)
     ax.axvline(x=0, color=bg_color, linestyle='--', lw=0.5)
@@ -285,7 +309,7 @@ for si, (sp, plotd) in enumerate(avg_ang_vel.groupby('species')):
     #putil.label_figure(fig, figid) 
     
 figname = 'turns_by_objectpos_{}_CCW-CW_{}'.format(yvar, sp)
-print(figname)
-plt.savefig(os.path.join(figdir, '{}.png'.format(figname))) 
+print(figdir, figname)
+#plt.savefig(os.path.join(figdir, '{}.png'.format(figname))) 
     
 # %%
