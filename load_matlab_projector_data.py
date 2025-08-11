@@ -54,7 +54,7 @@ def aggr_matstruct_to_df(mstruct, structname='feat_fly', fps=60):
 # Load the .mat file
 #mat_fpath = '/Volumes/Giacomo/MATLAB/free_behavior_data_mel_yak_20240403.mat'
 #minerva_base = '/Volumes/Giacomo/MATLAB Data'
-minerva_base = '/Users/julianarhee/Documents/rutalab/projects/courtship/data/MF/38mm-dyad'
+minerva_base = '/Users/julianarhee/Documents/rutalab/projects/courtship/data/38mm-dyad/MF'
 fn = 'free_behavior_data_mel_yak_20240403'
 #fn = 'projector_data_mel_yak_20240330'
 #fn = 'projector_data_elegans_all_20240325'
@@ -71,8 +71,8 @@ if assay == '2d-projector':
     alt_destdir = '/Users/julianarhee/Documents/rutalab/projects/courtship/data/2d-projector/JAABA'
 else:
     assert assay == '38mm-dyad'
-    destdir = '/Volumes/Juliana/free-behavior-analysis/MF/FlyTracker/38mm_dyad'
-    alt_destdir = '/Users/julianarhee/Documents/rutalab/projects/courtship/data/MF/38mm-dyad/giacomo'
+    destdir = '/Volumes/Juliana/free-behavior-analysis/38mm_dyad/MF/FlyTracker/processed'
+    alt_destdir = '/Users/julianarhee/Documents/rutalab/projects/courtship/data/38mm-dyad/MF/giacomo'
 if not os.path.exists(destdir):
     os.makedirs(destdir)
 if not os.path.exists(alt_destdir):
@@ -131,8 +131,7 @@ outfile = os.path.join(destdir, '{}_jaaba.pkl'.format(fname)) # os.path.splitext
 #elif 'elegans' in mat_fpath:
 #    outfile = os.path.join(destdir, 'jaaba_transformed_data_elegans.pkl')
 print("Saved: {}".format(outfile))
-
-df.to_pickle(outfile)
+#df.to_pickle(outfile)
 
 df.to_pickle(os.path.join(alt_destdir, os.path.split(outfile)[1]))
 
