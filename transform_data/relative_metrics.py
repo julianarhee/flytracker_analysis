@@ -335,7 +335,7 @@ def get_copulation_ix(acq,
 
     return cop_ix
 
-def get_video_cap(acqdir, ftname=None, movie_fmt='avi'):
+def get_video_cap(acqdir, ftname=None, movie_fmt='avi', verbose=False):
     if ftname is None:
         vids = util.get_videos(acqdir, vid_type=movie_fmt)
     else:
@@ -356,7 +356,8 @@ def get_video_cap(acqdir, ftname=None, movie_fmt='avi'):
         assert len(vids)==1, "Found more than one video in directory: {}".format(vids)  
 
     vidpath = vids[0]
-    print(vidpath)
+    if verbose:
+        print("Found video:", vidpath)
 
     cap = cv2.VideoCapture(vidpath)
     return cap
@@ -405,11 +406,134 @@ def calculate_heading(df_, winsize=5):
 
     return df_
 
+def additional_angle_metrics_single(df_, winsize=5, fps=60, filter_funky=True):
+    '''
+    Calculate additional angle metrics for a single dataframe of a focal fly.
+    Arguments:
+        df_ -- dataframe with focal fly data
+        winsize -- smoothing window size (default: 5)
+        fps -- frames per second (default: 60)
+        filter_funky -- whether to filter out funky values (default: True)
+    '''
+    # Calculate target angular vel
+    df_ = util.smooth_and_calculate_velocity_circvar(df_, 
+                            smooth_var='targ_pos_theta', vel_var='targ_ang_vel',
+                            time_var='sec', winsize=winsize)
+
+    # Calculate facing angle vel
+    df_ = util.smooth_and_calculate_velocity_circvar(df_, 
+                            smooth_var='facing_angle', vel_var='facing_angle_vel',)
+
+    # Calculate "theta-error"
+    try:
+        df_tmp = util.smooth_and_calculate_velocity_circvar(df_, 
+                                smooth_var='theta_error', vel_var='theta_error_dt', 
+                                time_var='sec', winsize=winsize)
+        assert all(np.isnan(df_tmp['theta_error']))==False
+    except AssertionError as e:
+        print("AssertionError: {}".format(e))
+        df_['theta_error_dt'] = np.nan
+    except Exception as e:
+        print("Error calculating theta error: {}".format(e))
+        df_['theta_error_dt'] = np.nan
+
+    # TMP splitiom to get vel into mm/s
+    df_['vel_fly'] = np.concatenate(
+                        (np.zeros(1), 
+                        np.sqrt(np.sum(np.square(np.diff(df_[['pos_x_smoothed', 'pos_y_smoothed']], axis=0)), 
+                        axis=1)))) / (winsize*4/fps)# /4 
+    df_.loc[df_['vel_fly']>50, 'vel_fly'] = np.nan 
+    df_['vel_fly'] = df_['vel_fly'].interpolate().ffill().bfill()
+        
+    df_ = util.smooth_and_calculate_velocity_circvar(df_, smooth_var='ori', 
+                                                        vel_var='ang_vel_fly', 
+                                                        time_var='sec', winsize=winsize)            
+    # Calculate difference in ori between consecutive rows 
+    df_['turn_size'] = df_.groupby('id')['ori'].transform(lambda x: x.diff())
+
+    # Calculate relative vel
+    df_['rel_vel'] = df_['dist_to_other'].interpolate().diff() / df_['sec'].diff().mean()
+
+    df_['ang_acc'] = df_['ang_vel'].diff() / df_['sec_diff'].mean()
+    df_['ang_acc_smoothed'] = util.smooth_orientations_pandas(df_['ang_acc'], winsize=3) 
+
+    df_['facing_angle_acc'] = df_['facing_angle_vel'].diff() / df_['sec_diff'].mean()
+
+    df_['ang_acc_fly'] = df_['ang_vel_fly'].diff() / df_['sec_diff'].mean()
+    df_['ang_acc_fly_smoothed'] = df_['ang_vel_fly_smoothed'].diff() / df_['sec_diff'].mean()
+
+    df_['theta_error_acc'] = df_['theta_error_dt'].diff() / df_['sec_diff'].mean()
+
+    if filter_funky:    
+        df_.loc[(df_['ang_vel_fly']>80) | (df_['ang_vel_fly']<-80), 'ang_vel_fly'] = np.nan
+
+    return df_
+ 
+def calculate_angle_metrics_focal_fly(df0, winsize=5, grouper='acquisition',
+                                      fps=60, filter_funky=True):
+    '''
+    Loop through all the acquisitions (or specified by grouper) to calculate additional angle metrics for a focal fly.
+    Arguments:
+        df0 -- dataframe with focal fly data
+        winsize -- smoothing window size (default: 5)
+        grouper -- column to group by (default: 'acquisition')
+        fps -- frames per second (default: 60)
+        filter_funky -- whether to filter out funky values of ang vel (default: True)
+    '''
+    assert df0['id'].nunique()==1, "Too many fly IDs, specify 1"
+
+    # df_ = df[df['acquisition']==acq].copy()
+    d_list = []
+    for acq, df_ in df0.groupby(grouper):
+        #print(acq)
+       df_ = addtional_angle_metrics_single(df_, winsize=winsize, fps=fps, filter_funky=filter_funky) 
+       d_list.append(df_)
+
+    df = pd.concat(d_list)
+    #%
+    #df.loc[(df['ang_vel_fly']>80) | (df['ang_vel_fly']<-80), 'ang_vel_fly'] = np.nan
+
+    #% and get abs values
+    df['targ_pos_theta_deg'] = np.rad2deg(df['targ_pos_theta'])
+    df['facing_angle_deg'] = np.rad2deg(df['facing_angle'])
+    df['rel_vel'] = np.nan
+
+    df['rel_vel_abs'] = np.abs(df['rel_vel']) 
+    df['targ_ang_vel_abs'] = np.abs(df['targ_ang_vel'])
+    df['targ_pos_theta_abs'] = np.abs(df['targ_pos_theta'])
+    if 'targ_ang_size' in df.columns: #has_size:
+        df['targ_ang_size_deg'] = np.rad2deg(df['targ_ang_size'])
+    df['targ_ang_vel_deg'] = np.rad2deg(df['targ_ang_vel'])
+    df['targ_ang_vel_deg_abs'] = np.abs(df['targ_ang_vel_deg'])
+    df['facing_angle_deg'] = np.rad2deg(df['facing_angle'])
+    df['ang_vel_fly_abs'] = np.abs(df['ang_vel_fly'])
+
+    df['facing_angle_vel_abs'] = np.abs(df['facing_angle_vel'])
+    df['facing_angle_vel_deg'] = np.rad2deg(df['facing_angle_vel'])
+    df['facing_angle_vel_deg_abs'] = np.abs(df['facing_angle_vel_deg'])
+
+    df['theta_error_deg'] = np.rad2deg(df['theta_error'])
+    df['theta_error_dt_deg'] = np.rad2deg(df['theta_error_dt'])
+    df['theta_error_abs'] = np.abs(df['theta_error'])
+
+    df['ang_vel_abs'] = np.abs(df['ang_vel'])
+    df['ang_vel_deg'] = np.rad2deg(df['ang_vel'])
+
+    # ftjaaba['ang_vel_abs'] = np.abs(ftjaaba['ang_vel'])
+    df['ang_vel_deg'] = np.rad2deg(df['ang_vel'])
+
+    df['ang_vel_fly_abs'] = np.abs(df['ang_vel_fly'])
+    df['ang_vel_fly_deg'] = np.rad2deg(df['ang_vel_fly'])
+    df['ang_vel_fly_abs_deg'] = np.rad2deg(df['ang_vel_fly_abs'])
+
+    return df
+
 
 def do_transformations_on_df(trk_, frame_width, frame_height, 
                              feat_=None,
                              cop_ix=None, flyid1=0, flyid2=1,
-                             verbose=False, get_relative_sizes=True):
+                             verbose=False, get_relative_sizes=True, 
+                             winsize=5, fps=60):
     '''
     Transform coordinates to focal fly (do it for both fly1 and fly2).
     Also calculate additional metrics based on these relative positions.
@@ -507,6 +631,7 @@ def do_transformations_on_df(trk_, frame_width, frame_height,
     fly2 = calculate_theta_error(fly2, fly1)
     fly2 = calculate_theta_error_from_heading(fly2, fly1)
 
+
     # recombine trk df
     trk = pd.concat([fly1.iloc[:cop_ix], fly2.iloc[:cop_ix]], axis=0).reset_index(drop=True)#.sort_index()
     trk['copulation'] = copulation
@@ -535,6 +660,13 @@ def do_transformations_on_df(trk_, frame_width, frame_height,
                                 value_var='dist_to_other', time_var='sec')
             f_list.append(df_.reset_index(drop=True).iloc[:cop_ix])
         df = pd.concat(f_list, axis=0).reset_index(drop=True) #.sort_index()
+
+
+    # Add addtional angular metrics (like ang_vel_fly and smoothing)
+    f1 = additional_angle_metrics_single(df[df['id']==flyid1].copy(), winsize=winsize, fps=fps, filter_funky=True)
+    f2 = additional_angle_metrics_single(df[df['id']==flyid2].copy(), winsize=winsize, fps=fps, filter_funky=True)
+    # Recombine f1 and f2
+    df = pd.concat([f1, f2], axis=0).reset_index(drop=True) #.so
 
     #acq = os.path.split(acqdir)[-1]
 
