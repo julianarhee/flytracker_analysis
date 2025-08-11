@@ -39,10 +39,7 @@ def get_meta_data_for_experiment(meta_fpath):
     '''
     Get metadata for a specific experiment from dstdir.
     
-    Args:
-        dstdir (str): Directory where metadata files are stored.
-        experiment (str): Name of the experiment to find metadata for. Parent folder of all acquisition folders. 
-        Should be the same name as .csv tab on meta data google sheets.
+    meta_fpath: Path to meta .csv file.
     '''
 #     meta_fpaths = glob.glob(os.path.join(dstdir, '*{}.csv'.format(experiment)))
 #     if len(meta_fpaths) > 1:
@@ -52,7 +49,7 @@ def get_meta_data_for_experiment(meta_fpath):
 #     else:
 #         print("Found metadata file: {}".format(meta_fpaths[0]))
 #     meta_fpath = meta_fpaths[0]
-     allmeta = pd.read_csv(meta_fpath)
+    allmeta = pd.read_csv(meta_fpath)
     if 'acquisition' not in allmeta.columns:
         allmeta['acquisition'] = allmeta['file_name']
         
@@ -62,8 +59,7 @@ def get_google_sheets_name(meta_fpath):
     
     return os.path.splitext(os.path.split(meta_fpath)[-1].split('- ')[-1])[0]
 
-
-def get_all_meta_data(dstdir, experiment='strains', return_all=False):
+def get_all_meta_data(meta_parentdir, experiment='strains', return_all=False):
     '''
     Gets metadata for all 2x2 (or other) multichamber assays.
     Assumes .csv files are in dstdir, and have 2x2 in name.
@@ -74,7 +70,7 @@ def get_all_meta_data(dstdir, experiment='strains', return_all=False):
                           Should be the same name as .csv tab on meta data google sheets.
         return_all (bool): If True, returns all_metadata, strain_metadata, otherwise only strain metadata.
     '''
-    meta_fpaths = glob.glob(os.path.join(dstdir, '*.csv'))
+    meta_fpaths = glob.glob(os.path.join(meta_parentdir, '*.csv'))
     meta_list = []
     for meta_fpath in meta_fpaths:
         print(meta_fpath)
@@ -126,6 +122,7 @@ def load_feat_and_trk(acqdir):
     # merge feat_ and trk_ by index, drop duplicate columns
     feat_trk = pd.merge(feat_, trk_[unique_cols], how='inner', left_index=True, right_index=True,
                         suffixes=('', ''))
+    acq = os.path.split(acqdir)[-1]
     feat_trk['acquisition'] = acq
     
     return feat_trk
@@ -175,7 +172,7 @@ def meta_flynum_to_ft_id(array_size='3x3'):
     
     return flynum_to_id
 
-def assign_conditions_to_multichamber(feat_trk, meta, array_size='3x3'):
+def assign_conditions_to_multichamber(feat_trk, meta, acq, array_size='3x3'):
     ''' 
     Assign winged/wing (or other conditions) to high-throughput multichamber data.
     Also adds acquisition and frame numnber. Assumes even is male, odd female.
@@ -317,7 +314,7 @@ def transform_multichamber_data(acqdir, feat_, trk_, cop_dict):
     '''
     For multi-arena acquisition, transform the data to get relative positions
     '''
-    cap = rel.get_video_cap(acqdir, movie_fmt='.avi')
+    cap = rel.get_video_cap(acqdir, movie_fmt='.avi', verbose=False)
     n_frames = cap.get(cv2.CAP_PROP_FRAME_COUNT)
     frame_width  = cap.get(cv2.CAP_PROP_FRAME_WIDTH)   # float `width`
     frame_height = cap.get(cv2.CAP_PROP_FRAME_HEIGHT)  # float `height`
@@ -338,7 +335,9 @@ def transform_multichamber_data(acqdir, feat_, trk_, cop_dict):
                                 feat_=curr_feat, cop_ix=cop_ix,
                                 flyid1=flyid1, flyid2=flyid2, 
                                 get_relative_sizes=False)
-        
+        transf_df['acquisition'] = os.path.split(acqdir)[-1]
+        transf_df['fly_pair'] = flypair
+         
         assert len(transf_df[transf_df['id']==flyid1]) == len(transf_df[transf_df['id']==flyid2]), 'Different number of frames for each fly'
         assert len(transf_df[transf_df['id']==flyid1]['frame']) == len(transf_df[transf_df['id']==flyid1]['frame'].unique()), 'Non-unique frames'
         assert transf_df.shape[0] == transf_df.index[-1]+1, "Bad frame indexing"
@@ -348,21 +347,34 @@ def transform_multichamber_data(acqdir, feat_, trk_, cop_dict):
 
     return acq_df
 
-def process_multichamber_acquisitions(acq_dirs, processed_outdir, allmeta0,
+def process_multichamber_acquisitions(acq_dirs, processed_mat_dir, allmeta0,
                                         fps=60, mov_is_upstream=False,
                                         subfolder='*', filter_ori=True,
                                         array_size='3x3'):  
     '''
     Load and aggregate transformed data for multichamber assays.
+    Args:
+        acq_dirs (list): List of acquisition directories to process.
+        processed_outdir (str): Directory where processed data files are stored (processed_mats).
+        allmeta0 (pd.DataFrame): Metadata for all acquisitions (from Google Sheets)
+        fps (float): Frame rate of the acquisition.
+        mov_is_upstream (bool): If True, assumes the movie is upstream.
+        subfolder (str): Subfolder to look for feat and trk files.
+        filter_ori (bool): If True, filters orientation in the data.
+        array_size (str): Size of the multichamber array (e.g., '2x2', '3x3').
+    Returns:
+        None: Saves processed data to processed_outdir as parquet files.
     '''
     no_actions = []
     d_list = []
        
     for acqdir in acq_dirs:
         acq = os.path.split(acqdir)[-1]
-        out_fpath = os.path.join(processed_outdir, '{}_df.parquet'.format(acq))
+        out_fpath = os.path.join(processed_mat_dir, '{}_df.parquet'.format(acq))
          
         print("Processing acquisition: {}".format(acq))
+        
+        # Load FlyTracker output from acquisition directory
         calib_, trk_, feat_ = util.load_flytracker_data(acqdir, 
                                     fps=fps, 
                                     calib_is_upstream=mov_is_upstream,
@@ -370,7 +382,8 @@ def process_multichamber_acquisitions(acq_dirs, processed_outdir, allmeta0,
                                     filter_ori=True)
         if 'acquisition' not in trk_.columns:
             trk_['acquisition'] = acq
-        # Get meta info for current acquisition
+            
+        # Select meta info for current acquisition
         meta = allmeta0[allmeta0['acquisition']==acq]
 
         # Check that the number of unique fly ids in feat_trk is 2x as the number of unique fly pairs in meta
@@ -390,7 +403,7 @@ def process_multichamber_acquisitions(acq_dirs, processed_outdir, allmeta0,
             print("No actions file for {}".format(acq))
             no_actions.append(acq)
             cop_dict = dict((k, -1) for k in trk_['id'].unique()) 
-            
+            continue 
         # for i, df_ in df.groupby('id'):
         #     cop_ix = cop_dict[i]
         #     # Only take frames up to copulation
@@ -406,30 +419,30 @@ def process_multichamber_acquisitions(acq_dirs, processed_outdir, allmeta0,
 
 #%%
 
-    #%%
+#%%
 def load_aggregate_datafile(save_fpath):
     
     df0 = pd.read_parquet(save_fpath)
 
     return df0
 
-def check_for_processed_file(processed_outdir, acqs):
+def check_if_processed_file_exists(processed_mat_dir, acqs):
     '''
     Check if processed data file exists for a given acquisition.
     Args:
-        processed_outdir (str): Directory where processed data files are stored (processed_mats).
-        acq (str): Acquisition name to check for.
+        processed_mat_dir (str): Directory where processed data files are stored (processed_mats).
+        acqs (list): List of acquisition names to check for in processed_mat_dir.
     Returns:
         bool: True if processed file exists, False otherwise.
     '''
     not_found = []
     for acq in acqs:
-        out_fpath = os.path.join(processed_outdir, '{}_df.parquet'.format(acq))
+        out_fpath = os.path.join(processed_mat_dir, '{}_df.parquet'.format(acq))
         if not os.path.exists(out_fpath):
-            not_found.appedn(acq)
+            not_found.append(acq)
     return not_found
 
-def cycle_and_load_processed_acquisitions(processed_outdir, acqs=None):
+def cycle_and_load_processed_acquisitions(processed_mat_dir, acqs=None):
     ''' Cycle through all processed acquisition directories and load data.
     Args:
         acq_dirs (list): List of acquisition directories to process.
@@ -441,16 +454,19 @@ def cycle_and_load_processed_acquisitions(processed_outdir, acqs=None):
     d_list = []
     if acqs is None:
         # Load/aggregate ALL processed data found in processed_outdir
-        out_fpaths = glob.glob(os.path.join(processed_outdir, '*_df.parquet'))
+        print("Loading all processed data from {}".format(processed_mat_dir))
+        out_fpaths = glob.glob(os.path.join(processed_mat_dir, '202*_df.parquet'))
         print("Found {} processed files.".format(len(acqs)))
     else:
         print("Processing {} acquisitions.".format(len(acqs)))
-        out_fpaths = [os.path.join(processed_outdir, '{}_df.parquet'.format(acq)) for acq in acqs]  
+        out_fpaths = [os.path.join(processed_mat_dir, '{}_df.parquet'.format(acq)) for acq in acqs]  
         
     for out_fpath in out_fpaths:
-        acq = os.path.split(f)[-1].replace('_df.parquet', '') 
+        acq = os.path.split(out_fpath)[-1].replace('_df.parquet', '') 
         if os.path.exists(out_fpath):
             acq_df = pd.read_parquet(out_fpath)
+            if 'acquisition' not in acq_df.columns:
+                acq_df['acquisition'] = acq
             d_list.append(acq_df)
         else:
             print("No processed data for {}".format(acq))
@@ -472,21 +488,23 @@ def cycle_and_load_processed_acquisitions(processed_outdir, acqs=None):
 
     return df0
 
-def aggregate_and_save_acquisitions(processed_outdir, save_fpath, acqs=None):
+def aggregate_and_save_acquisitions(processed_mat_dir, save_fpath, acqs=None):
     '''
     Aggregate processed data from multichamber assays and save to local directory.
     Args:
         processed_outdir (str): Directory where processed data files are stored (processed_mats).
         savedir (str): Directory where aggregated data will be saved as parquet file.
+        acqs (list, optional): List of acquisition names to process. If None, processes all found in processed_outdir.
+    Returns:
+        df0 (pd.DataFrame): Aggregated DataFrame containing all processed data.        
     '''
 #     aggregate_processed_datafile = os.path.join(savedir, 
 #                                             '38mm_strains_df.parquet')
 #     aggregate_processed_datafile_all = os.path.join(savedir, 
 #                                             '38mm_all_df.parquet')
 
-
     # Aggregate all processed data
-    df0 = cycle_and_load_processed_acquisitions(processed_outdir, 
+    df0 = cycle_and_load_processed_acquisitions(processed_mat_dir, 
                                                         acqs=acqs) 
     # Save to local directory
     df0.to_parquet(save_fpath, engine='pyarrow', compression='snappy')        
@@ -496,7 +514,7 @@ def aggregate_and_save_acquisitions(processed_outdir, save_fpath, acqs=None):
     
     
 #%% 
-def aggregate_main_from_meta(dstdir, array_size='2x2', save_fname='38mm_2x2_strains',
+def aggregate_wt_strains_from_meta(processed_mat_dir, meta_parentdir, array_size='2x2', save_fname='38mm_2x2_strains',
                         create_new=True, fps=60, 
                         rootdir='/Users/julianarhee/Dropbox @RU Dropbox/Juliana Rhee/caitlin_data',
                         remake_acquisition=False):
@@ -505,31 +523,51 @@ def aggregate_main_from_meta(dstdir, array_size='2x2', save_fname='38mm_2x2_stra
     Args:
         rootdir (str): Parent directory of experiment folder that in turn contains acquisiton folders.
         # rootdir default is dropbox caitlin_data: need this to get all the different sources of meta data
-        dstdir (str): Directory where processed data will be saved.
+        processed_mat_dir (str): Directory where processed data _df files exist.
+        meta_parentdir (str): Parent directory where metadata .csv files are stored.
+        rootdir (str): Root directory containing all experiment folders, including JAABA_classifiers folder
+        save_fname (str): Name of the file to save aggregated data (without extension).
+        remake_acquisition (bool): If True, re-processes all acquisitions even if processed files
         array_size (str): Size of the multichamber array (e.g., '2x2', '3x3').
         experiment (str): Name of the experiment to process (e.g., 'strains').
         create_new (bool): If True, creates new aggregate data.
         fps (float): Frame rate of the acquisition.
     '''
-    save_fpath = os.path.join(dstdir, '{}.parquet'.format(save_fname))
-
+    save_fpath = os.path.join(os.path.split(processed_mat_dir)[0], 
+                              '{}.parquet'.format(save_fname))
+    print("Saving aggregated data to: {}".format(save_fpath))
+    
     if (not create_new) and os.path.exists(save_fpath):
         df0 = load_aggregate_datafile(save_fpath)
         return df0
     
     # % Load metadata for YAK and MEL strains
-    allmeta0, strainmeta = get_all_meta_data(dstdir, experiment='strains' 
+    allmeta0, strainmeta = get_all_meta_data(meta_parentdir, experiment='strains',
                                              return_all=True) 
     #%
     # STRAINS -------------------------------------------------
-    in_jaaba = ['2x2 winged vs. wingless', '2x2 yak strains']
+    in_jaaba = ['2x2 winged vs. wingless', '2x2 yak strains',
+                '38mm_2x2_melstrains']
     all_acq_dirs = []
+    print(in_jaaba)
+    acq_not_found = []
     for i, row in strainmeta.iterrows():
-        if row['experiment'] in in_jaaba:
-            jaaba_srcdir = os.path.join(rootdir, 'JAABA_classifiers', '38mm_multichamber_winged-wingless_classifier')
+        #print('|{}|'.format(row['experiment']))
+        if int(row['file_name'][0:8]) > 20250417:
+            acq_dir = os.path.join(rootdir, row['experiment'], row['file_name'])  
+        elif row['experiment'] in in_jaaba:
+            #print("Grabbing acquisition from JAABA_classifiers folder")
+            jaaba_srcdir = os.path.join(rootdir, 'JAABA_classifiers', 
+                                        '38mm_multichamber_winged-wingless_classifier', 
+                                        'JAABA')
             acq_dir = os.path.join(jaaba_srcdir, row['file_name'])
         else:
-            acq_dir = os.path.join(rootdir, row['experiment'], row['file_name'])  
+            print("Unknown source for experiment: {}".format(row['experiment']))
+        if not os.path.exists(acq_dir):
+            print('Acquisition directory does not exist: {}'.format(acq_dir))
+            print("Skipping acquisition: {}".format(row['file_name']))
+            acq_not_found.append(row['file_name'])
+            continue
         all_acq_dirs.append(acq_dir)                 
     #all_acq_dirs = [os.path.join(srcdir, ac) for ac \
     #                                in strainmeta['file_name'].unique()]
@@ -539,24 +577,40 @@ def aggregate_main_from_meta(dstdir, array_size='2x2', save_fname='38mm_2x2_stra
         print("Non-existing directories: ")
         for n in non_existing:
             print(os.path.split(n)[-1])
-    acq_dirs = [a for a in all_acq_dirs if os.path.exists(a)]
-    acqs = [os.path.split(a)[-1] for a in acq_dirs]
-
+    acq_dirs = list(set([a for a in all_acq_dirs if os.path.exists(a)]))
+    strain_acqs = [os.path.split(a)[-1] for a in acq_dirs]
+    print("Found {} of {} acquisitions.".format(len(strain_acqs), strainmeta['file_name'].nunique()))
+     
     # Set output dirs
-    processed_outdir = os.path.join(dstdir, 'processed_mats') 
-    if not os.path.exists(processed_outdir):
-        os.makedirs(processed_outdir) 
-    print("Output saved to:", processed_outdir) 
+    #processed_outdir = os.path.join(processed_mat_dir, 'processed_mats') 
+    if not os.path.exists(processed_mat_dir):
+        os.makedirs(processed_mat_dir) 
+    print("Output saved to:", processed_mat_dir) 
     
     # Check for processed files
-    not_found = check_for_processed_file(processed_outdir, acqs=acqs)
-
+    # TODO: check if processed files exist
+    # 
+    not_found = check_if_processed_file_exists(processed_mat_dir, acqs=strain_acqs)
+    if len(not_found) > 0: #and not remake_acquisition:
+        print("The following acquisitions were not found in processed directory: {}".format(not_found))
+        #acqs_to_remake = allmeta0[allmeta0['file_name'].isin(not_found)]
+        #remake_acquisition = True
+    #else:
+    if remake_acquisition:
+        print("Remaking all acquisitions, even if processed files exist.")
+        
+        # Use allmeta0 which will include wingless/winged pairs for a given acquisition
+        # This is needed to reprocess all pairs. 
+        #acqs_to_remake = strainmeta[strainmeta['file_name'].isin(acqs)].copy()
+        acqs_to_remake = allmeta0[allmeta0['acquisition'].isin(strain_acqs)].copy()
+        print("Processing {} acquisitions".format(acqs_to_remake['acquisition'].nunique())) 
     #%
-    if remake_acquisition or len(not_found) > 0:
+    if remake_acquisition:
         #% 
-        print("The following acquisitions were not found in processed directory:") 
-        process_multichamber_acquisitions(acq_dirs, processed_outdir, allmeta0,
-                                            remake_acquisition=remake_acquisition, 
+        print("Processing individual acquisitions") 
+        process_multichamber_acquisitions(acq_dirs, processed_mat_dir, 
+                                            acqs_to_remake,
+                                            #remake_acquisition=remake_acquisition, 
                                             fps=fps, mov_is_upstream=False,
                                             filter_ori=True,
                                             array_size=array_size)
@@ -564,13 +618,12 @@ def aggregate_main_from_meta(dstdir, array_size='2x2', save_fname='38mm_2x2_stra
     
     if create_new:
         # Aggregate all processed data    
-        print("Saving ALL 2x2 data to local.")
-        df0 = aggregate_and_save_acquisitions(processed_outdir, save_fpath, acqs=acqs) 
+        print("Aggregating ALL 2x2 data to local.")
+        df0 = aggregate_and_save_acquisitions(processed_mat_dir, save_fpath, 
+                                              acqs=strain_acqs) 
     
     return df0  
-#%% 
-
-
+ 
 
 #%%
 
@@ -595,44 +648,53 @@ localdir = '/Users/julianarhee/Dropbox @RU Dropbox/Juliana Rhee/free_behavior_an
 if __name__ == "__main__":
     
     parser = argparse.ArgumentParser(description='Process Multichamber FlyTracker data for relative metrics.')
-    parser.add_argument('--dstdir', type=str, help='Directory to save processed data.')    
-    parser.add_argument('--srcdir', type=str, help='Parent dir of acquisition folders.')
-    parser.add_argument('--localdir', type=str, help='Local dir to save aggregate output.')
-    parser.add_argument('--meta', type=str, help='Full path to metadata .csv file.')
-    parser.add_argument('--savename', type=str, default='test', help='Save name of df saved to parquet file (aggregate).')
+    parser.add_argument('--procdir', type=str, help='[aggregate] Directory to save processed data, ends with processed_mats')    
+    parser.add_argument('--srcdir', type=str, help='[single] Parent dir of acquisition folders.')
+    parser.add_argument('--metapath', type=str, help='[single] Full path to metadata .csv file.')
+    #parser.add_argument('--localdir', type=str, help='Local dir to save aggregate output.')
+    parser.add_argument('--metadir', type=str, help='[aggregate] Path to folder containing metadata .csv files (only for aggregating).')
+      
+    parser.add_argument('--savename', type=str, default='test', help='[aggregate] Save name of aggregated df saved to parquet file.')
+    parser.add_argument('--new', type=bool, default=False, help='[aggregate] Create new aggregate data (default: True).')
 
-    parser.add_argument('--single', type=bool, default=False, help='Cycle and process all acqs from 1 source (default: False).')
-
-    parser.add_argument('--new', type=bool, default=False, help='Create new aggregate data (default: True).')
-    parser.add_argument('--remake', type=bool, default=False, help='Transform all data anew (default: False).')   
+    parser.add_argument('--single', type=bool, default=False, help='[single] Cycle and process all acqs from 1 source (default: False).')
+    parser.add_argument('--remake', type=bool, default=False, help='[aggregate] Transform all data anew (default: False).')   
+    parser.add_argument('--aggregate', type=bool, default=False, help='[aggregate] Cycle and load all from processed_mat_dir and aggregate into 1 (default: False).')
+   
     parser.add_argument('--fps', type=float, default=60.0, help='Acquisition frame rate (default: 60).')   
     parser.add_argument('--array', type=str, default='2x2', help='Size of multichamber array (default: 2x2).')   
   
     args = parser.parse_args()
     # 
-    dstdir = args.dstdir
-    srcdir = args.srcdir
+    #dstdir = args.dstdir
+    processed_mat_dir = args.procdir
+    meta_parentdir = args.metadir
+    acq_srcdir = args.srcdir
     meta_fpath = args.metapath
     create_new = args.new
     remake_acquisition = args.remake
-    localdir = args.localdir
+    #localdir = args.localdir
     fps = args.fps
     array_size = args.array
     save_fname = args.savename
 
     single_source = args.single
-    if single_source:
+    aggregate = args.aggregate
+    
+    if single_source: # and remake_acquisition:
         # Load metadata
-        acq_dirs = [os.path.join(srcdir, i) for i in os.listdir(srcdir) if os.path.isdir(os.path.join(srcdir, i))]
+        acq_dirs = [os.path.join(acq_srcdir, i) for i in os.listdir(acq_srcdir) if os.path.isdir(os.path.join(acq_srcdir, i))]
         allmeta0 = get_meta_data_for_experiment(meta_fpath)
 
-        process_multichamber_acquisitions(acq_dirs, dstdir, allmeta0,
+        # Process all acquisitions from a single source dir of acquisitions
+        process_multichamber_acquisitions(acq_dirs, processed_mat_dir, allmeta0,
                                         fps=fps, mov_is_upstream=False,
                                         subfolder='*', filter_ori=True,
                                         array_size=array_size) 
 
-    else: 
-        df0 = aggregate_main_from_meta(dstdir, array_size=array_size, 
+    elif aggregate: 
+        df0 = aggregate_wt_strains_from_meta(processed_mat_dir, 
+                                       meta_parentdir, array_size=array_size, 
                         save_fname=save_fname,
                         create_new=create_new, fps=fps, 
                         rootdir='/Users/julianarhee/Dropbox @RU Dropbox/Juliana Rhee/caitlin_data',
