@@ -70,6 +70,7 @@ def assign_paint_conditions(df0, meta):
     for fn, df_ in df0.groupby('file_name'):
         currm = meta[meta['file_name']==fn]
         assert len(currm)>0, 'No meta data for {}'.format(fn)
+        assert len(currm)==1, 'Multiple meta data for {}'.format(fn)
         #df0.loc[df0['file_name']==fn, 'stim_direction'] = currm['stim_direction'].values[0]
         stim_dir = currm['stim_direction'].unique()[0] #fn.split('_')[-1]
         df0.loc[df0['file_name']==fn, 'stim_direction'] = stim_dir
@@ -130,11 +131,14 @@ if assay == '38mm_projector':
     meta0 = pd.read_csv(meta_fpath)
     meta1 = meta0[(meta0['tracked in matlab and checked for swaps']==1)
                 & (meta0['exclude']==0) 
-                & (meta0['genotype_male']=='P1a-CsChR')].copy()
-    meta1[(meta1['manipulation_male']=='no paint ')].groupby(['species_male', 'stim_direction'])['file_name'].nunique()
-
+                & (meta0['genotype_male']=='P1a-CsChR')
+                & (meta0['manipulation_male']=='no paint')].copy()
+    
+    # Check counts of NON painted
+    meta1[(meta1['manipulation_male']=='no paint')].groupby(['species_male', 'stim_direction'])['file_name'].nunique()
     # Get list of acquisitions from meta data
-    acqs = meta1['file_name'].values
+    acqs = meta1['file_name'].unique()
+    
 elif assay == '38mm_dyad':
 #     found_meta_fpaths = glob.glob(os.path.join(acquisition_parentdir, '*.csv'))
 #     if len(found_meta_fpaths) > 1:
@@ -168,7 +172,7 @@ if create_new:
                                         create_new=False, 
                                         reassign_acquisition=reassign_acquisition)
     if assay == '38mm_projector':
-        df0 = assign_paint_conditions(df0, meta0)
+        df0 = assign_paint_conditions(df0, meta1)
         
     # Save transformed data
     df0.to_pickle(output_fpath)
@@ -199,10 +203,12 @@ if assay == '38mm_projector':
 file_grouper = 'file_name' if assay == '38mm_projector' else 'acquisition'
 df0 = util.add_stim_hz(df0, n_frames=24000, n_epochs=10, 
                        file_grouper=file_grouper)
-
+#%%
 grouper = ['species', 'acquisition'] 
 if assay == '38mm_projector':
-    f1 = df0[(df0['id']==0) & (df0['file_name'].isin(meta1['file_name']))].copy()
+    f1 = df0[(df0['id']==0) 
+             & (df0['file_name'].isin(meta1['file_name']))
+             & (df0['paint_coverage']=='none')].copy()
 else:
     f1 = df0[df0['id']==0].copy()
 #%%
@@ -218,42 +224,145 @@ f1['ang_vel_fly_shifted_abs'] = np.abs(f1['ang_vel_fly_shifted'])
 species_palette = {'Dmel': 'plum', 'Dyak': 'mediumseagreen'}
 
 #%%
-#chase_ = f1.copy()
 
-min_vel = 5
-max_targ_pos_theta = 180
-min_targ_pos_theta = -180
-max_facing_angle = 45
-min_wing_ang = 0
-max_dist_to_other = 20
+filter_chase = True
+f1['chasing_heuristic'] = False
 
-chase_ = f1[ #(f1['sex']=='m') #(tdf['id']%2==0)
-         (f1['vel'] >= min_vel)
-        & (f1['targ_pos_theta'] <= max_targ_pos_theta)
-        & (f1['targ_pos_theta'] >= min_targ_pos_theta)
-        & (f1['facing_angle'] <= max_facing_angle)
-        & (f1['max_wing_ang'] >= min_wing_ang)
-        & (f1['dist_to_other'] <= max_dist_to_other)
-        ].copy()
-        
+if filter_chase:
+    min_vel = 5
+    max_targ_pos_theta = 180
+    min_targ_pos_theta = -180
+    max_facing_angle = 60
+    min_wing_ang = 0
+    max_dist_to_other = 20
+
+    f1.loc[ #(f1['sex']=='m') #(tdf['id']%2==0)
+            (f1['vel'] >= min_vel)
+            & (f1['targ_pos_theta'] <= max_targ_pos_theta)
+            & (f1['targ_pos_theta'] >= min_targ_pos_theta)
+            & (f1['facing_angle'] <= max_facing_angle)
+            & (f1['max_wing_ang'] >= min_wing_ang)
+            & (f1['dist_to_other'] <= max_dist_to_other)
+            , 'chasing_heuristic'] = True
+    chase_ = f1[f1['chasing_heuristic']==True].copy()
+else: 
+    f1['chasing_heuristic'] = True
+    chase_ = f1.copy()
+     
+#%% 
+# Group by binned theta errors
+def bin_by_object_position(chase_, start_bin = -180, end_bin=180, bin_size=20):
+    '''
+    Bin theta error by object position. Convert theta error to degrees.
+    '''
+    chase_['theta_error_deg'] = np.rad2deg(chase_['theta_error'])
+    #start_bin = -180
+    #end_bin = 180
+    #bin_size = 20
+    chase_['binned_theta_error'] = pd.cut(chase_['theta_error_deg'],
+                                    bins=np.arange(start_bin, end_bin, bin_size),
+                                    labels=np.arange(start_bin+bin_size/2,
+                                            end_bin-bin_size/2, bin_size))    
+    return chase_
+
 #%%
-yvar = 'ang_vel_fly_shifted'
-chase_['theta_error_deg'] = np.rad2deg(chase_['theta_error'])
-start_bin = -180
-end_bin = 180
-bin_size = 20
-chase_['binned_theta_error'] = pd.cut(chase_['theta_error_deg'],
-                                bins=np.arange(start_bin, end_bin, bin_size),
-                                labels=np.arange(start_bin+bin_size/2,
-                                                    end_bin-bin_size/2, bin_size))    
+
+# Count N frames total and N frames chasing_heuristic==True
+chase_counts = the.count_chasing_frames(f1, 
+                        grouper=['species', 'acquisition', 'stim_direction'],
+                        chase_var='chasing_heuristic')
+print(chase_counts)
+#%%
+curr_cols = [c for c in chase_counts.columns if c != 'stim_direction']
+mean_counts = chase_counts[curr_cols].groupby(['species', 'acquisition']).mean().reset_index()
+
+#%%
+#top_mel = mean_counts[mean_counts['species']=='Dmel']\
+#            .sort_values('frac_frames_chasing', ascending=False).head(4)
+#top_yak = mean_counts[mean_counts['species']=='Dyak']\
+#            .sort_values('frac_frames_chasing', ascending=False).head(4)
+top_mel = mean_counts[(mean_counts['species']=='Dmel')\
+                         & (mean_counts['frac_frames_chasing']>=0.5)].copy()
+top_yak = mean_counts[(mean_counts['species']=='Dyak')\
+                         & (mean_counts['frac_frames_chasing']>=0.5)].copy()
+top_acqs = pd.concat([top_mel, top_yak])
+
+tmp1 = chase_[chase_['acquisition'].isin(top_acqs['acquisition'].unique())].copy()
+tmp1['courtship_level'] = 'high'
+
+#bottom_mel = mean_counts[mean_counts['species']=='Dmel']\
+#            .sort_values('frac_frames_chasing', ascending=True).iloc[5:10] #head(4)
+bottom_mel = mean_counts[(mean_counts['species']=='Dmel')\
+                         & (mean_counts['frac_frames_chasing']<0.3)
+                         & (mean_counts['frac_frames_chasing']>=0.2)].copy()
+bottom_yak = mean_counts[(mean_counts['species']=='Dyak')\
+                         & (mean_counts['frac_frames_chasing']<0.3)
+                         & (mean_counts['frac_frames_chasing']>=0.2)].copy()
+#bottom_yak = mean_counts[mean_counts['species']=='Dyak']\
+#            .sort_values('frac_frames_chasing', ascending=True).iloc[5:10] #head(4)
+bottom_acqs = pd.concat([bottom_mel, bottom_yak])
+bottom_acqs
+
+tmp2 = chase_[chase_['acquisition'].isin(bottom_acqs['acquisition'].unique())].copy()
+tmp2['courtship_level'] = 'low'
+
+chase_ = pd.concat([tmp1, tmp2])
+
+#%%
+chase_ = bin_by_object_position(chase_, start_bin=-180, end_bin=180, bin_size=20)
+
 # Get average ang vel across bins
-grouper = ['species', 'acquisition', 'binned_theta_error' ]
+grouper = ['species', 'acquisition', 'binned_theta_error', 'courtship_level']
 if assay == '38mm_projector':
     grouper.append('stim_direction') 
+    
+yvar = 'ang_vel_fly_shifted'
 avg_ang_vel = chase_.groupby(grouper)[yvar].mean().reset_index()
 
+
+#%%
+stim_palette = {'CW': 'cyan', 'CCW': 'magenta'}
+start_bin = -180
+end_bin = 180
+
+for lvl, avg_ang_vel_lvl in avg_ang_vel.groupby('courtship_level'):
+    fig, axn = plt.subplots(1, 2, figsize=(8, 4), sharex=True, sharey=True)
+    for si, (sp, plotd) in enumerate(avg_ang_vel_lvl.groupby('species')):
+        #plotd = avg_ang_vel[avg_ang_vel['species']=='Dyak'].copy()
+        ax=axn[si]
+        if assay == '38mm_projector':
+            sns.lineplot(data=plotd, x='binned_theta_error', y=yvar, ax=ax,
+                        hue='stim_direction', palette=stim_palette, 
+                        errorbar='se', marker='o') #errwidth=0.5)
+        else:
+            sns.lineplot(data=plotd, x='binned_theta_error', y=yvar, ax=ax,
+                        #hue='stim_direction', palette=stim_palette, ax=ax,
+                        errorbar='se', marker='o') #errwidth=0.5)
+        ax.axvline(x=0, color=bg_color, linestyle='--', lw=0.5)
+        ax.axhline(y=0, color=bg_color, linestyle='--', lw=0.5)
+        ax.set_xticks(np.linspace(start_bin, end_bin, 5))
+        #ax.set_xticklabels(np.arange(start_bin+bin_size/2, end_bin-bin_size/2+1, bin_size))
+        #ax.set_box_aspect(1)
+        ax.set_title(sp)
+        if assay == '38mm_projector':
+            if si==0:
+                ax.legend_.remove()
+            else:
+                sns.move_legend(ax, 'upper left', bbox_to_anchor=(1, 1),
+                                frameon=False, title='movement dir', fontsize=min_fontsize-2)
+        ax.set_xlabel('Object position (deg)')
+        ax.set_ylabel('Ang. vel. shifted (rad/s)')
+        #putil.label_figure(fig, figid) 
+        
+figname = 'turns_by_objectpos_{}_CCW-CW_{}'.format(yvar, sp)
+print(figdir, figname)
+#plt.savefig(os.path.join(figdir, '{}.png'.format(figname))) 
+
+#%% 
 #%%
 #avg_ang_vel = avg_ang_vel.dropna() 
+start_bin = -180
+end_bin = 180
 fig, axn = plt.subplots(1, 2, figsize=(8, 4), sharex=True, sharey=True)
 for si, (sdir, plotd) in enumerate(avg_ang_vel.groupby('stim_direction')):
 #plotd = avg_ang_vel[avg_ang_vel['stim_direction']=='CW'].copy()
@@ -277,39 +386,5 @@ figname = 'turns_by_objectpos_{}_by_stimdir'.format(yvar)
 print(figdir, figname)
 #plt.savefig(os.path.join(figdir, '{}.png'.format(figname)))
 
-#%%
-stim_palette = {'CW': 'cyan', 'CCW': 'magenta'}
-
-fig, axn = plt.subplots(1, 2, figsize=(8, 4), sharex=True, sharey=True)
-for si, (sp, plotd) in enumerate(avg_ang_vel.groupby('species')):
-    #plotd = avg_ang_vel[avg_ang_vel['species']=='Dyak'].copy()
-    ax=axn[si]
-    if assay == '38mm_projector':
-        sns.lineplot(data=plotd, x='binned_theta_error', y=yvar, ax=ax,
-                    hue='stim_direction', palette=stim_palette, 
-                    errorbar='se', marker='o') #errwidth=0.5)
-    else:
-        sns.lineplot(data=plotd, x='binned_theta_error', y=yvar, ax=ax,
-                    #hue='stim_direction', palette=stim_palette, ax=ax,
-                    errorbar='se', marker='o') #errwidth=0.5)
-    ax.axvline(x=0, color=bg_color, linestyle='--', lw=0.5)
-    ax.axhline(y=0, color=bg_color, linestyle='--', lw=0.5)
-    ax.set_xticks(np.linspace(start_bin, end_bin, 5))
-    #ax.set_xticklabels(np.arange(start_bin+bin_size/2, end_bin-bin_size/2+1, bin_size))
-    #ax.set_box_aspect(1)
-    ax.set_title(sp)
-    if assay == '38mm_projector':
-        if si==0:
-            ax.legend_.remove()
-        else:
-            sns.move_legend(ax, 'upper left', bbox_to_anchor=(1, 1),
-                            frameon=False, title='movement dir', fontsize=min_fontsize-2)
-    ax.set_xlabel('Object position (deg)')
-    ax.set_ylabel('Ang. vel. shifted (rad/s)')
-    #putil.label_figure(fig, figid) 
-    
-figname = 'turns_by_objectpos_{}_CCW-CW_{}'.format(yvar, sp)
-print(figdir, figname)
-#plt.savefig(os.path.join(figdir, '{}.png'.format(figname))) 
-    
+   
 # %%
