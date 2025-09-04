@@ -49,7 +49,9 @@ def set_sns_style(style='dark', min_fontsize=6):
                     'text.color': 'white',
                     'axes.facecolor': 'black',
                     'axes.grid': False,
-                    'figure.facecolor': 'black'}
+                    'figure.facecolor': 'black',
+                    'savefig.facecolor': 'black',
+                    'savefig.edgecolor': 'none'}
         custom_style.update(font_styles)
 
 #        pl.rcParams['figure.facecolor'] = 'black'
