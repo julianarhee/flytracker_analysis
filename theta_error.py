@@ -1339,9 +1339,10 @@ def annotate_axis(ax, annot_str, fontsize=6, color='k'):
                 ha='center', va='center', color=color)
 
 
-def count_chasing_frames(ftjaaba, grouper=['species', 'acquisition']):
+def count_chasing_frames(ftjaaba, grouper=['species', 'acquisition'],
+                         chase_var = 'chasing_binary'):
     # N frames of chasing each out of all frames by acquisition in ftjaaba 
-    n_frames_chasing = ftjaaba[ftjaaba['chasing_binary']>0].groupby(grouper)['frame'].count().reset_index()
+    n_frames_chasing = ftjaaba[ftjaaba[chase_var]>0].groupby(grouper)['frame'].count().reset_index()
     n_frames_chasing.rename(columns={'frame': 'n_frames_chasing'}, inplace=True)
     
     n_frames_total = ftjaaba.groupby(grouper)['frame'].count().reset_index()
