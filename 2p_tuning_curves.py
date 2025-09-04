@@ -22,7 +22,21 @@ plot_style = 'dark'
 putil.set_sns_style(plot_style, min_fontsize=18)
 bg_color = [0.7] * 3 if plot_style == 'dark' else 'k'
 # %%
-matfile = '/Volumes/Juliana/2p-data/20250725/processed/figures/20250725_Dmel_R35D04-R22D06-RSET-GCaMP8m_f3-029/plotvars.mat'
+#matfile = '/Volumes/Juliana/2p-data/20250725/processed/figures/20250725_Dmel_R35D04-R22D06-RSET-GCaMP8m_f3-029/plotvars.mat'
+rootdir = '/Volumes/Juliana/2p-data'
+genotype = 'R35D04-R22D06-RSET-GCaMP8m'
+session = '20250725'
+flyid = 'f3'
+filenum = 29
+procdir = os.path.join(rootdir, genotype, session, flyid, 'processed')
+matfile = os.path.join(procdir, 'figures', 
+                'plotvars_{}_Dmel_{}_{}-{:03d}.mat'.format(\
+                session, genotype, flyid, filenum))
+
+figdir = os.path.join(procdir, 'figures', 'tuning_curves')
+if not os.path.exists(figdir):
+    os.makedirs(figdir)
+    
 assert os.path.exists(matfile)
 mat = mat73.loadmat(matfile)
 mdata = mat['plotdata']
@@ -57,8 +71,6 @@ import re
 rootdir = '/Volumes/Juliana/2p-data'
 genotype = 'R35D04-R22D06-RSET-GCaMP8m'
 
-yvar = 'meantrial_tc'
-
 srcdir = os.path.join(rootdir, genotype)
 
 figdir = os.path.join(srcdir, 'figures', 'tuning_curves')
@@ -67,16 +79,20 @@ if not os.path.exists(figdir):
 
 #%%
 #session = '20250725'
-session_list = ['20250725', '20250724', '20250723', '20250722']  # List of sessions to process, can be extended
+session_list = ['20250725', '20250724', '20250723', '20250722',
+                '20250812', '20250813', '20250814', '20250815']  # List of sessions to process, can be extended
 #flynum = 1
+
+matvar = 'meantrial_tc'
 
 #filenum = 20
 tun_list = []
 df_list = []
 
 for session in session_list:
-    found_processed_matfiles = glob.glob(os.path.join(srcdir, session, 'f*', #'f{}'.format(flynum),
-                           'processed', 'figures', '*', 'plotvars.mat'))
+    found_processed_matfiles = glob.glob(os.path.join(srcdir, 
+                                    session, 'f*', #'f{}'.format(flynum),
+                                    'processed', 'figures', 'plotvars_*.mat'))
     #fly_list = sorted([os.path.split(f.split('/processed')[0])[-1] for f in found_processed_flydirs])
     #for flynum in fly_list:  
     #plot_srcdir = os.path.join(srcdir, session, 'f{}'.format(flynum), 'processed', 'figures')
@@ -95,7 +111,7 @@ for session in session_list:
         mat = mat73.loadmat(matfile)
         mdata = mat['plotdata']
 
-        mean_tc = mdata[yvar].mean(axis=0)
+        mean_tc = mdata[matvar].mean(axis=0)
         mean_tc = mean_tc - mean_tc.min()  # Normalize to min
         max_val = np.max(mean_tc)
         mean_val = np.mean(mean_tc)
@@ -171,10 +187,11 @@ for fnum, df_ in dff.groupby('id'):
 
 
 #%%
+yvar = 'mean_response'
 # Get mean, ignore non-numeric values
-mean_tuning = tuning_df.groupby('vel')['max_response'].mean().reset_index().rename(columns={'max_response': 'mean_response'})
+mean_tuning = tuning_df.groupby('vel')[yvar].mean().reset_index().rename(columns={yvar: 'mean'})
 # Get std, ignore NaN
-std_tuning = tuning_df.groupby('vel')['max_response'].std().reset_index().rename(columns={'max_response': 'std_response'})
+std_tuning = tuning_df.groupby('vel')[yvar].std().reset_index().rename(columns={yvar: 'std'})
 
 # Combine mean and std into a single DataFrame
 mean_tuning = mean_tuning.merge(std_tuning, on='vel').dropna()
@@ -182,11 +199,11 @@ mean_tuning = mean_tuning.merge(std_tuning, on='vel').dropna()
 #% PLOT
 same_colors = dict((k, bg_color) for k in tuning_df['id'].unique())
 fig, ax = plt.subplots(figsize=(5,4))
-sns.lineplot(data=tuning_df, x='vel', y='max_response', 
+sns.lineplot(data=tuning_df, x='vel', y=yvar, 
                 hue='id', lw=0.5, palette=same_colors,
                 ax=ax, legend=0)
 # plot mean and std
-ax.plot(mean_tuning['vel'], mean_tuning['mean_response'],
+ax.plot(mean_tuning['vel'], mean_tuning['mean'],
         color=bg_color, lw=2)
 ax.set_xlabel('Velocity (a.u.)')
 ax.set_ylabel('dF/F')
@@ -195,8 +212,25 @@ sns.despine(ax=ax, offset=4, trim=False)
 ax.set_title('Mean size tuning (N={})'.format(len(tuning_df['id'].unique())),
              fontsize=16, loc='left')
 
-figname = 'mean_tuning_curve'
+figname = 'tuning_curve_{}_n{}'.format(yvar, len(tuning_df['id'].unique()))
+print(figname)
 plt.savefig(os.path.join(figdir, figname + '.png'), dpi=300)
+
+#%%
+
+yvar = 'max_response'
+
+same_colors = dict((k, bg_color) for k in tuning_df['id'].unique())
+fig, ax = plt.subplots(figsize=(5,4))
+sns.pointplot(data=tuning_df, x='vel', y=yvar, 
+                ax=ax, legend=0)
+# label only every other x tick
+xticks = ax.get_xticks()
+xticklabels = ax.get_xticklabels()
+ax.set_xticks(xticks[::3], labels=[t for t in xticklabels[::3]])
+ax.set_xlabel('Velocity (a.u.)')
+
+
 
 
 #%%
@@ -204,88 +238,11 @@ ax.fill_between(mean_tuning['vel'],
                 mean_tuning['mean_response'] - mean_tuning['std_response'], 
                 mean_tuning['mean_response'] + mean_tuning['std_response'], 
                 color='gray', alpha=0.2, label='Std Dev')
-
-
-#%%
-plot_srcdir = os.path.join(srcdir, session, 'f{}'.format(flynum), 'processed', 'figures')
-#print(plot_srcdir)
-filenums = glob.glob(os.path.join(plot_srcdir, '*', 'plotvars.mat')) # For each filepath, find the pattern '-{:03d}' and extract the number
-filenums = sorted([int(os.path.split(os.path.split(f)[0])[-1].split('-')[-1]) for f in filenums])
-# Sort the file numbers
-filenums.sort()
-print(filenums)
-
-#%%
-
-#filenum = 20
-tun_list = []
-df_list = []
-for filenum in filenums: 
-    print("Processing fly {}, file {}".format(flynum, filenum))
-    found_mats = glob.glob(os.path.join(plot_srcdir,
-                    '*f{}-{:03d}'.format(flynum, filenum), 
-                    'plotvars.mat'))
-    assert len(found_mats) == 1, "Expected one plotvars.mat file, found: {}".format(len(found_mats))
-    matfile = found_mats[0] if found_mats else None
-
-    assert os.path.exists(matfile)
-    mat = mat73.loadmat(matfile)
-    mdata = mat['plotdata']
-
-    mean_tc = mdata[yvar].mean(axis=0)
-    mean_tc = mean_tc - mean_tc.min()  # Normalize to min
-    max_val = np.max(mean_tc)
-    mean_val = np.mean(mean_tc)
-
-    # Tuning
-    tun_ = pd.DataFrame({
-                  'max_response': max_val, 
-                  'mean_response': mean_val,
-                  'filenum': filenum,
-                  'flynum': flynum,
-                  'vel': mdata['vel'],
-                  },
-                  index=[filenum])
-    tun_list.append(tun_)
-
-    # Traces
-    df_ = pd.DataFrame({
-        'dff': mean_tc - mean_tc.min(),
-        'time': mdata['meantrial_time']},
-        index=np.arange(len(mean_tc)))
-    
-    df_['filenum'] = filenum
-    df_['flynum'] = flynum
-    df_['vel'] = mdata['vel']
-    df_list.append(df_)
-
-
-tuning_df = pd.concat(tun_list, axis=0)
-dff = pd.concat(df_list, axis=0)
-
-
-# %%
-
-fig, ax = plt.subplots(figsize=(5,4))
-sns.lineplot(data=dff, x='time', y='dff', ax=ax,
-             hue='vel', palette='viridis'
-             )
-
-#%%
-fig, ax = plt.subplots(figsize=(5,4))
-colors = sns.color_palette('viridis', n_colors=len(dff['vel'].unique()))
-#dff['vel'] = dff['vel'].astype(str)  # Ensure vel is treated as a categorical variable
-offset = 0.2
-for ci, (col, (v, d_)) in enumerate(zip(colors, dff.groupby('vel'))):
-    ax.plot(d_['time'], d_['dff'] + ci*offset, label=v, lw=2, 
-            color=col)
-
-
 # %%
 
 fig, ax = plt.subplots(figsize=(5,4))
 sns.scatterplot(data=tuning_df, x='vel', y='max_response', 
-                hue='vel', palette='viridis',
-                style='flynum', ax=ax, s=100)
+                hue='flynum', palette='viridis',
+                ax=ax, s=100, legend=0)
 
 # %%
