@@ -96,8 +96,8 @@ bg_color = [0.7]*3 if plot_style=='dark' else 'k'
 
 # Set directories
 # Main assay containing all the acquisitions
-#assay = '38mm_dyad' #'38mm_projector'
-assay = '38mm_projector'
+assay = '38mm_dyad' #'38mm_projector'
+#assay = '38mm_projector'
 
 if assay == '38mm_projector':
     # Dropbox/source directory:
@@ -162,8 +162,9 @@ if not os.path.exists(figdir):
 print("saving figures to {}".format(figdir))
 
 #%% 
-create_new = False
-reassign_acquisition = assay == '38mm_projector'
+create_new = True #False
+reassign_acquisition = False
+
 if create_new:
     # Transform data 
     df0, errors = transform_projector_data(acquisition_parentdir, acqs,
@@ -214,6 +215,54 @@ else:
 #%%
 # Add additional metrics
 f1 = rel.calculate_angle_metrics_focal_fly(f1, winsize=5, grouper=grouper)
+
+#%%
+import matplotlib as mpl
+# Check targ_ang_vel, is negative CW or CCW?
+# Plot on polar plot
+mel_acqs = f1[f1['species']=='Dmel']['acquisition'].unique()
+acq = mel_acqs[4]
+
+#plotd = f1[(f1['species']=='Dmel') & (f1['acquisition']==acq)].iloc[6855:6863] # target on fly's RIGHT (plots on upper-right hand side) | (starts y+ then gets smaller/down, angvel targ is neg)
+#plotd = f1[(f1['species']=='Dmel') & (f1['acquisition']==acq)].iloc[7952:7974] #7930] # target on fly's RIGHT, then center (plots on upper-right hand side | starts y+ then to 0, angvel targ is neg))
+plotd = f1[(f1['species']=='Dmel') & (f1['acquisition']==acq)].iloc[11276:11321] # target on fly's LEFT, then crosses ot right, target is moving rightward (starts on bottom-left, goes to upper-right | starts negative y, then positive y | angvel targ is positive )
+plotd = f1[(f1['species']=='Dmel') & (f1['acquisition']==acq)].iloc[14588:14606] # target on fly's LEFT, then slightly on right, target is moving rightward (starts on bottom-left, goes to upper-right | starts negative y, then positive y | angvel targ is positive )
+
+plot_polar = False
+
+if plot_polar:
+    fig, axn = plt.subplots(1, 2, subplot_kw={'projection': 'polar'})
+    # split colorbar at 0
+    ax=axn[0]
+    sns.scatterplot(data=plotd, x='targ_pos_theta', y='targ_pos_radius', 
+                    hue='sec', ax=ax,
+                    palette='viridis', edgecolor='none', alpha=1, legend=0)
+    ax=axn[1]
+    hue_norm = mpl.colors.TwoSlopeNorm(vcenter=0, vmin=-5, vmax=5)
+    sns.scatterplot(data=plotd, x='targ_pos_theta', y='targ_pos_radius', 
+                    hue='targ_ang_vel', ax=ax,
+                    palette='coolwarm', edgecolor='none', alpha=1, legend=0,
+                    hue_norm=hue_norm)
+    ax.axvline(x=0, color=bg_color, linestyle='--', lw=0.5)
+    ax.set_xlabel('Targ. ang. vel. (rad/s)')
+    ax.set_ylabel('Stim. direction')
+else:
+    fig, axn = plt.subplots(1, 2, figsize=(10,5), sharex=True, sharey=True)
+    ax=axn[0]
+    sns.scatterplot(data=plotd, x='targ_rel_pos_x', y='targ_rel_pos_y', 
+                    hue='sec', ax=ax,
+                    palette='viridis', edgecolor='none', alpha=1, legend=0)
+    ax=axn[1]
+    hue_norm = mpl.colors.TwoSlopeNorm(vcenter=0, vmin=-5, vmax=5)
+    sns.scatterplot(data=plotd, x='targ_rel_pos_x', y='targ_rel_pos_y', 
+                    hue='targ_ang_vel', ax=ax,
+                    palette='coolwarm', edgecolor='none', alpha=1, legend=0,
+                    hue_norm=hue_norm)
+    ax.axvline(x=0, color=bg_color, linestyle='--', lw=0.5)
+
+
+#%%
+
 
 #%%
 f1 = the.shift_variables_by_lag(f1, lag=2)
@@ -277,6 +326,13 @@ curr_cols = [c for c in chase_counts.columns if c != 'stim_direction']
 mean_counts = chase_counts[curr_cols].groupby(['species', 'acquisition']).mean().reset_index()
 
 #%%
+
+fig, ax = plt.subplots()
+sns.histplot(data=mean_counts, x='frac_frames_chasing',
+             hue='species', bins=5,
+             )
+
+#%%
 #top_mel = mean_counts[mean_counts['species']=='Dmel']\
 #            .sort_values('frac_frames_chasing', ascending=False).head(4)
 #top_yak = mean_counts[mean_counts['species']=='Dyak']\
@@ -294,10 +350,10 @@ tmp1['courtship_level'] = 'high'
 #            .sort_values('frac_frames_chasing', ascending=True).iloc[5:10] #head(4)
 bottom_mel = mean_counts[(mean_counts['species']=='Dmel')\
                          & (mean_counts['frac_frames_chasing']<0.3)
-                         & (mean_counts['frac_frames_chasing']>=0.2)].copy()
+                         & (mean_counts['frac_frames_chasing']>=0.1)].copy()
 bottom_yak = mean_counts[(mean_counts['species']=='Dyak')\
                          & (mean_counts['frac_frames_chasing']<0.3)
-                         & (mean_counts['frac_frames_chasing']>=0.2)].copy()
+                         & (mean_counts['frac_frames_chasing']>=0.1)].copy()
 #bottom_yak = mean_counts[mean_counts['species']=='Dyak']\
 #            .sort_values('frac_frames_chasing', ascending=True).iloc[5:10] #head(4)
 bottom_acqs = pd.concat([bottom_mel, bottom_yak])
@@ -318,6 +374,46 @@ if assay == '38mm_projector':
     
 yvar = 'ang_vel_fly_shifted'
 avg_ang_vel = chase_.groupby(grouper)[yvar].mean().reset_index()
+
+#%%
+# Get average ang vel across bins
+grouper = ['species', 'acquisition', 'binned_theta_error']
+if assay == '38mm_projector':
+    grouper.append('stim_direction') 
+yvar = 'ang_vel_fly_shifted'
+avg_ang_vel_no_levels = chase_.groupby(grouper)[yvar].mean().reset_index()
+
+fig, axn = plt.subplots(1, 2, figsize=(8, 4), sharex=True, sharey=True)
+for si, (sp, plotd) in enumerate(avg_ang_vel_no_levels.groupby('species')):
+    #plotd = avg_ang_vel[avg_ang_vel['species']=='Dyak'].copy()
+    ax=axn[si]
+    if assay == '38mm_projector':
+        sns.lineplot(data=plotd, x='binned_theta_error', y=yvar, ax=ax,
+                    hue='stim_direction', palette=stim_palette, 
+                    errorbar='se', marker='o') #errwidth=0.5)
+    else:
+        sns.lineplot(data=plotd, x='binned_theta_error', y=yvar, ax=ax,
+                    #hue='stim_direction', palette=stim_palette, ax=ax,
+                    errorbar='se', marker='o') #errwidth=0.5)
+    ax.axvline(x=0, color=bg_color, linestyle='--', lw=0.5)
+    ax.axhline(y=0, color=bg_color, linestyle='--', lw=0.5)
+    ax.set_xticks(np.linspace(start_bin, end_bin, 5))
+    #ax.set_xticklabels(np.arange(start_bin+bin_size/2, end_bin-bin_size/2+1, bin_size))
+    #ax.set_box_aspect(1)
+    ax.set_title(sp)
+    if assay == '38mm_projector':
+        if si==0:
+            ax.legend_.remove()
+        else:
+            sns.move_legend(ax, 'upper left', bbox_to_anchor=(1, 1),
+                            frameon=False, title='movement dir', fontsize=min_fontsize-2)
+    ax.set_xlabel('Object position (deg)')
+    ax.set_ylabel('Ang. vel. shifted (rad/s)')
+    #putil.label_figure(fig, figid) 
+fig.suptitle('courtship level: {}'.format(lvl))    
+
+figname = 'turns_by_objectpos_{}_CCW-CW_{}'.format(yvar, sp)
+print(figdir, figname)
 
 
 #%%
@@ -353,7 +449,8 @@ for lvl, avg_ang_vel_lvl in avg_ang_vel.groupby('courtship_level'):
         ax.set_xlabel('Object position (deg)')
         ax.set_ylabel('Ang. vel. shifted (rad/s)')
         #putil.label_figure(fig, figid) 
-        
+    fig.suptitle('courtship level: {}'.format(lvl))    
+    
 figname = 'turns_by_objectpos_{}_CCW-CW_{}'.format(yvar, sp)
 print(figdir, figname)
 #plt.savefig(os.path.join(figdir, '{}.png'.format(figname))) 
