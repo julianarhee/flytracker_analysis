@@ -20,14 +20,14 @@ import transform_multichamber_data as trf
 
 #%%
 import plotting as putil
-plot_style='white'
-putil.set_sns_style(plot_style, min_fontsize=7)
+plot_style='dark'
+putil.set_sns_style(plot_style, min_fontsize=18) #7)
 bg_color = [0.7]*3 if plot_style=='dark' else 'k'
 
 #%%
 def load_jaaba_from_mat(mat_fpath, return_dict=False):
     """Get JAABA scores for a behavior from scores_behavior.mat file for a video.
-
+    NOTE: All scores expected to be the same size, otherwise may need to reprocess.
     Args:
         mat_fpath (str):  Full path to scores_chasing.mat for one video.
         return_dict (bool, optional): Return full scores mat as dictionary (not just score values). Defaults to False.
@@ -45,8 +45,12 @@ def load_jaaba_from_mat(mat_fpath, return_dict=False):
     allscores = {}
     for k, v in zip(allscores_fields, allscores_data):
         if k in ['scores', 'postprocessed']:
-            scores = np.vstack(v[0]).T 
-            allscores[k] = scores
+            try:
+                scores = np.vstack(v[0]).T 
+                allscores[k] = scores
+            except ValueError as e:
+                print("Error stacking scores: {}".format(mat_fpath))
+                return None 
         else:
             allscores[k] = v[0]
     if return_dict:
@@ -92,7 +96,7 @@ def get_path_to_jaaba_scores(jaaba_dir, acq, beh_type='chasing', score_str=''):
     try:
         # Load most recent scores file 
         mat_fpath = sorted(glob.glob(os.path.join(jaaba_dir, acq, 
-                'scores_{}*{}.mat'.format(beh_type, score_str))))[-1]
+                'scores_{}*{}*.mat'.format(beh_type, score_str))))[-1]
     except IndexError:
         print("No JAABA {} scores for {}".format(beh_type, acq))
         return None 
@@ -103,14 +107,14 @@ def add_jaaba(df, mat_fpath, beh_type='chasing', is_threshold=5,
               binarize_jaaba=False, isnot_threshold=0.2):
     '''
     Load scores_chasing.mat file for a given df. Add scores and binarize. 
+    Stacks frame and id columns, then merges with df based on frame and ID.
     NOTE: keeps both all fly IDs
     '''    
     acq = df['acquisition'].unique()[0] 
-    try:
-        jaaba_scores = load_jaaba_from_mat(mat_fpath)
-    except Exception as e:
-        traceback.print_exc()
-        print("Error loading JAABA scores for {}: {}".format(acq, e)) 
+    jaaba_scores = load_jaaba_from_mat(mat_fpath)
+    if jaaba_scores is None:
+        #traceback.print_exc()
+        print("Error loading JAABA scores: {}".format(acq)) 
         return None
     #
     # Find where jaaba_scores is greater than threshold value, set to 1 and otherwise 0
@@ -137,7 +141,7 @@ def add_jaaba(df, mat_fpath, beh_type='chasing', is_threshold=5,
 
 def aggr_add_jaaba(df0, jaaba_dir, beh_types=['chasing', 'singing'],
                    jaaba_thresholds={'chasing': 5, 'singing': 10}, 
-                   binarize_jaaba=False, score_species=True):
+                   binarize_jaaba=False): #, score_species=True):
     '''
     Loop over acquisitions in df0 and add jaaba scores for each behavior type.
     
@@ -147,15 +151,16 @@ def aggr_add_jaaba(df0, jaaba_dir, beh_types=['chasing', 'singing'],
         beh_types (list): List of behavior types to add jaaba scores for
         jaaba_thresholds (dict): Dictionary of thresholds for each behavior type
         binarize_jaaba (bool): Whether to binarize jaaba scores
-        score_species (bool): Whether to use species-specific jaaba scores 
+    NOTE: score_species (bool): Whether to use species-specific jaaba scores if species in classifier name
     '''
     df_list = []
     no_scores = dict((k, []) for k in beh_types) 
     for acq, df in df0.groupby('acquisition'):
+        print("Processing acquisition: {}".format(acq)) 
         # Iteratively add to df 
         for beh_type in beh_types:
             is_threshold = jaaba_thresholds[beh_type]
-
+            score_species = beh_type == 'chasing' # chasing clf has species name
             # Get path to jaaba scores
             if score_species:
                 if 'yak' in acq:
@@ -166,7 +171,9 @@ def aggr_add_jaaba(df0, jaaba_dir, beh_types=['chasing', 'singing'],
                 score_str = ''
             mat_fpath = get_path_to_jaaba_scores(jaaba_dir, acq, 
                                         beh_type=beh_type, score_str=score_str)
-             
+            if mat_fpath is None:
+                no_scores[beh_type].append(acq)
+                continue 
             # Load JAABA scores
             df_j = add_jaaba(df, mat_fpath, beh_type=beh_type, 
                             is_threshold=is_threshold, binarize_jaaba=binarize_jaaba) 
@@ -186,18 +193,18 @@ def aggr_add_jaaba(df0, jaaba_dir, beh_types=['chasing', 'singing'],
 #%%
 # ----------------------------------------
 #experiment = 'ht_winged_vs_wingless'
-experiment = '38mm_strains'
+experiment = '38mm_2x2_dyad' #strains'
 array_size = '2x2'
 
 # parent dir where transformed data was saved
 dstdir = os.path.join('/Volumes/Juliana/free_behavior_analysis', experiment)
 # local dir where aggregated data saved 
-local_dir = '/Users/julianarhee/Dropbox @RU Dropbox/Juliana Rhee/free_behavior/38mm_strains'
+local_dir = '/Users/julianarhee/Dropbox @RU Dropbox/Juliana Rhee/free_behavior_analysis/38mm_2x2_dyad'
 # JAABA dir containing all the acquisitions (and scores)
 jaaba_dir = '/Users/julianarhee/Dropbox @RU Dropbox/Juliana Rhee/caitlin_data/JAABA_classifiers/38mm_multichamber_winged-wingless_classifier/JAABA'
 
 # Set output dirs
-figdir = os.path.join(dstdir, 'figures', 'multichamber_strains')
+figdir = os.path.join(dstdir, 'figures', 'multichamber_and_single_strains')
 if not os.path.exists(figdir):
     os.makedirs(figdir)
    
@@ -206,44 +213,61 @@ print(figid)
 
 # %% Load metadata for YAK and MEL strains
 meta_fpaths = glob.glob(os.path.join(dstdir, '*.csv'))
-strainmeta = trf.get_meta_data(dstdir, experiment='strains', return_all=False)
+strainmeta = trf.get_all_meta_data(dstdir, experiment='strains', return_all=False)
 
 #%%
 # File paths to saved processed data
+#aggregate_processed_datafile = os.path.join(local_dir, 
+#                                        '38mm_strains_df.parquet')
+
+# Output of transform_multichamber_data.py:
 aggregate_processed_datafile = os.path.join(local_dir, 
-                                        '38mm_strains_df.parquet')
-#aggregate_processed_datafile_all = os.path.join(local_dir, 
-#                                        '38mm_all_df.parquet')
+                                            '38mm_2x2_dyad_wt_strains.parquet')
 ftjaaba_datafile = os.path.join(local_dir, 
-                                        '38mm_strains_ftjaaba.parquet')
+                                        '38mm_2x2_dyad_wt_strains_ftjaaba.parquet')
 ftjaaba_datafile_single_arena = os.path.join(local_dir,
-                                        '38mm_single_arena_ftjaaba.parquet')
-ftjaaba_datafile_all = os.path.join(local_dir, '38mm_all_ftjaaba.parquet')
+                                        '38mm_GG_single_arena_ftjaaba.parquet')
+
+#ftjaaba_datafile = os.path.join(local_dir, 
+#                                        '38mm_strains_ftjaaba.parquet')
+#ftjaaba_datafile_single_arena = os.path.join(local_dir,
+#                                        '38mm_single_arena_ftjaaba.parquet')
+ftjaaba_datafile_all = os.path.join(local_dir, '38mm_2x2_strain_and_GG_single_ftjaaba.parquet')
 
 #%%
 # Load FTJAABA for all data (M/F, both single arena and 2x2 in 38mm arenas)
 # ---------------------------------------------------------------------------
-ftj= pd.read_parquet(ftjaaba_datafile_all)
-print("Loaded processed: {}".format(ftjaaba_datafile))
-ftj.head()
+#ftj= pd.read_parquet(ftjaaba_datafile_all)
+#print("Loaded processed: {}".format(ftjaaba_datafile))
+#ftj.head()
 
 #%%
 # Load and process feat-track data and combine 2x2 with single arena data
 # -----------------------------------------------------------------------
 new_ftjaaba = False # Load strain data 2x2 and create ftjaaba
-recombine_ftjaaba_datasets = False # Load single arena data and recombine with 2x2 data
+recombine_ftjaaba_datasets = True # Load single arena data and recombine with 2x2 data
+
 # -----------------------------------------------------------------------
 if new_ftjaaba:
     df0 = pd.read_parquet(aggregate_processed_datafile)
     print("Loaded processed: {}".format(aggregate_processed_datafile))
-    df0['strain'] = df0['strain'].map(lambda x: x.replace('CS mai', 'CS Mai'))
-    df0['strain'] = df0['strain'].map(lambda x: x.replace('CS Mai ', 'CS Mai'))
-    df0['strain'] = df0['strain'].map(lambda x: x.replace(' ', '_'))
+   
+    df0.loc[df0['strain']=='CS Mai ', 'strain'] = 'CS Mai' 
+    df0.loc[df0['strain']=='CO4N (Selective)', 'strain'] = 'CO4N'  
+    df0['strain'].unique()
+    # For 38mm_strains_df.parquet:
+#     df0['strain'] = df0['strain'].map(lambda x: x.replace('CS mai', 'CS Mai'))
+#     df0['strain'] = df0['strain'].map(lambda x: x.replace('CS Mai ', 'CS Mai'))
+#     df0['strain'] = df0['strain'].map(lambda x: x.replace(' ', '_'))
     #%
     conds = df0[['species', 'strain', 'acquisition', 'fly_pair']].drop_duplicates()
     counts = conds.groupby(['species', 'strain'])['fly_pair'].count()
     print(counts)
 
+    # Resave
+    df0.to_parquet(aggregate_processed_datafile, engine='pyarrow',  
+                   compression='snappy')
+    
 #%%
 # ==========================================
 # Check JAABA scores
@@ -259,8 +283,10 @@ def hist_jaaba_scores_male_female(jaaba_scores, ix, ax=None,
 no_jaaba_acqs = ['20250320-1025_fly1-4_Dyak-gab_3do_gh',
                  '20250306-0917_fly1-4_Dyak-cost-abid-tai-cy_3do_gh']
 
-acqs = [a for a in df0['acquisition'].unique() if a not in no_jaaba_acqs]
+# acqs = [a for a in df0['acquisition'].unique() if a not in no_jaaba_acqs]
 
+plot_scores = False 
+# ----------------
 has_jaaba = True
 beh_type = 'chasing' #'unilateral_extension'
 is_threshold = 5
@@ -271,14 +297,17 @@ if not os.path.exists(os.path.join(figdir, 'acqs')):
     
 # HISTOGRAM of JAABA scores
 # -----------------------------------------
-cond_name = 'strain''
-if has_jaaba:
+cond_name = 'strain'
+check_jaaba = []
+if has_jaaba and plot_scores:
     for acq, df_ in df0.groupby('acquisition'):# in acqs[0:nr*nc]:
-        if acq in no_jaaba_acqs:
-            continue
         mat_fpath = sorted(glob.glob(os.path.join(jaaba_dir, acq, 
                             'scores_{}*.mat'.format(beh_type))))[-1]
         jaaba_scores = load_jaaba_from_mat(mat_fpath)        
+        if jaaba_scores is None:
+            check_jaaba.append(acq)
+            print("Skipping: {}".format(acq))
+            continue 
         nr=2; nc=int(df_['id'].nunique()/2/nr);
         fig, axn = plt.subplots(nr, nc, sharex=True, sharey=True,
                                 figsize=(nc*1.7, nr*1.7))
@@ -289,7 +318,7 @@ if has_jaaba:
                 continue
             currcond = df_[df_['id']==ix][cond_name].unique()[0]
             ax = hist_jaaba_scores_male_female(jaaba_scores, ix, ax=ax, 
-                        curr_color='r', is_threshold=is_threshold)
+                        curr_color='r', is_threshold=is_threshold, bg_color=bg_color)
             ax.set_title('{}: ids {}, {}'.format(currcond, ix, ix+1), 
                          loc='left', fontsize=4) 
             ix += 2
@@ -297,6 +326,7 @@ if has_jaaba:
         putil.label_figure(fig, figid)  
         figname = 'jaaba_scores_{}_{}'.format(beh_type, acq)
         plt.savefig(os.path.join(figdir, 'acqs', '{}.png'.format(figname)))   
+        
 #%%
 # Create FTJAABA: Load and binarize all JAABA scores
 # --------------------------------------------------
@@ -305,13 +335,15 @@ if new_ftjaaba:
     jaaba_thresholds = {'chasing': 5, 'unilateral_extension': 10}
     isnot_threshold = 0.2 #14
     binarize_jaaba = False
-
+    
+    # NOTE: make sure using EITHER unilateral extension or singing, not both
     ftj0, no_scores = aggr_add_jaaba(df0, jaaba_dir, 
                                     beh_types=['chasing', 'unilateral_extension'],
                                     jaaba_thresholds=jaaba_thresholds, 
                                     binarize_jaaba=binarize_jaaba)
-    print("[{}]: No JAABA for the following acquisitions:".format(beh_type))
-    pp.pprint(no_scores)
+    for k, v in no_scores.items():
+        print("[{}]: No JAABA for the following acquisitions:".format(k))
+        pp.pprint(v)
     # del df0
     #%
     # Save
@@ -319,38 +351,45 @@ if new_ftjaaba:
     ftj0.to_parquet(ftjaaba_datafile, engine='pyarrow',
             compression='snappy')
 else: 
-    #%
-    # %  LOAD FTJAABA strain dataset 1
-    # del df0
-    ftj0 = pd.read_parquet(ftjaaba_datafile)
-    print("Loaded processed: {}".format(ftjaaba_datafile))
-    ftj0.head()
+    if recombine_ftjaaba_datasets:
+        #%
+        # %  LOAD FTJAABA strain dataset 1
+        # del df0
+        ftj0 = pd.read_parquet(ftjaaba_datafile)
+        print("Loaded processed 2x2 strain WT data: {}".format(ftjaaba_datafile))
+        ftj0.head()
 
 #%% 
 # Load FTJAABA for single arena data, if needed
-if recombine_ftjaaba_datasets:
+if new_ftjaaba: #recombine_ftjaaba_datasets:
     # Load second dataset
-    localdir2 = '/Users/julianarhee/Dropbox @RU Dropbox/Juliana Rhee/free_behavior/38mm_dyad/MF/FlyTracker'
+    localdir2 = '/Users/julianarhee/Dropbox @RU Dropbox/Juliana Rhee/free_behavior_analysis/38mm_dyad/MF/FlyTracker'
+    metapath2 = os.path.join(os.path.split(localdir2)[0], 'courtship-free-behavior-GG (Responses) - Form Responses 1.csv')
     jaaba_dir2 = '/Volumes/Giacomo/JAABA_classifiers/free_behavior'
     dfpath2 = os.path.join(localdir2, 'processed.pkl')
     tmpdf = pd.read_pickle(dfpath2)
+    
+    meta2 = pd.read_csv(metapath2)
 
     # Get subset of data that has been processed with jaaba
-    ftjaaba_fpath_local = os.path.join(localdir2, 'ftjaaba.pkl')
-    ftj2_processed = pd.read_pickle(ftjaaba_fpath_local)
-    print("Loaded local processed data for other dataset.")
+    #ftjaaba_fpath_local = os.path.join(localdir2, 'ftjaaba.pkl')
+    #ftj2_processed = pd.read_pickle(ftjaaba_fpath_local)
+    #print("Loaded local processed data for other dataset.")
         
-    df2 = tmpdf[tmpdf['acquisition'].isin(ftj2_processed['acquisition'].unique())]
+    #df2 = tmpdf[tmpdf['acquisition'].isin(ftj2_processed['acquisition'].unique())]
+    df2 = tmpdf[tmpdf['acquisition'].isin(meta2['logfile'].unique())]
     # Add strain info (from GG's meta)
     for acq, df_ in df2.groupby('acquisition'):
-        curr_strain = ftj2_processed[ftj2_processed['acquisition']==acq]['strain'].unique()[0]
+        #curr_strain = ftj2_processed[ftj2_processed['acquisition']==acq]['strain'].unique()[0]
+        curr_strain = meta2[meta2['logfile']==acq]['genotype_male'].unique()[0]
+        print(acq, curr_strain)
         df2.loc[df2['acquisition']==acq, 'strain'] = curr_strain
 
     print(df2['strain'].unique())
     print(df2['acquisition'].nunique())
-    del ftj2_processed
+    #del ftj2_processed
 
-    #%%
+    #%
     # Add jaaba scores for other dataset
     jaaba_thresholds2 = {'chasing': 10, 'singing': 5}
     binarize_jaaba= False
@@ -363,7 +402,7 @@ if recombine_ftjaaba_datasets:
     pp.pprint(no_scores2)
     ftj2.head()
 
-    #%% Load FTJAABA of other dataset
+    #% Load FTJAABA of other dataset
 
     # species  strain                               
     # Dmel     CS_Mai                                    5
@@ -376,41 +415,61 @@ if recombine_ftjaaba_datasets:
     ftj2['fly_pair'] = 1 # Only acquiring 1 at a time
 
     # Fix strain name
-    ftj2.loc[ftj2['strain']=='mel-SD105N', 'strain'] = 'SD105N_(Intermediate_Usually_Aroused)'
-    ftj2.loc[ftj2['strain']=='yak-WT', 'strain'] = 'RL_Ruta_Lab'
-    ftj2.loc[ftj2['strain']=='mel-Canton-S', 'strain'] = 'CS_Mai'
+    ftj2.loc[ftj2['strain']=='WT', 'strain'] = 'RL Ruta Lab' # Dyak lab strain
+    ftj2.loc[ftj2['strain']=='Canton-S', 'strain'] = 'CS Mai' # Mel lab strain
 
-    #%%
+    #ftj2.loc[ftj2['strain']=='mel-SD105N', 'strain'] = 'SD105N_(Intermediate_Usually_Aroused)'
+    #ftj2.loc[ftj2['strain']=='yak-WT', 'strain'] = 'RL_Ruta_Lab'
+    #ftj2.loc[ftj2['strain']=='mel-Canton-S', 'strain'] = 'CS_Mai'
+
+    #%
     # save old dataset ftjaaba
     print("Saving old 38mm (single arena) ftjaaba to local.")
     print(ftjaaba_datafile_single_arena)
     # Save
     ftj2.to_parquet(ftjaaba_datafile_single_arena, engine='pyarrow',
             compression='snappy')
-        
-    #%%
+    #%
+    del df2, tmpdf
+
+#%%
+if recombine_ftjaaba_datasets:
+    # %  LOAD FTJAABA strain dataset 1
+    # del df0
+    ftj2 = pd.read_parquet(ftjaaba_datafile_single_arena)
+    print("Loaded processed single 38mm strain data: {}".format(ftjaaba_datafile_single_arena))
+    
+    #%
+    ftj2['arena'] = '1x1'
+    ftj0['arena'] = '2x2'
+
+    print(ftj2['strain'].unique())
+    print(ftj0['strain'].unique())
+     
     # Get intersection of columns in ftj0 and ftj2
     missing_cols = np.setdiff1d(ftj0.columns, ftj2.columns)
     shared_cols = np.intersect1d(ftj0.columns, ftj2.columns)
 
-    #%%
-    del df2, tmpdf
-
-    #%% 
+    #% 
     # merge ftj[shared_cols] with ftj2[shared_cols]
     ftj = pd.concat([ftj0[shared_cols], ftj2[shared_cols]], axis=0)
     ftj.head()
 
-    #%%
+    #%
     del ftj0, ftj2
 
-    #%%
+    #%
     # Save
     print("Saving ALL 38mm ftjaaba to local.")
-    print(ftjaaba_datafile_single_arena)
+    print(ftjaaba_datafile_all)
     ftj.to_parquet(ftjaaba_datafile_all, engine='pyarrow',
             compression='snappy')
-
+else:
+    #% Load saved all 
+    print("Loading ALL 38mm ftjaaba from local.")
+    print(ftjaaba_datafile_all)
+    ftj = pd.read_parquet(ftjaaba_datafile_all)
+    
 #%% ==========================================
 # START HERE for analysis
 # ============================================
@@ -419,7 +478,22 @@ if recombine_ftjaaba_datasets:
 conds = ftj[['acquisition', 'species', 'strain', 'fly_pair']].drop_duplicates()
 counts = conds.groupby(['species', 'strain'])['fly_pair'].count()
 print(counts)
-
+# species  strain                          
+# Dmel     CO13N                                9
+#          CO4N                                 5
+#          CS Mai                              21
+#          RG11N                                6
+#          RG38N                                4
+#          SD105N                              14
+# Dyak     Abidjan 12 Abidjan, Ivory Coast     10
+#          CY 23 Nguti, Cameroon               10
+#          Cost 1235.4 São Tomé                 5
+#          Gabon 35 Gabon                       8
+#          NY42 Nairobi, Kenya                 10
+#          RL Ruta Lab                         28
+#          Tai 18E2 Tai forest, Ivory Coast    11
+# Name: fly_pair, dtype: int64
+ 
 #%%
 # check overall velocity between yak and mel 
 grouper= ['species', 'strain', 'acquisition', 'fly_pair']  
@@ -427,15 +501,16 @@ mean_vel = ftj[ftj['sex']=='m'].groupby(grouper)['vel'].mean().reset_index()
 mean_vel.head()
 
 # % plot mean velocity by condition
-fig, ax =plt.subplots(figsize=(3,2))
+fig, ax =plt.subplots(figsize=(5,4)) #(3,2))
 # center barplot and stripplot over each other
-sns.barplot(data=mean_vel, ax=ax, x='species', y='vel', color='k', linewidth=1,
+sns.barplot(data=mean_vel, ax=ax, x='species', y='vel', color=bg_color, linewidth=1,
             width=0.5, fill=False)
 sns.stripplot(data=mean_vel, ax=ax, x='species', y='vel', hue='strain',
-            palette='PRGn', dodge=True, jitter=True, linewidth=0.5) #, legend=False)
+            palette='PRGn', dodge=True, jitter=True, linewidth=0.5, s=8) #, legend=False)
 sns.move_legend(ax, loc='upper left', bbox_to_anchor=(1, 1), frameon=False, title='')
 ax.set_xlabel('')
 ax.set_box_aspect(1)
+sns.despine(offset=4) 
 putil.label_figure(fig, figid)
 
 figname = 'mean_vel_{}'.format(experiment)
@@ -462,8 +537,8 @@ ftj = ftj.reset_index(drop=True)
 
 #%%
 # save strain info
-yak_strains = ftj[ftj['species']=='dyak']['strain'].unique()
-mel_strains = ftj[ftj['species']=='dmel']['strain'].unique()
+yak_strains = ftj[ftj['species']=='Dyak']['strain'].unique()
+mel_strains = ftj[ftj['species']=='Dmel']['strain'].unique()
 
 strains_in_group = {'Dmel': mel_strains, 'Dyak': yak_strains}
  
@@ -550,22 +625,31 @@ def filter_chasing(tdf, use_jaaba=True, beh_type='chasing_binary',
 
     return chasedf
 
-def annotate_p_value_two_groups(ax, yak_behav, mel_behav, fontsize=4):
+def annotate_p_value_two_groups(ax, yak_behav, mel_behav, fontsize=4, text_fontsize=8,
+                                color='k'):
     import scipy.stats as spstats
     res = spstats.mannwhitneyu( yak_behav, mel_behav, alternative='two-sided')    
-    if res.pvalue < 0.01:
-        ax.annotate('**', xy=(0.5, 1), fontsize=fontsize, #ax.get_ylim()[-1]), 
-                    xycoords='axes fraction', ha='center', va='center')
-    elif res.pvalue < 0.05:
-        ax.annotate('*', xy=(0.5, 1), fontsize=fontsize, #ax.get_ylim()[-1]), 
-                    xycoords='axes fraction', ha='center', va='center')
+    if res.pvalue > 0.05:
+        ax.annotate('n.s.', xy=(0.5, 1), fontsize=text_fontsize, #ax.get_ylim()[-1]), 
+                    xycoords='axes fraction', ha='center', va='center',
+                    color=color)
+    else: 
+        if res.pvalue < 0.01:
+            ax.annotate('**', xy=(0.5, 1), fontsize=fontsize, #ax.get_ylim()[-1]), 
+                        xycoords='axes fraction', ha='center', va='center',
+                        color=color)
+        elif res.pvalue < 0.05:
+            ax.annotate('*', xy=(0.5, 1), fontsize=fontsize, #ax.get_ylim()[-1]), 
+                        xycoords='axes fraction', ha='center', va='center', 
+                        color=color)
     return res
 
 def plot_grouped_boxplots(mean_, palette='PRGn', 
                             between_group_spacing=1.5, 
                             within_group_spacing=0.5, box_width=0.3,
                             grouper='species', lw=0.5,
-                            x='strain_name', y='vel', ax=None):
+                            x='strain_name', y='vel', ax=None,
+                            edgecolor='black'):
     '''
     Seaborn's box plot doesn't allow custom spacing (no gap functionality). 
     Custom function to plot boxplots with custom spacing.
@@ -583,8 +667,8 @@ def plot_grouped_boxplots(mean_, palette='PRGn',
     if ax is None:
         fig, ax = plt.subplots()
         
-    species_order = mean_[grouper].unique()
-    strain_order = mean_[x].unique()
+    species_order = sorted(mean_[grouper].unique())
+    strain_order = sorted(mean_[x].unique())
     strain_palette = sns.color_palette(palette, n_colors=len(strain_order))
     strain_colors = dict(zip(strain_order, strain_palette))
     # Set spacing
@@ -609,19 +693,31 @@ def plot_grouped_boxplots(mean_, palette='PRGn',
     for (species, strain), pos in positions.items():
         data = mean_[(mean_[grouper] == species) & (mean_[x] == strain)][y]
         ax.boxplot(data, positions=[pos], widths=box_width, patch_artist=True,
-                boxprops=dict(facecolor=strain_colors[strain], edgecolor='black',
+                boxprops=dict(facecolor=strain_colors[strain], 
+                              edgecolor=edgecolor,
                               linewidth=lw),
-                medianprops=dict(color='black'), 
-                flierprops=dict(marker='o', markersize=0, color='black'))
+                whiskerprops=dict(color=edgecolor, linewidth=lw),
+                capprops=dict(color=edgecolor, linewidth=lw),
+                medianprops=dict(color=edgecolor), 
+                flierprops=dict(marker='o', markersize=0, color=edgecolor))
     # Axis labels and legend
     ax.set_xticks(x_ticks)
     ax.set_xticklabels(x_tick_labels) 
     # Legend
     if ai==2:
         for strain in strain_order:
-            ax.plot([], [], color=strain_colors[strain], label=strain, linewidth=5)
+            ax.plot([], [], color=strain_colors[strain], label=strain, 
+                    linewidth=5)
         ax.legend(title='Strain', bbox_to_anchor=(1.05, 1), loc='upper left')
     return ax
+
+def add_legend_column_with_N(ftj, key='strain', 
+                    grouper=['species', 'strain', 'acquisition', 'fly_pair']):
+    conds = ftj[grouper].drop_duplicates()
+    counts = conds.groupby([key])['fly_pair'].count()
+    ftj['{}_legend'.format(key)] = ftj[[key]].applymap(lambda x: '{} (n={})'.format(x, counts[x]))
+  
+    return ftj, counts
 
 #%%
 # Add manual filter on singing
@@ -663,13 +759,14 @@ ftj['courting_manual_combo'] = False
 ftj.loc[ftj['behav_sum']>0, 'courting_manual_combo'] = True
 
 #%%
-# compare velocity overall vs. velocity during chasing bouts
+# PLOT: compare velocity overall vs. velocity during chasing bouts
 # -----------------------------------------------------------
 use_jaaba=True
 grouper = ['species', 'strain_name_legend', 'acquisition', 'fly_pair']
 palette = 'PRGn'
 plot_type = 'box'
 plot_bar = plot_type == 'strip'
+lw = 1.0
 
 min_vel = 10
 max_facing_angle = np.deg2rad(90) #45)
@@ -686,7 +783,6 @@ min_wing_ang = np.deg2rad(min_wing_ang_deg)
 # (number_of_strains_in_group - 1) * within_group_spacing + box_width
 # species_spacing >= 
 # 
-
 chasedf_jaaba = filter_chasing(ftj, use_jaaba=True, beh_type='chasing_binary')               
 singdf_jaaba = filter_chasing(ftj, use_jaaba=True, beh_type='singing_binary_manual',
                         min_vel=0, min_wing_ang=np.deg2rad(45),
@@ -696,7 +792,7 @@ mean_vel = ftj[(ftj['sex']=='m')].groupby(grouper)['vel'].mean().reset_index()
 mean_vel_chasing = chasedf_jaaba.groupby(grouper)['vel'].mean().reset_index()
 mean_vel_singing = singdf_jaaba.groupby(grouper)['vel'].mean().reset_index()
 
-fig, axn = plt.subplots(1,3, sharex=True, sharey=False, figsize=(10,4))
+fig, axn = plt.subplots(1,3, sharex=True, sharey=False, figsize=(13,4))
 for ai, (beh_, mean_) in enumerate(zip(['all', 'chasing', 'singing'], 
                                     [mean_vel, mean_vel_chasing, mean_vel_singing])):
     ax=axn[ai]
@@ -706,30 +802,30 @@ for ai, (beh_, mean_) in enumerate(zip(['all', 'chasing', 'singing'],
                 width=0.5, fill=False)
     if plot_type == 'strip':
         sns.stripplot(data=mean_, ax=ax, x='species', y='vel', hue='strain_name_legend',
-                    palette=palette, dodge=True, jitter=False, linewidth=0.5, 
+                    palette=palette, dodge=True, jitter=False, linewidth=lw, 
                     legend=ai==2)
     else:
         plot_grouped_boxplots(mean_, palette=palette, 
-                              between_group_spacing=5, within_group_spacing=0.6, 
-                              box_width=0.5,
-                              grouper='species', x='strain_name_legend', y='vel', ax=ax)         
-        #sns.boxplot(data=mean_, x='species', y='vel', hue='strain_name', ax=ax,
-        #      palette=palette, legend=ai==2, fliersize=0, width=1, gap=0.1)
+                              between_group_spacing=10, within_group_spacing=1.1, 
+                              box_width=lw, lw=lw,
+                              grouper='species', x='strain_name_legend', 
+                              y='vel', ax=ax, edgecolor=bg_color) 
     ax.set_title(beh_)
     ax.set_xlabel('')
     ax.set_ylabel('Mean velocity (mm/s)')
     ax.set_ylim([0, 20])
-    sns.despine(ax=ax, bottom=True)
-sns.move_legend(axn[2], loc='upper left', bbox_to_anchor=(1, 1), frameon=False)
-plt.subplots_adjust(wspace=0.4)
+    sns.despine(ax=ax, bottom=True, offset=4)
+sns.move_legend(axn[2], loc='upper left', bbox_to_anchor=(1, 1), frameon=False, 
+                fontsize=4)
+plt.subplots_adjust(wspace=0.4, left=0.1, right=0.9, top=0.8)
 #%
 #plt.xticks(rotation=90)
 putil.label_figure(fig, figid)
 figname = 'mean_vel_by_behavior_per_strain_{}'.format(plot_type)
-#plt.savefig(os.path.join(figdir, figname+'.png'))
+plt.savefig(os.path.join(figdir, figname+'.png'))
 
 #%%
-# mean vel by species
+# PLOT: average strains, plot mean vel by species
 grouper = ['species', 'strain_name_legend']
 palette = 'PRGn'
 
@@ -742,7 +838,7 @@ for ai, (beh_, mean_) in enumerate(zip(['all', 'chasing', 'singing'],
                                     [mean_vel, mean_vel_chasing, mean_vel_singing])):
     ax=axn[ai]
     # Center barplot and stripplot over each other
-    sns.barplot(data=mean_, ax=ax, x='species', y='vel', color='k', linewidth=1,
+    sns.barplot(data=mean_, ax=ax, x='species', y='vel', color=bg_color, linewidth=1,
                 width=0.5, fill=False)
     #ax.margins(x=0.2)
     sns.stripplot(data=mean_, ax=ax, x='species', y='vel', hue='strain_name_legend',
@@ -750,18 +846,19 @@ for ai, (beh_, mean_) in enumerate(zip(['all', 'chasing', 'singing'],
                 legend=ai==2, s=10)
     yak = mean_[mean_['species']=='Dyak']['vel']
     mel = mean_[mean_['species']=='Dmel']['vel']
-    res = annotate_p_value_two_groups(ax, yak, mel)
+    res = annotate_p_value_two_groups(ax, yak, mel, color='w', fontsize=6)
     ax.set_title(beh_)
     ax.set_xlabel('')
     print(res)
     ax.set_ylim([0, 16])
     sns.despine(ax=ax, bottom=True)
 sns.move_legend(axn[2], loc='upper left', bbox_to_anchor=(1, 1), frameon=False)
+plt.subplots_adjust(wspace=0.5, left=0.1, right=0.9, top=0.8)
 #%
 #plt.xticks(rotation=90)
 putil.label_figure(fig, figid)
 
-figname = 'mean_vel_by_behavior_per_species'
+figname = 'mean_vel_by_behavior_average-strains'
 plt.savefig(os.path.join(figdir, figname+'.png'))
 
 
@@ -795,10 +892,10 @@ plot_vars.append('dist_to_other')
 
 # Calculate means
 mean_frames = ftj_tmp[ftj_tmp['sex']=='m'].groupby([
-                'species', 'strain_name', 'strain_name_legend', 'acquisition', 'fly_pair' #'behavior', 
+                'species', 'strain', 'strain_name', 'strain_name_legend', 'acquisition', 'fly_pair' #'behavior', 
                 ])[plot_vars].mean().reset_index().dropna()
 mean_frames_courting = ftj_tmp[(ftj_tmp['sex']=='m') & (ftj['courting']==True)].groupby([
-                'strain_name', 'strain_name_legend', 'species', 'acquisition', 'fly_pair'
+                'strain', 'strain_name', 'strain_name_legend', 'species', 'acquisition', 'fly_pair'
                 ])[plot_vars].mean().reset_index().dropna()
 
 plotd = mean_frames_courting.copy() if courting_frames else mean_frames.copy()
@@ -807,7 +904,9 @@ to_plot = ['courting',
            'chasing_binary{}'.format(jaaba_suffix), 
            'singing_binary_manual'] #{}'.format(jaaba_suffix)]
 #%%
-fig, axn = plt.subplots(1, len(to_plot), sharex=True, sharey=False, figsize=(8, 4))
+# PLOT: box plots, p(singing), p(chasing), etc. for each strain
+# -------------------------------------------------
+fig, axn = plt.subplots(1, len(to_plot), sharex=True, sharey=False, figsize=(10, 4))
 for ai, behav in enumerate(to_plot):
     ax=axn[ai]
     if plot_species_mean:
@@ -817,21 +916,24 @@ for ai, behav in enumerate(to_plot):
         plot_grouped_boxplots(plotd, grouper='species', x='strain_name_legend', 
                               y=behav, ax=ax, palette=palette, 
                               between_group_spacing=5, within_group_spacing=0.6, 
-                              box_width=0.5)                                     
+                              box_width=0.5, edgecolor=bg_color)                                     
         #sns.boxplot(data=plotd, x='species', y=behav, hue='strain_name_legend', ax=ax,
         #      palette=palette, legend=ai==2, fliersize=0, width=1, gap=0.1)
         if ai==2:
-            sns.move_legend(ax, loc='upper left', bbox_to_anchor=(1, 1), frameon=False)
+            sns.move_legend(ax, loc='upper left', bbox_to_anchor=(1, 1), 
+                            frameon=False, fontsize=4)
     else:
         sns.stripplot(data=plotd, x='species', y=behav, hue='strain_name_legend', ax=ax, 
               palette=palette, legend=ai==2, jitter=False, dodge=True)
         if ai==2:
-            sns.move_legend(ax, loc='upper left', bbox_to_anchor=(1, 1), frameon=False)
+            sns.move_legend(ax, loc='upper left', bbox_to_anchor=(1, 1), 
+                            frameon=False, fontsize=4)
 
     # draw statistics on plot
     yak_behav = plotd[plotd['species']=='Dyak'][behav]
     mel_behav = plotd[plotd['species']=='Dmel'][behav]
-    res = annotate_p_value_two_groups(ax, yak_behav, mel_behav, fontsize=4)
+    res = annotate_p_value_two_groups(ax, yak_behav, mel_behav, fontsize=8, 
+                                      color=bg_color)
     print(res)
     ax.set_xlabel('')
     if 'chasing' in behav:
@@ -848,9 +950,10 @@ figname = 'p-behaviors-flypairs_{}_bar-{}_jaaba-{}'.format(data_type, pair_plot_
 plt.savefig(os.path.join(figdir, figname+'.png'))
 
 #%% 
+# PLOT: Directly compare 2x2 vs. 1x1 arenas
+# -------------------------------------------------
 # Check if strain is different between single and quad MAI
-mel_strain_check = ['Dmel SD105N_(Intermediate_Usually_Aroused)', 'Dmel CS_Mai', 
-                    'Dyak RL_Ruta_Lab']
+mel_strain_check = ['Dmel SD105N', 'Dmel CS Mai', 'Dyak RL Ruta Lab']
 beh = 'singing_binary_manual'
 for curr_strain in mel_strain_check:
     single_mai = []
@@ -869,10 +972,12 @@ for curr_strain in mel_strain_check:
 fig, ax = plt.subplots()
 sns.boxplot(data=plotd[plotd['strain_name'].isin(mel_strain_check)], 
             x='n_arenas', y=beh, ax=ax,
-            hue='strain_name', palette=palette, legend=1)
+            hue='strain_name', hue_order=mel_strain_check,
+            palette=palette, legend=1)
 sns.stripplot(data=plotd[plotd['strain_name'].isin(mel_strain_check)], 
             x='n_arenas', y=beh, ax=ax, linewidth=0.5, dodge=True,
-            hue='strain_name', palette=palette, legend=1)
+            hue='strain_name', hue_order=mel_strain_check,
+            palette=palette, legend=1)
 
 ax.set_box_aspect(1)
 ax.set_ylim([0, 1])
@@ -883,6 +988,8 @@ plt.savefig(os.path.join(figdir, figname+'.png'))
 
 
 #%%
+# PLOT: For different combinations of behavior classifiers (Binary, manual, etc.),
+#      plot p(singing) and p(chasing) for each species for single arena data
 # Check ONLY single acq data
 species_palette = {'Dmel': 'lavender', 
                    'Dyak': 'mediumorchid'}
@@ -922,10 +1029,13 @@ for ri, (sing_var, chase_var) in enumerate(var_combos):
                     hue='species', palette=species_palette, legend=0)
         sns.stripplot(data=meanbouts_courting_nodist,
                     x='species', y=sing_var, ax=ax, 
-                    hue='acquisition', color='k', s=2, legend=0, 
+                    hue='acquisition', color=bg_color, s=2, legend=0, 
                     jitter=False, dodge=True) #palette=species_palette, legend=1)
         ax.set_ylim([0, 1])
         ax.set_box_aspect(1)
+        ax.set_ylabel(ax.get_ylabel(), fontsize=8)
+        ax.set_xlabel(ax.get_xlabel(), fontsize=8)
+        
         ax.set_title("ori_angle: {}\n{}\n{}".format(ori_angle, chase_var, sing_var),
                      fontsize=5)
 plt.subplots_adjust(hspace=0.6, wspace=0.5)
@@ -937,17 +1047,21 @@ plt.savefig(os.path.join(figdir, figname+'.png'))
       # )
 
 
-#%% Calculate whether singing_binary is significantly different between species:
+#%%  
+# PLOT: p(chasing), p(singing), dist_to_other, for each strain, bar plot
+# -------------------------------------------------
+# Calculate whether singing_binary is significantly different between species:
 mean_strains = mean_frames_courting.groupby(['species', 'strain_name'])\
                     [plot_vars].mean().reset_index().dropna()   
                 
-fig, axn = plt.subplots(1, len(plot_vars), sharex=True, sharey=False, figsize=(9, 4))
+fig, axn = plt.subplots(1, len(plot_vars), sharex=True, sharey=False, 
+                        figsize=(len(plot_vars)*3, 4))
 for ai, behav in enumerate(plot_vars):
     ax=axn[ai]
-    sns.barplot(data=mean_strains, ax=ax, x='species', y=behav, color='k', linewidth=1,
-            width=0.5, fill=False)
+    sns.barplot(data=mean_strains, ax=ax, x='species', y=behav, color=bg_color,
+                linewidth=1, width=0.5, fill=False)
     sns.stripplot(data=mean_strains, x='species', y=behav, hue='strain_name',
-              palette=palette, dodge=True, jitter=False, ax=ax, legend=0)
+              palette=palette, dodge=False, jitter=False, ax=ax, legend=0, s=10)
     
     # draw statistics on plot
     yak_behav = mean_strains[mean_strains['species']=='Dyak'][behav]
@@ -967,7 +1081,7 @@ for ai, behav in enumerate(plot_vars):
     ax.set_xlabel('')
 
 fig.suptitle('P(behavior), courting frames only: {}'.format(courting_frames), fontsize=6)
-plt.subplots_adjust(wspace=0.5, top=0.8)
+plt.subplots_adjust(wspace=0.5, top=0.8, left=0.1)
 sns.despine(offset=2, bottom=True, trim=True)
 
 putil.label_figure(fig, jaaba_dir)
@@ -975,7 +1089,7 @@ figname = 'p-behaviors-strainmeans_{}_bar-{}'.format(data_type, pair_plot_type)
 plt.savefig(os.path.join(figdir, figname+'.png'))
 
 #%%
-# Plot box plots of dist_to_other alone
+# PLOT: box plots of dist_to_other alone
 behav = 'dist_to_other'
 courting_frames = True
 pair_plot_type = 'box'
@@ -985,27 +1099,27 @@ plot_species_mean = False
 plotd = mean_frames_courting.copy() if courting_frames else mean_frames.copy()
 
 # plot
-fig, ax = plt.subplots(figsize=(3, 1))
+fig, ax = plt.subplots(figsize=(5, 4)) #(3, 1))
 if plot_species_mean:
     sns.barplot(data=plotd, ax=ax, x='species', y=behav,
             color='k', linewidth=1, width=0.5, fill=False)
 if pair_plot_type == 'box':    
-    plot_grouped_boxplots(plotd, grouper='species', x='strain_name', 
+    plot_grouped_boxplots(plotd, grouper='species', x='strain_name_legend', 
                             y=behav, ax=ax, palette=palette, 
                             between_group_spacing=10, within_group_spacing=1.2, 
-                            box_width=1, lw=0.2) 
-#     sns.boxplot(data=plotd, x='species', y=behav, hue='strain_name', ax=ax,
-#             palette=palette, legend=0, fliersize=0,
-#             width=1, gap=0.05, dodge=0.00001, linewidth=0.25)
+                            box_width=1, lw=0.5, edgecolor=bg_color) 
 else:
     sns.stripplot(data=plotd, x='species', y=behav, hue='strain_name', ax=ax, 
             palette=palette, legend=0, jitter=False) #dodge=True)
-ax.set_box_aspect(1.5)
-ax.set_ylim([0, 20])
+sns.move_legend(ax, loc='upper left', bbox_to_anchor=(1.05, 1), 
+                frameon=False, fontsize=6)
+ax.set_box_aspect(1) #1.5) #2)
+ax.set_ylim([0, 25])
 #ax.set_xlim([-0.5, 5])
 sns.despine(trim=True, offset=2, bottom=True)
 ax.set_xlabel('')
 ax.set_ylabel('Interfly distance (mm)')
+plt.subplots_adjust(left=0.1, right=0.9, top=0.8, bottom=0.2)
 
 yak_behav = plotd[plotd['species']=='Dyak'][behav]
 mel_behav = plotd[plotd['species']=='Dmel'][behav]
@@ -1032,13 +1146,16 @@ means = mean_frames_courting.copy() if courting_frames else mean_frames.copy()
 
 plotd = means.groupby(['species', 'strain_name'])\
                 [behav].mean().reset_index().dropna()   
+#plotd = plotd[plotd['dist_to_other']<8].copy()
 # plot
-fig, ax = plt.subplots(figsize=(1, 1))
+fig, ax = plt.subplots(figsize=(4, 4)) #(1, 1))
+markersize=10
 sns.barplot(data=plotd, ax=ax, x='species', y=behav,
-            color='k', linewidth=1, width=0.5, fill=False)
+            color=bg_color, linewidth=1, width=0.25, fill=False, gap=-1)
 sns.stripplot(data=plotd, x='species', y=behav, hue='strain_name', ax=ax, 
-            palette=palette, legend=0, jitter=0.3, s=3, linewidth=0.1, dodge=False)
-ax.set_box_aspect(1.5)
+            palette=palette, legend=0, jitter=0.2, s=markersize, linewidth=0.1, 
+            dodge=False)
+ax.set_box_aspect(1)
 ax.set_xlabel('')
 ax.set_ylim([0, 15])
 ax.set_xlim([-0.5, 1.5])
@@ -1056,13 +1173,18 @@ elif res.pvalue < 0.05:
     ax.annotate('*', xy=(0.5, 0.95), #ax.get_ylim()[-1]), 
                 xycoords='axes fraction', ha='center', va='center')
 sns.despine(trim=True, offset=2, bottom=True)
+plt.subplots_adjust(left=0.2, right=0.9, top=0.8, bottom=0.2)
 
 figname = 'dist_to_other_{}_species-means'.format(data_type)
 plt.savefig(os.path.join(figdir, figname+'.png'))
 plt.savefig(os.path.join(figdir, figname+'.svg'))
 
+#%%
 
-#%% # Binn dist_to_other
+# Bin dist_to_other and see how it affects p(singing) and p(chasing)
+# -------------------------------------------------
+
+# Bin dist_to_other
 bin_size = 5 #3 
 max_dist = 30 #25#np.ceil(ftjaaba['dist_to_other'].max())
 dist_bins = np.arange(0, max_dist+bin_size, bin_size)
@@ -1074,15 +1196,8 @@ ftj['binned_dist_to_other'] = pd.cut(ftj['dist_to_other'],
                                     labels=dist_bins[:-1])   
 ftj['binned_dist_to_other'] = ftj['binned_dist_to_other'].astype(float)
 
-#%%
-def add_legend_column_with_N(ftj, key='strain', 
-                    grouper=['species', 'strain', 'acquisition', 'fly_pair']):
-    conds = ftj[grouper].drop_duplicates()
-    counts = conds.groupby([key])['fly_pair'].count()
-    ftj['{}_legend'.format(key)] = ftj[[key]].applymap(lambda x: '{} (n={})'.format(x, counts[x]))
-  
-    return ftj, counts
-
+#%
+# Add legend column with N of each strain
 grouper = ['species', 'strain', 'strain_name', 'acquisition', 'fly_pair']
 ftj, counts = add_legend_column_with_N(ftj, key='strain_name', grouper=grouper)
 #
@@ -1099,8 +1214,9 @@ meanbouts_orienting = ftj[ftj['sex']=='m'].groupby([
                     'species', 'strain', 'strain_name_legend', 'acquisition', 'fly_pair', #'behavior', 
                     'binned_dist_to_other'])[plot_vars].mean().reset_index()
 
-#%% # Bin dist_to_other during chasing and singing
-#species_palette = {'Dmel': 'lavender', 
+#%% 
+# PLOT:  Bin dist_to_other during chasing and singing (all strains per species)
+# -------------------------------------------------
 plot_bar = True
 grouper_palette = 'cubehelix'
 error_type = 'ci'
@@ -1109,7 +1225,7 @@ plot_pairs = False
 plot_type = 'bar' if plot_bar else 'point'
 
 for curr_species, df_ in meanbouts_courting.groupby('species'): #_courting.groupby('species'):
-    fig, axn = plt.subplots(1, 3, figsize=(8, 4), sharex=True, sharey=False)
+    fig, axn = plt.subplots(1, 3, figsize=(15, 4), sharex=True, sharey=False)
     for ai, behav in enumerate(['orienting_binary', 'chasing_binary', 'singing_binary_manual']):
         if behav == 'orienting_binary':
             df_ = meanbouts_orienting[meanbouts_orienting['species']==curr_species]
@@ -1157,16 +1273,17 @@ for curr_species, df_ in meanbouts_courting.groupby('species'): #_courting.group
     putil.label_figure(fig, figid)
     figname = 'p_singing_chasing_v_binned_dist_to_other_bin-{}_{}_{}'.format(bin_size, plot_type, curr_species)
     plt.savefig(os.path.join(figdir, figname+'.png'))
-
+    print(figname)
+    
 #%%
-# just look at RL strains
-#% plot
+# PLOT: p(chasing) and p(singing) by binned dist for RL strains
+# only, recreate old analyses
 species_palette = {'Dmel': 'lavender', 
                    'Dyak': 'mediumorchid'}
 error_type = 'ci'
 
-yak_strain = 'RL_Ruta_Lab'
-mel_strains = ['CS_Mai', 'SD105N_(Intermediate_Usually_Aroused)']
+yak_strain = 'RL Ruta Lab'
+mel_strains = ['CS Mai', 'SD105N']
 
 yak = ftj[(ftj['species']=='Dyak') & (ftj['strain']==yak_strain) * (ftj['sex']=='m')]
 
@@ -1214,7 +1331,8 @@ for mel_strain in mel_strains:
     # plot
     figname = 'pSinging_binned_dist_to_other_{}_{}'.format(yak_strain, mel_strain)
     plt.savefig(os.path.join(figdir, figname+'.png'))   
-
+    print(figname)
+    
 #%%
 # Cumulative dist_to_other histograms, split by behavior:
 c1 = 'purple'
@@ -1228,7 +1346,7 @@ mel_strains = strains_in_group['Dmel']
 species_palette = dict((k, c2) for k in yak_strains) 
 species_palette.update(dict((k, c1) for k in mel_strains))
 
-fig, axn = plt.subplots(1, 3, figsize=(6,3), sharex=True, sharey=True)
+fig, axn = plt.subplots(1, 3, figsize=(6,4), sharex=True, sharey=True)
 for curr_species, df_ in ftj.groupby('species'):
     for ai, beh in enumerate(['orienting_binary', 'chasing_binary', 'singing_clean_binary']):
         plotd = df_[df_[beh]==True].copy().reset_index(drop=True)
@@ -1244,13 +1362,13 @@ for curr_species, df_ in ftj.groupby('species'):
         sns.histplot(data=plotd, ax=ax,
                     x='dist_to_other', bins=hist_bins, stat='probability',
                     hue='strain_name', common_norm=False,
-                    element='step', lw=0.5, alpha=1, fill=fill, cumulative=cumulative,
-                    #color=species_palette[curr_species])
-                    palette=species_palette)
+                    element='step', lw=0.5, alpha=1, 
+                    fill=fill, cumulative=cumulative, palette=species_palette)
         if ai <= 1:
             ax.legend_.remove()
-    sns.move_legend(ax, loc='upper left', bbox_to_anchor=(1,1), frameon=False, 
-                title='')
+        else:
+            sns.move_legend(ax, loc='upper left', bbox_to_anchor=(1,1), 
+                frameon=False, title='')
 for ax in axn:
     #ax.set_ylim([0, ylim])
     ax.set_box_aspect(1)

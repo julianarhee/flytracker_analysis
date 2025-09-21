@@ -17,10 +17,15 @@ import seaborn as sns
 
 import utils as util
 import plotting as putil
+#%%
+
+plot_style='dark'
+putil.set_sns_style(style=plot_style, min_fontsize=18)
+bg_color = [0.7]*3 if plot_style=='dark' else 'k'
 
 #%%
 
-assay = '2d_projector'
+assay = 'free_behavior' #'2d_projector'
 
 if assay == '2d_projector':
     basedir = '/Volumes/Juliana/2d_projector_analysis/circle_diffspeeds/FlyTracker'
@@ -29,7 +34,9 @@ else:
     srcdir = '/Volumes/Giacomo/free_behavior_data'
 
 figdir = os.path.join(basedir, 'plot_example_trajectory')
-
+if plot_style == 'white':
+    figdir = os.path.join(figdir, 'white')
+    
 if not os.path.exists(figdir):
     os.makedirs(figdir)
 print('figdir:', figdir)
@@ -134,6 +141,35 @@ elif curr_species == 'Dele':
 #%% # 
 import cv2
 
+def plot_extracted_objects(cap, ix, crop=False,
+                           ratio_for_kernel=20, thresh_value=20, counter_ix=5,
+                           minR_frac=0.05, maxR_frac=0.5, testing=False):
+    #ix = 6439
+    cap.set(1, ix)
+    ret, img = cap.read()
+    gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY) #COLOR_BGR2RGB)
+    h, w = gray.shape 
+
+    # Mask image
+    #ratio_for_kernel = 5
+    #thresh_value = 70
+    mask_two = get_mask(gray, crop=crop, 
+                        ratio_for_kernel=ratio_for_kernel,
+                        thresh_value=thresh_value, use_adaptive=False,
+                        counter_ix=counter_ix, minR_frac=minR_frac, maxR_frac=maxR_frac
+    )
+    
+    # 6. Build the final RGBA: copy original RGB into channels 0–2, and use mask_two as alpha
+    rgba = np.zeros((h, w, 4), dtype=np.uint8)
+    rgba[..., :3] = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+    rgba[..., 3]  = mask_two
+    
+    if testing:
+        plt.figure()
+        plt.imshow(rgba)
+
+    return rgba
+
 def video_frames_to_rgba(cap, frame_range, crop=False,
                          #min_dist=5, param1=200, param2=1, minR=None, maxR=None,
                          ratio_for_kernel=10, thresh_value=20, counter_ix=2,
@@ -152,27 +188,12 @@ def video_frames_to_rgba(cap, frame_range, crop=False,
         #ix = frame_range[5] # 0, 1, 5
         #ix = 7454
         #print(ix)
-        cap.set(1, ix)
-        ret, img = cap.read()
-        gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY) #COLOR_BGR2RGB)
-        h, w = gray.shape 
-
-        # Mask image
-        thresh_value = 70
-        ratio_for_kernel = 5
-        mask_two = get_mask(gray, crop=crop, 
-                            ratio_for_kernel=ratio_for_kernel,
-                            thresh_value=thresh_value, use_adaptive=False,
-                            counter_ix=counter_ix, minR_frac=0.05, maxR_frac=0.5
-    )
-     
-        # 6. Build the final RGBA: copy original RGB into channels 0–2, and use mask_two as alpha
-        rgba = np.zeros((h, w, 4), dtype=np.uint8)
-        rgba[..., :3] = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
-        rgba[..., 3]  = mask_two
-
-        #plt.figure()
-        #plt.imshow(rgba)
+        #ix = 6439
+        rgba = plot_extracted_objects(cap, ix, crop=crop,
+                                       ratio_for_kernel=ratio_for_kernel,
+                                       thresh_value=thresh_value, counter_ix=counter_ix,
+                                       minR_frac=minR_frac, maxR_frac=maxR_frac, 
+                                       testing=False)
         #%
         # 7. Flatten the RGBA to a 2D array if want on white background
         # outim = flatten_rgba(rgba, background='white')
@@ -268,18 +289,26 @@ def crop_inside_circle(img, dp=1.2, min_dist=None, param1=100, param2=30,
     return masked_img, (cx, cy, r)
 
 #%% TEST ZONE
+# Take a frame and test image thresholing
+# ---------------------------------------------------
 testing =  True
+ix = 6451
 if testing == True:
     #ix = 7515 #frame_range[50]
-    ix = frame_range[5]
+    #ix = frame_range[0]
     cap.set(1, ix)
     ret, img = cap.read()
     gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY) #COLOR_BGR2RGB)
     h, w = gray.shape 
 
-    ratio_for_kernel = 5 #12
-    thresh_value = 70
-
+    # PROJECTOR: 
+    #ratio_for_kernel = 5 #12
+    #thresh_value = 70
+    # ------
+    # FREE-BEHAVIOR:
+    ratio_for_kernel =5
+    thresh_value = 30 
+    #% ----
     min_dist = 1
     param1 = 300
     param2 = 1
@@ -288,9 +317,6 @@ if testing == True:
 
     h, w = gray.shape
 
-    min_dist = 1
-    param1 = 300
-    param2 = 1
     #minR = int(min(gray.shape)*0.05)
     #maxR = int(max(gray.shape)*5)
     #cropped_img, (cx, cy, r) = crop_inside_circle(gray, min_dist=min_dist, param1=param1, param2=2,
@@ -315,9 +341,11 @@ if testing == True:
     # 2) Crop/mask everything outside the detected circle
     min_dist = 1
     param1 = 300
-    param2 = 1
-    minR = int(min(gray.shape)*0.05)
-    maxR = int(min(gray.shape)*0.5)
+    param2 = 100
+    minR_frac = 0.05
+    maxR_frac =0.75
+    minR = int(min(gray.shape)*minR_frac)
+    maxR = int(min(gray.shape)*maxR_frac)
     cropped_img, (cx, cy, r) = crop_inside_circle(thresh, min_dist=min_dist, param1=param1, param2=2,
                                                    min_radius=minR, max_radius=maxR)
     #thresh = cropped_img
@@ -360,7 +388,15 @@ if testing == True:
     ax.imshow(thresh, cmap='gray')
     ax=axn[2]
     ax.imshow(mask_two, cmap='gray') 
-            
+
+#%%
+minR_frac = 0.05
+maxR_frac =0.75
+plot_extracted_objects(cap, ix, crop=False, 
+                        ratio_for_kernel=ratio_for_kernel,
+                        thresh_value=thresh_value, counter_ix=counter_ix,
+                        minR_frac=minR_frac, maxR_frac=maxR_frac, testing=True)
+
 
 #%%k 
 def get_mask(gray, ratio_for_kernel=10, thresh_value=20, use_adaptive=False,
@@ -865,9 +901,9 @@ def separate_objects_by_centroid(rgba_list):
 #%%
 import pickle as pkl
 
-
 # Try loading frames 
 frame_fpath = os.path.join(figdir, 'frames_{}.pkl'.format(acquisition))
+print(frame_fpath)
 create_new = False 
 
 if create_new is False and os.path.exists(frame_fpath):
@@ -879,6 +915,7 @@ else:
 print(create_new)
     
 #%%a
+#crop = False
 if assay == '2d_projector':
     print("2d")
     ratio_for_kernel = 5# 10
@@ -886,6 +923,18 @@ if assay == '2d_projector':
     counter_ix = 5
     minR_frac=0.05
     maxR_frac=0.5
+    use_adaptive = False    
+    # Cropping parms, to remove bright edge of aren
+    min_dist=1; param1=300; param2=2;
+    #minR=None, maxR=None,
+    crop=True
+else:
+    print("free behavior")
+    ratio_for_kernel = 5 #20# 10
+    thresh_value = 30 #50
+    counter_ix = 5
+    minR_frac=0.05
+    maxR_frac=0.75
     use_adaptive = False    
     # Cropping parms, to remove bright edge of aren
     min_dist=1; param1=300; param2=2;
@@ -900,7 +949,7 @@ if create_new:
     if len(found_vidpaths) > 1:
         for vi, v in enumerate(found_vidpaths):
             print(os.path.split(v)[-1])
-    vidpath = found_vidpaths[3]  # Assuming you want the first video file
+    vidpath = found_vidpaths[0] #[3]  # Assuming you want the first video file
     print(vidpath)
 
     # Load video
@@ -918,29 +967,42 @@ if create_new:
         # Make a list of frames to process
         # -----------
         #start_frame, stop_frame = bouts[0]
+        #%
+        #ix = 0 
+        start_fram, stop_frame = bouts[ix]
+        print("Processing frames {} to {}".format(start_frame, stop_frame))
+        print(ix)
         frame_range = np.arange(start_frame, stop_frame) #, interval)
         rgba_list = video_frames_to_rgba(cap, frame_range, crop=crop,
                                         ratio_for_kernel = ratio_for_kernel, #12
                                         thresh_value = thresh_value,
                                         counter_ix = counter_ix,
                                         minR_frac=minR_frac, maxR_frac=maxR_frac) 
-        if assay == '2d_projector':
-            print("Extracting")
-            # For 2D projector, we need to crop the image to remove the bright edge
-            extracted_rgba = [extract_two_darkest_blobs_from_rgba(rgba, thresh_val=240) for rgba in rgba_list] 
-            #ext = extract_two_darkest_blobs_from_rgba(rgba_list[0], thresh_val=240, 
-            #                                opening_kernel_size=5, min_blob_area=50)
-            #plt.figure()
-            #plt.imshow(ext, cmap='gray')
-        else:
-            # For 3D projector, we can use the original RGBA images directly
-            extracted_rgba = rgba_list 
+        #if assay == '2d_projector':
+        print("Extracting")
+        # For 2D projector, we need to crop the image to remove the bright edge
+        extracted_rgba = []
+        for i, rgba in enumerate(rgba_list):
+            # Extract the two darkest blobs from each RGBA image
+            # This will return a new RGBA image with only the two darkest blobs
+            extracted_ = extract_two_darkest_blobs_from_rgba(rgba, 
+                                    thresh_val=240, 
+                                    opening_kernel_size=5, min_blob_area=50)
+            extracted_rgba.append(extracted_)
+        #extracted_rgba = [extract_two_darkest_blobs_from_rgba(rgba, thresh_val=240) for rgba in rgba_list] 
+        #ext = extract_two_darkest_blobs_from_rgba(rgba_list[0], thresh_val=240, 
+        #                                opening_kernel_size=5, min_blob_area=50)
+        #plt.figure()
+        #plt.imshow(ext, cmap='gray')
+        #else:
+        #    # For 3D projector, we can use the original RGBA images directly
+        #    extracted_rgba = rgba_list 
         #%
         # Separate male and female
         # Now `list_A` and `list_B` each contain 10 single-object RGBA images, consistently tracked
         # left is A, right is B for first frame
         list_A, list_B = separate_objects_by_centroid(extracted_rgba)    
-
+        #%
         #plt.figure()
         #plt.imshow(list_A[5]); plt.imshow(list_B[5])
         #% 
@@ -1011,7 +1073,8 @@ for (start_frame, end_frame), (ix, (list_A, list_B)) in zip(bouts, frame_dict.it
     
     # Set cbar title
     figname = 'overlaid_{}__{}_fr{}-{}'.format(curr_species, acquisition, start_frame, stop_frame)
-    plt.savefig(os.path.join(figdir, '{}.png'.format(figname)), dpi=300, bbox_inches='tight')
+    plt.savefig(os.path.join(figdir, '{}.png'.format(figname)), 
+                dpi=300, bbox_inches='tight')
 
 #%%
 

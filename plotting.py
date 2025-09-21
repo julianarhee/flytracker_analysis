@@ -16,7 +16,7 @@ import pylab as pl
 import seaborn as sns
 
 import utils as util
-
+import matplotlib.pyplot as plt
 ## generic
 # ----------------------------------------------------------------------
 # Visualization 
@@ -49,7 +49,9 @@ def set_sns_style(style='dark', min_fontsize=6):
                     'text.color': 'white',
                     'axes.facecolor': 'black',
                     'axes.grid': False,
-                    'figure.facecolor': 'black'}
+                    'figure.facecolor': 'black',
+                    'savefig.facecolor': 'black',
+                    'savefig.edgecolor': 'none'}
         custom_style.update(font_styles)
 
 #        pl.rcParams['figure.facecolor'] = 'black'
@@ -515,3 +517,71 @@ def add_colored_lines(b_, ax, xvar='ft_posx', yvar='ft_posy',
     ax.add_collection(coll)
     return ax
 
+
+#%%
+def plot_grouped_boxplots(mean_, palette='PRGn', 
+                            between_group_spacing=1.5, 
+                            within_group_spacing=0.5, box_width=0.3,
+                            grouper='species', lw=0.5,
+                            x='strain_name', y='vel', ax=None,
+                            edgecolor='black'):
+    '''
+    Seaborn's box plot doesn't allow custom spacing (no gap functionality). 
+    Custom function to plot boxplots with custom spacing.
+    
+    Args:
+        mean_ (pd.DataFrame): Dataframe with mean values for each group
+        palette (str): Seaborn color palette
+        group_spacing (float): Spacing between groups
+        x_spacing (float): Spacing between boxes within a group
+        grouper (str): Column name to group by
+        x (str): Column name for x-axis
+        y (str): Column name for y-axis
+        ax (matplotlib.axes.Axes): Axes to plot on, if None create new figure and axes 
+    '''
+    if ax is None:
+        fig, ax = plt.subplots()
+        
+    species_order = mean_[grouper].unique()
+    strain_order = mean_[x].unique()
+    strain_palette = sns.color_palette(palette, n_colors=len(strain_order))
+    strain_colors = dict(zip(strain_order, strain_palette))
+    # Set spacing
+    #group_spacing = 1.5
+    #x_spacing = 0.2
+    # Set positions
+    positions = {}
+    x_ticks = []
+    x_tick_labels = []
+    x_pos = 0
+    for species in species_order:
+        strains = mean_[mean_[grouper] == species][x].unique()
+        n = len(strains)
+        # Center strains around the group midpoint
+        offsets = [(i - (n - 1) / 2) * within_group_spacing for i in range(n)] 
+        for i, strain in enumerate(strains):
+            positions[(species, strain)] = x_pos + offsets[i] #i * within_group_spacing
+        x_ticks.append(x_pos) #x_pos + (len(strains) - 1) * within_group_spacing / 2)
+        x_tick_labels.append(species)
+        x_pos += between_group_spacing  # move to next species group
+    # Plot
+    for (species, strain), pos in positions.items():
+        data = mean_[(mean_[grouper] == species) & (mean_[x] == strain)][y]
+        ax.boxplot(data, positions=[pos], widths=box_width, patch_artist=True,
+                boxprops=dict(facecolor=strain_colors[strain], 
+                              edgecolor=edgecolor,
+                              linewidth=lw),
+                whiskerprops=dict(color=edgecolor, linewidth=lw),
+                capprops=dict(color=edgecolor, linewidth=lw),
+                medianprops=dict(color=edgecolor), 
+                flierprops=dict(marker='o', markersize=0, color=edgecolor))
+    # Axis labels and legend
+    ax.set_xticks(x_ticks)
+    ax.set_xticklabels(x_tick_labels) 
+    # Legend
+#     if ai==2:
+#         for strain in strain_order:
+#             ax.plot([], [], color=strain_colors[strain], label=strain, 
+#                     linewidth=5)
+#         ax.legend(title='Strain', bbox_to_anchor=(1.05, 1), loc='upper left')
+    return ax
