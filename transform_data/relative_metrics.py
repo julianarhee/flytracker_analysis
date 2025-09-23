@@ -579,6 +579,9 @@ def do_transformations_on_df(trk_, frame_width, frame_height,
     fly1['targ_centered_to_focal_x'] = fly2['trans_x']
     fly1['targ_centered_to_focal_y'] = fly2['trans_y']
 
+    fly1['target_vel'] = fly2['vel']
+    fly1['target_ang_vel'] = fly2['ang_vel']
+
     # rotate coordinates so that fly1 is facing 0 degrees (East)
     # Assumes fly1 ORI goes from 0 to pi CCW, with y-axis NOT-inverted.
     # if using FlyTracker, trk_['ori'] = -1*trk_['ori']
@@ -604,6 +607,10 @@ def do_transformations_on_df(trk_, frame_width, frame_height,
 
     fly2['targ_centered_to_focal_x'] = fly1['trans_x']
     fly2['targ_centered_to_focal_y'] = fly1['trans_y']
+
+    fly2['target_vel'] = fly1['vel']
+    fly2['target_ang_vel'] = fly1['ang_vel']
+
 
     # rotate coordinates so that fly1 is facing 0 degrees (East)
     # Assumes fly1 ORI goes from 0 to pi CCW, with y-axis NOT-inverted.
