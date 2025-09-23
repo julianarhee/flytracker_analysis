@@ -14,6 +14,7 @@ import os
 import glob
 
 import numpy as np
+from numpy._typing import _128Bit
 import pandas as pd
 import seaborn as sns
 import matplotlib.pyplot as plt
@@ -26,7 +27,7 @@ import transform_data.relative_metrics as rel
 
 def transform_projector_data(acquisition_parentdir, acqs, processedmat_dir, 
                             movie_fmt='.avi',subdir=None, flyid1=0, flyid2=1,
-                            create_new=False, reassign_acquisition=False):
+                            create_new=False, reassign_acquisition_name=False):
     """
     Load transformed projector data for specified acquisitions.
     """
@@ -54,11 +55,11 @@ def transform_projector_data(acquisition_parentdir, acqs, processedmat_dir,
             continue
         df_['file_name'] = os.path.split(acq)[-1]
         df_['species'] = 'Dmel' if 'mel' in acq else 'Dyak'
-        if reassign_acquisition:
+        if reassign_acquisition_name:
             df_['date_fly'] = ['_'.join([f.split('-')[0], f.split('_')[1]]) for f in df_['file_name']]
             df_['acquisition'] = ['_'.join([a, b]) for a, b in df_[['date_fly', 'species']].values]
         else:
-            df_['acquisition'] = acq 
+            df_['acquisition'] = acq #os.path.split(acq)[-1] 
         d_list.append(df_)
 
     df0 = pd.concat(d_list)
@@ -89,7 +90,7 @@ def assign_paint_conditions(df0, meta):
 
     return df0
 #%%
-plot_style='dark'
+plot_style='white'
 min_fontsize=18
 putil.set_sns_style(style=plot_style, min_fontsize=min_fontsize)
 bg_color = [0.7]*3 if plot_style=='dark' else 'k'
@@ -150,7 +151,7 @@ elif assay == '38mm_dyad':
     found_acqs = glob.glob(os.path.join(acquisition_parentdir, '202*'))
     # Get list of acquisitions    
     # Check if is directory
-    acqs = [a for a in found_acqs if os.path.isdir(a)]
+    acqs = [os.path.split(a)[-1] for a in found_acqs if os.path.isdir(a)]
     print(len(acqs))
      
     
@@ -163,7 +164,7 @@ print("saving figures to {}".format(figdir))
 
 #%% 
 create_new = True #False
-reassign_acquisition = False
+reassign_acquisition_name = False
 
 if create_new:
     # Transform data 
@@ -171,7 +172,7 @@ if create_new:
                                         processedmat_dir, movie_fmt='.avi',
                                         subdir=None, flyid1=0, flyid2=1,
                                         create_new=False, 
-                                        reassign_acquisition=reassign_acquisition)
+                                        reassign_acquisition_name=reassign_acquisition_name)
     if assay == '38mm_projector':
         df0 = assign_paint_conditions(df0, meta1)
         
@@ -220,15 +221,93 @@ f1 = rel.calculate_angle_metrics_focal_fly(f1, winsize=5, grouper=grouper)
 import matplotlib as mpl
 # Check targ_ang_vel, is negative CW or CCW?
 # Plot on polar plot
-mel_acqs = f1[f1['species']=='Dmel']['acquisition'].unique()
-acq = mel_acqs[4]
-
+sp = 'Dyak'
+curr_acqs = f1[f1['species']==sp]['acquisition'].unique()
+acq = curr_acqs[4]
+print(acq)
 #plotd = f1[(f1['species']=='Dmel') & (f1['acquisition']==acq)].iloc[6855:6863] # target on fly's RIGHT (plots on upper-right hand side) | (starts y+ then gets smaller/down, angvel targ is neg)
 #plotd = f1[(f1['species']=='Dmel') & (f1['acquisition']==acq)].iloc[7952:7974] #7930] # target on fly's RIGHT, then center (plots on upper-right hand side | starts y+ then to 0, angvel targ is neg))
-plotd = f1[(f1['species']=='Dmel') & (f1['acquisition']==acq)].iloc[11276:11321] # target on fly's LEFT, then crosses ot right, target is moving rightward (starts on bottom-left, goes to upper-right | starts negative y, then positive y | angvel targ is positive )
-plotd = f1[(f1['species']=='Dmel') & (f1['acquisition']==acq)].iloc[14588:14606] # target on fly's LEFT, then slightly on right, target is moving rightward (starts on bottom-left, goes to upper-right | starts negative y, then positive y | angvel targ is positive )
+s_ = 0
+e_ = 15
 
-plot_polar = False
+#s_ = 120
+#e_ = 150
+
+s_ = 20598
+e_ = 20598+15
+
+f_ = f1[(f1['species']==sp) & (f1['acquisition']==acq)].copy()
+plotd = f_.iloc[s_:e_] # target on fly's LEFT, then crosses ot right, target is moving rightward (starts on bottom-left, goes to upper-right | starts negative y, then positive y | angvel targ is positive )
+#plotd = f1[(f1['species']==sp) & (f1['acquisition']==acq)].iloc[14588:14606] # target on fly's LEFT, then slightly on right, target is moving rightward (starts on bottom-left, goes to upper-right | starts negative y, then positive y | angvel targ is positive )
+
+#% find where f_['targ_ang_vel'] meets threshold condition for consecutive frames
+def find_consecutive_frames(series, threshold=0, condition='less', min_consecutive=10):
+    """
+    Find indices where a series meets threshold condition for at least min_consecutive consecutive frames.
+    
+    Parameters:
+    - series: pandas Series to analyze
+    - threshold: value to compare against
+    - condition: 'less', 'greater', 'less_equal', 'greater_equal', 'equal'
+    - min_consecutive: minimum number of consecutive frames required
+    
+    Returns a list of (start_idx, end_idx) tuples for each consecutive sequence.
+    """
+    if condition == 'less':
+        is_condition = series < threshold
+    elif condition == 'greater':
+        is_condition = series > threshold
+    elif condition == 'less_equal':
+        is_condition = series <= threshold
+    elif condition == 'greater_equal':
+        is_condition = series >= threshold
+    elif condition == 'equal':
+        is_condition = series == threshold
+    else:
+        raise ValueError("condition must be one of: 'less', 'greater', 'less_equal', 'greater_equal', 'equal'")
+    
+    # Find transitions from False to True and True to False
+    transitions = np.diff(np.concatenate([[False], is_condition, [False]]).astype(int))
+    starts = np.where(transitions == 1)[0]
+    ends = np.where(transitions == -1)[0]
+    
+    # Filter for sequences that are at least min_consecutive long
+    consecutive_sequences = []
+    for start, end in zip(starts, ends):
+        if end - start >= min_consecutive:
+            consecutive_sequences.append((start, end))
+    
+    return consecutive_sequences
+
+# Find consecutive frames below threshold
+threshold_low = -5  # Adjust this value as needed
+min_consecutive = 10
+condition = 'less'
+low_sequences = find_consecutive_frames(f_['targ_ang_vel'], threshold=threshold_low, 
+                                        condition='less', 
+                                        min_consecutive=min_consecutive)
+print(f"Found {len(low_sequences)} sequences where targ_ang_vel < {threshold_low} for {min_consecutive}+ consecutive frames:")
+for i, (start, end) in enumerate(low_sequences):
+    print(f"  Sequence {i+1}: frames {start} to {end-1} (length: {end-start})")
+    print(f"    Values: {f_['targ_ang_vel'].iloc[start:end].values}")
+
+# Find consecutive frames above threshold
+threshold_high = 5  # Adjust this value as needed
+condition = 'greater'
+high_sequences = find_consecutive_frames(f_['targ_ang_vel'], threshold=threshold_high, 
+                                         condition='greater', min_consecutive=min_consecutive)
+print(f"\nFound {len(high_sequences)} sequences where targ_ang_vel > {threshold_high} for {min_consecutive}+ consecutive frames:")
+for i, (start, end) in enumerate(high_sequences):
+    print(f"  Sequence {i+1}: frames {start} to {end-1} (length: {end-start})")
+    print(f"    Values: {f_['targ_ang_vel'].iloc[start:end].values}")
+
+seq = high_sequences[4]
+s_ = seq[0]#215284
+e_ = seq[1] #215294
+print("FRAMES: ", s_, e_)
+plotd = f_.iloc[s_:e_]
+
+plot_polar = True
 
 if plot_polar:
     fig, axn = plt.subplots(1, 2, subplot_kw={'projection': 'polar'})
@@ -249,19 +328,75 @@ if plot_polar:
 else:
     fig, axn = plt.subplots(1, 2, figsize=(10,5), sharex=True, sharey=True)
     ax=axn[0]
-    sns.scatterplot(data=plotd, x='targ_rel_pos_x', y='targ_rel_pos_y', 
+    sns.scatterplot(data=plotd, x='targ_rel_pos_y', y='targ_rel_pos_x', 
                     hue='sec', ax=ax,
                     palette='viridis', edgecolor='none', alpha=1, legend=0)
     ax=axn[1]
     hue_norm = mpl.colors.TwoSlopeNorm(vcenter=0, vmin=-5, vmax=5)
-    sns.scatterplot(data=plotd, x='targ_rel_pos_x', y='targ_rel_pos_y', 
+    sns.scatterplot(data=plotd, x='targ_rel_pos_y', y='targ_rel_pos_x', 
                     hue='targ_ang_vel', ax=ax,
                     palette='coolwarm', edgecolor='none', alpha=1, legend=0,
                     hue_norm=hue_norm)
-    ax.axvline(x=0, color=bg_color, linestyle='--', lw=0.5)
+    for ax in axn:
+        ax.axvline(x=0, color=bg_color, linestyle='--', lw=0.5)
+        ax.axhline(y=0, color=bg_color, linestyle='--', lw=0.5)
+    #ax.invert_yaxis()
+
+fig.suptitle('{}: {} ({} - {})'.format(sp, acq, s_, e_), fontsize=8)
+
+#%%
+
+
+seq = low_sequences[2]
+s_ = seq[0]#215284
+e_ = seq[1] #215294
+print("FRAMES: ", s_, e_)
+plotd = f_.iloc[s_:e_]
+
+hue_norm = mpl.colors.TwoSlopeNorm(vcenter=0, vmin=-5, vmax=5)
+
+# Calculate 
+fig, axn = plt.subplots(1, 3, subplot_kw={'projection': 'polar'})
+ax=axn[0]
+sns.scatterplot(data=plotd, x='targ_pos_theta', y='targ_pos_radius', 
+                hue='sec', ax=ax,
+                palette='viridis', edgecolor='none', alpha=1, legend=0)
+ax=axn[1]
+
+ax.set_title('hue: theta_error_dt_deg')
+sns.scatterplot(data=plotd, x='theta_error', y='dist_to_other', ax=ax, 
+                #hue='targ_ang_vel',
+                hue='theta_error_dt_deg', hue_norm=hue_norm,
+                palette='coolwarm', edgecolor='none', alpha=1, legend=0)
+ax=axn[2]
+ax.set_title('hue: targ_ang_vel')
+sns.scatterplot(data=plotd, x='theta_error', y='dist_to_other', ax=ax, 
+                    hue='targ_ang_vel', 
+                    palette='coolwarm', edgecolor='none', alpha=1, legend=0,
+                    hue_norm=hue_norm)
+fig.suptitle('{}: {} ({} - {})'.format(sp, acq, s_, e_), fontsize=6)
+
+fig, ax = plt.subplots()
+sns.scatterplot(data=plotd, x='theta_error_deg', y='dist_to_other', 
+                hue='sec', ax=ax,
+                palette='viridis', edgecolor='none', alpha=1, legend=0)
 
 
 #%%
+
+fig, ax= plt.subplots()
+sns.scatterplot(data=plotd, x='theta_error_dt_deg', y='targ_ang_vel_deg', ax=ax,
+                palette='viridis', edgecolor='none', alpha=1, legend=0)
+ax.set_xlabel('Theta error (deg)')
+ax.set_ylabel('Targ. ang. vel. (rad/s)')
+ax.set_title('{}: {} ({} - {})'.format(sp, acq, s_, e_))
+ax.set_aspect(1)
+
+
+#%%
+
+
+
 
 
 #%%
@@ -317,8 +452,12 @@ def bin_by_object_position(chase_, start_bin = -180, end_bin=180, bin_size=20):
 #%%
 
 # Count N frames total and N frames chasing_heuristic==True
+if assay == '38mm_projector':
+    grouper = ['species', 'acquisition', 'stim_direction']
+else:
+    grouper = ['species', 'acquisition']
 chase_counts = the.count_chasing_frames(f1, 
-                        grouper=['species', 'acquisition', 'stim_direction'],
+                        grouper=grouper,
                         chase_var='chasing_heuristic')
 print(chase_counts)
 #%%
@@ -376,6 +515,11 @@ yvar = 'ang_vel_fly_shifted'
 avg_ang_vel = chase_.groupby(grouper)[yvar].mean().reset_index()
 
 #%%
+
+stim_palette = {'CW': 'cyan', 'CCW': 'magenta'}
+start_bin = -180
+end_bin = 180
+
 # Get average ang vel across bins
 grouper = ['species', 'acquisition', 'binned_theta_error']
 if assay == '38mm_projector':
@@ -410,7 +554,7 @@ for si, (sp, plotd) in enumerate(avg_ang_vel_no_levels.groupby('species')):
     ax.set_xlabel('Object position (deg)')
     ax.set_ylabel('Ang. vel. shifted (rad/s)')
     #putil.label_figure(fig, figid) 
-fig.suptitle('courtship level: {}'.format(lvl))    
+fig.suptitle('all courtship levels')    
 
 figname = 'turns_by_objectpos_{}_CCW-CW_{}'.format(yvar, sp)
 print(figdir, figname)
@@ -485,3 +629,25 @@ print(figdir, figname)
 
    
 # %%
+fig, axn = plt.subplots(1, 2, figsize=(8, 4), sharex=True, sharey=True)
+for si, (sdir, plotd) in enumerate(avg_ang_vel.groupby('species')):
+#plotd = avg_ang_vel[avg_ang_vel['stim_direction']=='CW'].copy()
+    ax=axn[si]
+    sns.lineplot(data=plotd, x='binned_theta_error', y=yvar,
+                    hue='species', palette=species_palette, ax=ax,
+                    errorbar='se', marker='o') #errwidth=0.5)
+    ax.axvline(x=0, color=bg_color, linestyle='--', lw=0.5)
+    ax.axhline(y=0, color=bg_color, linestyle='--', lw=0.5)
+    ax.set_xticks(np.linspace(start_bin, end_bin, 5))
+    ax.set_title(sdir)
+    if si==0:
+        ax.legend_.remove()
+    else:
+        sns.move_legend(ax, 'upper left', bbox_to_anchor=(1, 1),
+                        frameon=False, title='species', fontsize=min_fontsize-2)
+    ax.set_xlabel('Object position (deg)')
+    ax.set_ylabel('Ang. vel. shifted (rad/s)')
+  
+figname = 'turns_by_objectpos_{}_by_stimdir'.format(yvar)
+print(figdir, figname)
+#plt.savefig(os.path.join(figdir, '{}.png'.format(figname)))
