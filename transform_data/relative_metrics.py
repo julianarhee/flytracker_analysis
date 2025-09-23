@@ -569,9 +569,15 @@ def do_transformations_on_df(trk_, frame_width, frame_height,
 
     # FIRST, do fly1: -------------------------------------------------
     # translate coordinates so that focal fly is at origin
+    # Creates trans_x, trans_y
     if verbose:
         print("... translating to focal fly1")
     fly1, fly2 = util.translate_coordinates_to_focal_fly(fly1, fly2)
+    fly1['targ_centered_x'] = fly2['ctr_x']
+    fly1['targ_centered_y'] = fly2['ctr_y']
+
+    fly1['targ_centered_to_focal_x'] = fly2['trans_x']
+    fly1['targ_centered_to_focal_y'] = fly2['trans_y']
 
     # rotate coordinates so that fly1 is facing 0 degrees (East)
     # Assumes fly1 ORI goes from 0 to pi CCW, with y-axis NOT-inverted.
@@ -593,6 +599,11 @@ def do_transformations_on_df(trk_, frame_width, frame_height,
     if verbose:
         print("... now repeating for fly2")
     fly2, fly1 = util.translate_coordinates_to_focal_fly(fly2, fly1)
+    fly2['targ_centered_x'] = fly1['ctr_x']
+    fly2['targ_centered_y'] = fly1['ctr_y']
+
+    fly2['targ_centered_to_focal_x'] = fly1['trans_x']
+    fly2['targ_centered_to_focal_y'] = fly1['trans_y']
 
     # rotate coordinates so that fly1 is facing 0 degrees (East)
     # Assumes fly1 ORI goes from 0 to pi CCW, with y-axis NOT-inverted.
@@ -674,6 +685,7 @@ def do_transformations_on_df(trk_, frame_width, frame_height,
 
 def get_metrics_relative_to_focal_fly(acqdir, mov_is_upstream=False, fps=60, cop_ix=None,
                                       movie_fmt='avi', flyid1=0, flyid2=1,
+                                      default_frame_width=None, default_frame_height=None,
                                       plot_checks=False, get_relative_sizes=True,
                                       save=False, savedir=None, create_new=False):
     '''
@@ -736,8 +748,14 @@ def get_metrics_relative_to_focal_fly(acqdir, mov_is_upstream=False, fps=60, cop
 
     # N frames should equal size of DCL df
     n_frames = cap.get(cv2.CAP_PROP_FRAME_COUNT)
-    frame_width  = cap.get(cv2.CAP_PROP_FRAME_WIDTH)   # float `width`
-    frame_height = cap.get(cv2.CAP_PROP_FRAME_HEIGHT)  # float `height`
+    if n_frames == 0:
+        print("No frames found in video: {}".format(acqdir))
+        print('{}: using default, {}x{}'.format(acq, default_frame_width, default_frame_height))
+        frame_width = default_frame_width
+        frame_height = default_frame_height
+    else:
+        frame_width  = cap.get(cv2.CAP_PROP_FRAME_WIDTH)   # float `width`
+        frame_height = cap.get(cv2.CAP_PROP_FRAME_HEIGHT)  # float `height`
     #print(frame_width, frame_height) # array columns x array rows
     # Check that we have 2 flies
     if trk_['id'].nunique()==1:
@@ -841,7 +859,9 @@ if __name__ == '__main__':
     parser.add_argument('--new', type=bool, default=False, help='Create new processed data (default: False).')
     parser.add_argument('--subdir', type=str, default=None, help='subdir of tracked folders, e.g., fly-tracker (default: None).')
     parser.add_argument('--single', type=bool, default=False, help='Set True if just running one acquisition, provide path to acquisition dir for viddir rather than parent (default: False).')
-   
+    parser.add_argument('--default_frame_width', type=int, default=None, help='Default frame width (default: None).')
+    parser.add_argument('--default_frame_height', type=int, default=None, help='Default frame height (default: None).')
+
     args = parser.parse_args()
     # 
     viddir = args.viddir 
@@ -870,6 +890,8 @@ if __name__ == '__main__':
         flyid2 = 1
         movie_fmt = '.avi'
         create_new=True
+        default_frame_width = None
+        default_frame_height = None
 
 #%%
     if single:
@@ -924,6 +946,8 @@ if __name__ == '__main__':
                                         movie_fmt=movie_fmt, 
                                         mov_is_upstream=subdir is not None,
                                         flyid1=flyid1, flyid2=flyid2,
+                                        default_frame_width=default_frame_width,
+                                        default_frame_height=default_frame_height,
                                         plot_checks=False,
                                         create_new=create_new,
                                         save=create_new)
