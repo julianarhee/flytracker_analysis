@@ -201,12 +201,23 @@ def get_heading_diff(expr, heading_var='integrated_heading', invert_heading=True
     
     return heading_diffs
 
+def bin_x(chase_, xvar, start_bin = -180, end_bin=180, bin_size=20):
+    '''
+    Bin xvar by object position. Convert xvar to degrees.
+    '''
+    chase_['binned_{}'.format(xvar)] = pd.cut(chase_[xvar],
+                                    bins=np.arange(start_bin, end_bin, bin_size),
+                                    labels=np.arange(start_bin+bin_size/2, 
+                                                     end_bin-bin_size/2, bin_size))
+    return chase_
+
+
 # Group by binned theta errors
 def bin_by_object_position(chase_, start_bin = -180, end_bin=180, bin_size=20):
     '''
     Bin theta error by object position. Convert theta error to degrees.
     '''
-    chase_['theta_error_deg'] = np.rad2deg(chase_['theta_error'])
+    #chase_['theta_error_deg'] = np.rad2deg(chase_['theta_error'])
     #start_bin = -180
     #end_bin = 180
     #bin_size = 20
@@ -218,7 +229,7 @@ def bin_by_object_position(chase_, start_bin = -180, end_bin=180, bin_size=20):
 
 #%%
 plot_style='white'
-min_fontsize=18
+min_fontsize=24
 putil.set_sns_style(style=plot_style, min_fontsize=min_fontsize)
 bg_color = [0.7]*3 if plot_style=='dark' else 'k'
 
@@ -227,7 +238,6 @@ bg_color = [0.7]*3 if plot_style=='dark' else 'k'
 #assay = '38mm_dyad_GG' #'38mm_projector'
 #assay = '38mm_dyad_Dele'
 assay = '38mm_projector'
-
 
 if assay == '38mm_projector':
     # Dropbox/source directory:
@@ -321,7 +331,7 @@ figid = acquisition_parentdir
 #%% 
 # LOAD DATA
 # --------------------------------
-create_new = True
+create_new = False
 reassign_acquisition_name = assay=='38mm_projector' 
 load_local = False
 
@@ -353,8 +363,10 @@ else:
     print("Loaded transformed.")
 
 df0[['species', 'acquisition']].drop_duplicates().groupby('species')['acquisition'].count()
-
-            
+        
+# Reset index 
+df0.reset_index(drop=True, inplace=True)
+   
 #%% Check
 if assay == '38mm_projector':
     # Acquisitions loaded by .csv metadata, check that we have everything
@@ -375,26 +387,27 @@ if assay == '38mm_projector':
     df0 = util.add_stim_hz(df0, n_frames=24000, n_epochs=10, 
                         file_grouper=file_grouper)
 
-#%%
-
-df0.reset_index(drop=True, inplace=True)
-
 #%% 
 # TMP: ADD TARGET_VEL
 if 'target_vel' not in df0.columns:
     df0['target_vel'] = np.nan
     df0['target_ang_vel'] = np.nan
+
     for acq, df_ in df0.groupby('acquisition'):
         f1_ = df_[df_['id']==0].copy()
         f2_ = df_[df_['id']==1].copy()
+        # Add target info for fly1
         df_.loc[df_['id']==0, 'target_vel'] = f2_['vel'].values
         df_.loc[df_['id']==0, 'target_ang_vel'] = f2_['ang_vel'].values
+        # Add target info for fly2
         df_.loc[df_['id']==1, 'target_vel'] = f1_['vel'].values
         df_.loc[df_['id']==1, 'target_ang_vel'] = f1_['ang_vel'].values
+        # Add to main df0
         df0.loc[df0['acquisition']==acq, 'target_vel'] = df_['target_vel'].values
         df0.loc[df0['acquisition']==acq, 'target_ang_vel'] = df_['target_ang_vel'].values
 
 #%%
+# Select only focal fle
 grouper = ['species', 'acquisition'] 
 if assay == '38mm_projector':
     f1 = df0[(df0['id']==0) 
@@ -406,223 +419,6 @@ else:
 #%%
 # Add additional metrics
 f1 = rel.calculate_angle_metrics_focal_fly(f1, winsize=5, grouper=grouper)
-
-#%%
-import matplotlib as mpl
-# Check targ_ang_vel, is negative CW or CCW?
-# Plot on polar plot
-sp = 'Dyak'
-curr_acqs = f1[f1['species']==sp]['acquisition'].unique()
-acq = curr_acqs[4]
-print(acq)
-#plotd = f1[(f1['species']=='Dmel') & (f1['acquisition']==acq)].iloc[6855:6863] # target on fly's RIGHT (plots on upper-right hand side) | (starts y+ then gets smaller/down, angvel targ is neg)
-#plotd = f1[(f1['species']=='Dmel') & (f1['acquisition']==acq)].iloc[7952:7974] #7930] # target on fly's RIGHT, then center (plots on upper-right hand side | starts y+ then to 0, angvel targ is neg))
-s_ = 0
-e_ = 15
-
-#s_ = 120
-#e_ = 150
-
-s_ = 20598
-e_ = 20598+15
-
-f_ = f1[(f1['species']==sp) & (f1['acquisition']==acq)].copy()
-plotd = f_.iloc[s_:e_] # target on fly's LEFT, then crosses ot right, target is moving rightward (starts on bottom-left, goes to upper-right | starts negative y, then positive y | angvel targ is positive )
-#plotd = f1[(f1['species']==sp) & (f1['acquisition']==acq)].iloc[14588:14606] # target on fly's LEFT, then slightly on right, target is moving rightward (starts on bottom-left, goes to upper-right | starts negative y, then positive y | angvel targ is positive )
-
-#% find where f_['targ_ang_vel'] meets threshold condition for consecutive frames
-def find_consecutive_frames(series, threshold=0, condition='less', min_consecutive=10):
-    """
-    Find indices where a series meets threshold condition for at least min_consecutive consecutive frames.
-    
-    Parameters:
-    - series: pandas Series to analyze
-    - threshold: value to compare against
-    - condition: 'less', 'greater', 'less_equal', 'greater_equal', 'equal'
-    - min_consecutive: minimum number of consecutive frames required
-    
-    Returns a list of (start_idx, end_idx) tuples for each consecutive sequence.
-    """
-    if condition == 'less':
-        is_condition = series < threshold
-    elif condition == 'greater':
-        is_condition = series > threshold
-    elif condition == 'less_equal':
-        is_condition = series <= threshold
-    elif condition == 'greater_equal':
-        is_condition = series >= threshold
-    elif condition == 'equal':
-        is_condition = series == threshold
-    else:
-        raise ValueError("condition must be one of: 'less', 'greater', 'less_equal', 'greater_equal', 'equal'")
-    
-    # Find transitions from False to True and True to False
-    transitions = np.diff(np.concatenate([[False], is_condition, [False]]).astype(int))
-    starts = np.where(transitions == 1)[0]
-    ends = np.where(transitions == -1)[0]
-    
-    # Filter for sequences that are at least min_consecutive long
-    consecutive_sequences = []
-    for start, end in zip(starts, ends):
-        if end - start >= min_consecutive:
-            consecutive_sequences.append((start, end))
-    
-    return consecutive_sequences
-
-# Find consecutive frames below threshold
-threshold_low = -5  # Adjust this value as needed
-min_consecutive = 10
-condition = 'less'
-low_sequences = find_consecutive_frames(f_['targ_ang_vel'], threshold=threshold_low, 
-                                        condition='less', 
-                                        min_consecutive=min_consecutive)
-print(f"Found {len(low_sequences)} sequences where targ_ang_vel < {threshold_low} for {min_consecutive}+ consecutive frames:")
-for i, (start, end) in enumerate(low_sequences):
-    print(f"  Sequence {i+1}: frames {start} to {end-1} (length: {end-start})")
-    print(f"    Values: {f_['targ_ang_vel'].iloc[start:end].values}")
-
-# Find consecutive frames above threshold
-threshold_high = 5  # Adjust this value as needed
-condition = 'greater'
-high_sequences = find_consecutive_frames(f_['targ_ang_vel'], threshold=threshold_high, 
-                                         condition='greater', min_consecutive=min_consecutive)
-print(f"\nFound {len(high_sequences)} sequences where targ_ang_vel > {threshold_high} for {min_consecutive}+ consecutive frames:")
-for i, (start, end) in enumerate(high_sequences):
-    print(f"  Sequence {i+1}: frames {start} to {end-1} (length: {end-start})")
-    print(f"    Values: {f_['targ_ang_vel'].iloc[start:end].values}")
-
-seq = high_sequences[0]
-s_ = seq[0]#215284
-e_ = seq[1] #215294
-print("FRAMES: ", s_, e_)
-plotd = f_.iloc[s_:e_]
-
-plot_polar = True
-
-if plot_polar:
-    fig, axn = plt.subplots(1, 2, subplot_kw={'projection': 'polar'})
-    # split colorbar at 0
-    ax=axn[0]
-    sns.scatterplot(data=plotd, x='targ_pos_theta', y='targ_pos_radius', 
-                    hue='sec', ax=ax,
-                    palette='viridis', edgecolor='none', alpha=1, legend=0)
-    ax=axn[1]
-    hue_norm = mpl.colors.TwoSlopeNorm(vcenter=0, vmin=-5, vmax=5)
-    sns.scatterplot(data=plotd, x='targ_pos_theta', y='targ_pos_radius', 
-                    hue='targ_ang_vel', ax=ax,
-                    palette='coolwarm', edgecolor='none', alpha=1, legend=0,
-                    hue_norm=hue_norm)
-    ax.axvline(x=0, color=bg_color, linestyle='--', lw=0.5)
-    ax.set_xlabel('Targ. ang. vel. (rad/s)')
-    ax.set_ylabel('Stim. direction')
-else:
-    fig, axn = plt.subplots(1, 2, figsize=(10,5), sharex=True, sharey=True)
-    ax=axn[0]
-    sns.scatterplot(data=plotd, x='targ_rel_pos_y', y='targ_rel_pos_x', 
-                    hue='sec', ax=ax,
-                    palette='viridis', edgecolor='none', alpha=1, legend=0)
-    ax=axn[1]
-    hue_norm = mpl.colors.TwoSlopeNorm(vcenter=0, vmin=-5, vmax=5)
-    sns.scatterplot(data=plotd, x='targ_rel_pos_y', y='targ_rel_pos_x', 
-                    hue='targ_ang_vel', ax=ax,
-                    palette='coolwarm', edgecolor='none', alpha=1, legend=0,
-                    hue_norm=hue_norm)
-    for ax in axn:
-        ax.axvline(x=0, color=bg_color, linestyle='--', lw=0.5)
-        ax.axhline(y=0, color=bg_color, linestyle='--', lw=0.5)
-    #ax.invert_yaxis()
-
-fig.suptitle('{}: {} ({} - {})'.format(sp, acq, s_, e_), fontsize=8)
-
-#%%
-
-# DEBUGGING
-
-#seq = low_sequences[2]
-s_ = seq[0]#215284
-e_ = seq[1] #215294
-print("FRAMES: ", s_, e_)
-plotd = f_.iloc[s_:e_]
-
-hue_norm = mpl.colors.TwoSlopeNorm(vcenter=0, vmin=-5, vmax=5)
-
-# Calculate 
-fig, axn = plt.subplots(1, 3, subplot_kw={'projection': 'polar'})
-ax=axn[0]
-sns.scatterplot(data=plotd, x='targ_pos_theta', y='targ_pos_radius', 
-                hue='sec', ax=ax,
-                palette='viridis', edgecolor='none', alpha=1, legend=0)
-ax=axn[1]
-
-ax.set_title('hue: theta_error_dt_deg')
-sns.scatterplot(data=plotd, x='theta_error', y='dist_to_other', ax=ax, 
-                #hue='targ_ang_vel',
-                hue='theta_error_dt_deg', hue_norm=hue_norm,
-                palette='coolwarm', edgecolor='none', alpha=1, legend=0)
-ax=axn[2]
-ax.set_title('hue: targ_ang_vel')
-sns.scatterplot(data=plotd, x='theta_error', y='dist_to_other', ax=ax, 
-                    hue='targ_ang_vel', 
-                    palette='coolwarm', edgecolor='none', alpha=1, legend=0,
-                    hue_norm=hue_norm)
-fig.suptitle('{}: {} ({} - {})'.format(sp, acq, s_, e_), fontsize=6)
-
-fig, ax = plt.subplots()
-sns.scatterplot(data=plotd, x='theta_error_deg', y='dist_to_other', 
-                hue='sec', ax=ax,
-                palette='viridis', edgecolor='none', alpha=1, legend=0)
-
-
-#%%
-
-# DEBUG TARGET TURNING DIRECTION
-
-acq_dir = os.path.join(acquisition_parentdir, acq)
-# Load flytracker output
-calib, trk, feat = util.load_flytracker_data(acq_dir, filter_ori=True)
-# Transform data to relative coordinates
-df_ = rel.get_metrics_relative_to_focal_fly(acq_dir,
-                                        savedir=processedmat_dir,
-                                        movie_fmt='.avi',
-                                        mov_is_upstream=None,
-                                        flyid1=0, flyid2=1,
-                                        plot_checks=False,
-                                        create_new=True,
-                                        get_relative_sizes=False)
-
-#%%
-#f1_ = df_[df_['id']==1].iloc[0:5000]
-#%%
-
-# DEBUGGING
-
-acq = '20240119-1517-fly7-yakWT_3do_sh_yakWT_3do_gh'
-f1_ = f1[f1['acquisition']==acq].copy()
-
-# Plot ang_vel from x and y
-f1_['target_angular_position'] = -1*wrap_pi(np.arctan2(f1_['targ_centered_x'], f1_['targ_centered_y']))
-
-f1_['target_angle_diff'] = get_heading_diff(f1_, 'target_angular_position',
-                                                 invert_heading=False)
-f1_['ang_vel_target'] = f1_['target_angle_diff'] / f1_['sec'].diff().mean()
-
-#f1_['target_dir_deg'] = np.rad2deg(-1*f1_['target_dir'])
-
-s_ix = 1500
-e_ix = 3000
-fig, axn = plt.subplots(1, 2, sharex=True, sharey=True)
-ax=axn[0]
-sns.scatterplot(data=f1_.iloc[s_ix:e_ix], ax=ax,
-        x='targ_centered_x', y='targ_centered_y', #ax=ax,
-        hue='sec', palette='viridis', edgecolor='none')
-ax=axn[1]
-hue_norm = mpl.colors.TwoSlopeNorm(vcenter=0, vmin=-1, vmax=1)
-sns.scatterplot(data=f1_.iloc[s_ix:e_ix], ax=ax,
-        x='targ_centered_x', y='targ_centered_y', #ax=ax,
-        hue='ang_vel_target', palette='coolwarm', 
-        edgecolor='none', hue_norm=hue_norm)
-sns.move_legend(ax, 'upper left', bbox_to_anchor=(1, 1), frameon=False)
-ax.invert_yaxis()
 
 #%%
 # Calculate TARGET's STIMULUS DIRECTION
@@ -660,6 +456,8 @@ if calculate_target_direction:
 #%%
 f1 = the.shift_variables_by_lag(f1, lag=2)
 f1['ang_vel_fly_shifted_abs'] = np.abs(f1['ang_vel_fly_shifted'])
+f1['ang_vel_fly_shifted_deg'] = np.rad2deg(f1['ang_vel_fly_shifted'])
+f1['ang_vel_fly_deg'] = np.rad2deg(f1['ang_vel_fly'])
 
 # %%
 #species_colors = ['plum', 'mediumseagreen']
@@ -675,11 +473,11 @@ filter_chase = True
 f1['chasing_heuristic'] = False
 if filter_chase:
     min_vel = 3
-    max_targ_pos_theta = 180
-    min_targ_pos_theta = -180
+    max_targ_pos_theta = 250 #180
+    min_targ_pos_theta = -250 #180
     max_facing_angle = 120
     min_wing_ang = 0
-    max_dist_to_other = 20
+    max_dist_to_other = 30
 
     f1.loc[ #(f1['sex']=='m') #(tdf['id']%2==0)
             (f1['vel'] >= min_vel)
@@ -704,7 +502,7 @@ chase_counts = the.count_chasing_frames(f1,
                         grouper=grouper,
                         chase_var='chasing_heuristic')
 #print(chase_counts)
-#%%
+#%
 curr_cols = [c for c in chase_counts.columns if c != 'stim_direction']
 mean_counts = chase_counts[curr_cols].groupby(['species', 'acquisition']).mean().reset_index()
 
@@ -740,10 +538,8 @@ if split_by_acquisition and filter_chase:
     # SPlit by courtship bout
     # actually, can't do this because there is no
     # "tracking_index" in a given bout
-
-#%%
+chase_['theta_error_deg'] = np.rad2deg(chase_['theta_error'])
 chase_ = bin_by_object_position(chase_, start_bin=-180, end_bin=180, bin_size=20)
-
 chase_.reset_index(drop=True, inplace=True)
 
 #%%
@@ -759,11 +555,18 @@ grouper.append('stim_direction')
 
 yvar = 'ang_vel_fly_shifted'
 
-#avg_ang_vel_no_levels = chase_.groupby(grouper)[yvar].mean().reset_index()
+avg_ang_vel_no_levels = chase_.groupby(grouper)[yvar].mean().reset_index()
 n_species = chase_['species'].nunique()
 species_str = '_'.join(chase_['species'].unique())
-fig, axn = plt.subplots(1, n_species, figsize=(n_species*3, 4), sharex=True, sharey=True)
-for si, (sp, plotd) in enumerate(chase_.groupby('species')):
+
+if min_fontsize==6:
+    figsize = (n_species*3, 4)
+else:
+    figsize = (n_species*3.5, 6)
+
+fig, axn = plt.subplots(1, n_species, figsize=figsize,
+                        sharex=True, sharey=True)
+for si, (sp, plotd) in enumerate(avg_ang_vel_no_levels.groupby('species')):
     #plotd = avg_ang_vel[avg_ang_vel['species']=='Dyak'].copy()
     if n_species==1:
         ax=axn
@@ -773,7 +576,8 @@ for si, (sp, plotd) in enumerate(chase_.groupby('species')):
     # if assay == '38mm_projector':
     sns.lineplot(data=plotd, x='binned_theta_error', y=yvar, ax=ax,
                     hue='stim_direction', palette=stim_palette, 
-                    errorbar='se', marker='o') #errwidth=0.5)
+                    errorbar='ci', marker='o', 
+                    markersize=6, markeredgewidth=0) #errwidth=0.5)
     #else:
 #         sns.lineplot(data=plotd, x='binned_theta_error', y=yvar, ax=ax,
 #                     #hue='stim_direction', palette=stim_palette, ax=ax,
@@ -790,12 +594,36 @@ for si, (sp, plotd) in enumerate(chase_.groupby('species')):
     else:
         sns.move_legend(ax, 'upper left', bbox_to_anchor=(1, 1),
                         frameon=False, title='movement dir', fontsize=min_fontsize-2)
-    ax.set_xlabel('Object position (deg)')
-    ax.set_ylabel('Ang. vel. shifted (rad/s)')
+    # label shoudl use degree symbol
+    ax.set_xlabel('Target position (°)')
+    ax.set_ylabel('Ang. vel. (rad/s)')
     ax.set_box_aspect(1)
-    ax.set_ylim([-5.5, 5.5])
+    #ax.set_ylim([-7.5, 7.5])
     #putil.label_figure(fig, figid) 
+    # Remove seaborn styling and use pure matplotlib
+    
+    # Set tick positions explicitly - only 3 points centered at 0
+    ax.set_xticks([-180, 0, 180])
+    ax.set_yticks([-6, 0, 6])
+    
+    # Only show ticks on bottom and left axes
+    ax.tick_params(axis='x', which='major', 
+                   length=4, width=1.0, direction='out',
+                   colors='black', zorder=10, pad=3,
+                   bottom=True, top=False, labelbottom=True, labeltop=False)
+    
+    ax.tick_params(axis='y', which='major', 
+                   length=4, width=1.0, direction='out',
+                   colors='black', zorder=10, pad=3,
+                   left=True, right=False, labelleft=True, labelright=False)
+    
+    # Turn off minor ticks
+    ax.minorticks_off()
+
+    sns.despine(offset=2, ax=ax, trim=True)
+
 fig.suptitle('all frames (filter-chase={})'.format(filter_chase), fontsize=8)    
+plt.subplots_adjust(wspace=0.4)
 
 putil.label_figure(fig, figid)
 
@@ -820,46 +648,47 @@ start_bin = -180
 end_bin = 180
 yvar = 'ang_vel_fly_shifted'
 
-# Don't use avg_ang_vel, bec some acquisitions are not represnted in each courtship level
-for lvl, chase_lvl in chase_.groupby('courtship_level'):
-    fig, axn = plt.subplots(1, n_species, figsize=(8, 4), sharex=True, sharey=True)
-    for si, (sp, plotd) in enumerate(chase_lvl.groupby('species')):
-        #plotd = avg_ang_vel[avg_ang_vel['species']=='Dyak'].copy()
-        if n_species==1:
-            ax=axn
-        else:
-            ax=axn[si]
-
-        #if assay == '38mm_projector':
-        sns.lineplot(data=plotd, ax=ax,
-                    x='binned_theta_error', y=yvar,
-                    hue='stim_direction', 
-                    palette=stim_palette, 
-                    errorbar='se', marker='o', legend=0) #errwidth=0.5)
-        #else:
-        #    sns.lineplot(data=plotd, x='binned_theta_error', y=yvar, ax=ax,
-        #                #hue='stim_direction', palette=stim_palette, ax=ax,
-        #                errorbar='se', marker='o') #errwidth=0.5)
-        ax.axvline(x=0, color=bg_color, linestyle='--', lw=0.5)
-        ax.axhline(y=0, color=bg_color, linestyle='--', lw=0.5)
-        ax.set_xticks(np.linspace(start_bin, end_bin, 5))
-        #ax.set_xticklabels(np.arange(start_bin+bin_size/2, end_bin-bin_size/2+1, bin_size))
-        #ax.set_box_aspect(1)
-        ax.set_title(sp)
-        if assay == '38mm_projector':
-            if si==0:
-                ax.legend_.remove()
+if filter_chase:
+    # Don't use avg_ang_vel, bec some acquisitions are not represnted in each courtship level
+    for lvl, chase_lvl in chase_.groupby('courtship_level'):
+        fig, axn = plt.subplots(1, n_species, figsize=(8, 4), sharex=True, sharey=True)
+        for si, (sp, plotd) in enumerate(chase_lvl.groupby('species')):
+            #plotd = avg_ang_vel[avg_ang_vel['species']=='Dyak'].copy()
+            if n_species==1:
+                ax=axn
             else:
-                sns.move_legend(ax, 'upper left', bbox_to_anchor=(1, 1),
-                                frameon=False, title='movement dir', fontsize=min_fontsize-2)
-        ax.set_xlabel('Object position (deg)')
-        ax.set_ylabel('Ang. vel. shifted (rad/s)')
-        ax.set_box_aspect(1)
-        ax.set_ylim([-5.5, 5.5])
+                ax=axn[si]
 
-        #putil.label_figure(fig, figid) 
-    fig.suptitle('courtship level: {}'.format(lvl))    
-    
+            #if assay == '38mm_projector':
+            sns.lineplot(data=plotd, ax=ax,
+                        x='binned_theta_error', y=yvar,
+                        hue='stim_direction', 
+                        palette=stim_palette, 
+                        errorbar='se', marker='o', legend=0) #errwidth=0.5)
+            #else:
+            #    sns.lineplot(data=plotd, x='binned_theta_error', y=yvar, ax=ax,
+            #                #hue='stim_direction', palette=stim_palette, ax=ax,
+            #                errorbar='se', marker='o') #errwidth=0.5)
+            ax.axvline(x=0, color=bg_color, linestyle='--', lw=0.5)
+            ax.axhline(y=0, color=bg_color, linestyle='--', lw=0.5)
+            ax.set_xticks(np.linspace(start_bin, end_bin, 5))
+            #ax.set_xticklabels(np.arange(start_bin+bin_size/2, end_bin-bin_size/2+1, bin_size))
+            #ax.set_box_aspect(1)
+            ax.set_title(sp)
+            if assay == '38mm_projector':
+                if si==0:
+                    ax.legend_.remove()
+                else:
+                    sns.move_legend(ax, 'upper left', bbox_to_anchor=(1, 1),
+                                    frameon=False, title='movement dir', fontsize=min_fontsize-2)
+            ax.set_xlabel('Object position (deg)')
+            ax.set_ylabel('Ang. vel. shifted (rad/s)')
+            ax.set_box_aspect(1)
+            ax.set_ylim([-5.5, 5.5])
+
+            #putil.label_figure(fig, figid) 
+        fig.suptitle('courtship level: {}'.format(lvl))    
+        
 
 #%%
 if filter_chase:
@@ -888,7 +717,7 @@ if filter_chase:
                         frameon=False, fontsize=min_fontsize-2)
         ax.set_box_aspect(1) 
 
-        ax.set_ylim([-15, 15])
+        ax.set_ylim([-3.5, 3.5])
         ax.set_xticks([-180, -90, 0, 90, 180])
         #ax.set_xlim([-195, 195])
 
@@ -905,67 +734,38 @@ if filter_chase:
     plt.savefig(os.path.join(figdir, '{}.png'.format(figname))) 
     print(figdir, figname)
 
+
 #%%
-#avg_ang_vel = avg_ang_vel.dropna() 
-start_bin = -180
-end_bin = 180
-fig, axn = plt.subplots(1, 2, figsize=(8, 4), sharex=True, sharey=True)
-for si, (sdir, plotd) in enumerate(chase_.groupby('stim_direction')):
-#plotd = avg_ang_vel[avg_ang_vel['stim_direction']=='CW'].copy()
-    ax=axn[si]
-    sns.lineplot(data=plotd, x='binned_theta_error', y=yvar,
-                    hue='species', palette=species_palette, ax=ax,
-                    errorbar='se', marker='o') #errwidth=0.5)
-    ax.axvline(x=0, color=bg_color, linestyle='--', lw=0.5)
-    ax.axhline(y=0, color=bg_color, linestyle='--', lw=0.5)
-    ax.set_xticks(np.linspace(start_bin, end_bin, 5))
-    ax.set_title(sdir)
-    if si==0:
-        ax.legend_.remove()
-    else:
-        sns.move_legend(ax, 'upper left', bbox_to_anchor=(1, 1),
-                        frameon=False, fontsize=min_fontsize-2)
-    ax.set_xlabel('Object position (deg)')
-    ax.set_ylabel('Ang. vel. shifted (rad/s)')
+min_vel = 10
+max_vel = 50
 
-putil.label_figure(fig, figid)
+fig, ax = plt.subplots()
+# chase_[chase_['target_vel']>80] = np.nan
 
-# Save
-figname = 'split-by-stimdir_{}'.format(yvar)
-print(figdir, figname)
-plt.savefig(os.path.join(figdir, '{}.png'.format(figname)))
+sns.histplot(data=chase_, x='target_vel', ax=ax, bins=10)
+ax.axvline(x=min_vel, color='r', linestyle='--', lw=0.5)
+ax.axvline(x=max_vel, color='r', linestyle='--', lw=0.5)
 
-   
+#%%
+# Divide target_vel into bins
+min_vel = round(chase_['target_vel'].min())
+max_vel = round(chase_['target_vel'].max())
+
+min_vel = 0
+max_vel = 50
+chase_ = bin_x(chase_, 'target_vel', start_bin=min_vel, 
+               end_bin=max_vel, bin_size=5)
+
+chase_['stim_hz'] = chase_['binned_target_vel'].copy()
+ 
 # %%
-# Plot without splitting dir
-fig, axn = plt.subplots(1, 2, figsize=(8, 4), sharex=True, sharey=True)
-for si, (sdir, plotd) in enumerate(chase_.groupby('species')):
-#plotd = avg_ang_vel[avg_ang_vel['stim_direction']=='CW'].copy()
-    ax=axn[si]
-    sns.lineplot(data=plotd, x='binned_theta_error', y=yvar,
-                    hue='species', palette=species_palette, ax=ax,
-                    errorbar='se', marker='o') #errwidth=0.5)
-    ax.axvline(x=0, color=bg_color, linestyle='--', lw=0.5)
-    ax.axhline(y=0, color=bg_color, linestyle='--', lw=0.5)
-    ax.set_xticks(np.linspace(start_bin, end_bin, 5))
-    ax.set_title(sdir)
-    if si==0:
-        ax.legend_.remove()
-    else:
-        sns.move_legend(ax, 'upper left', bbox_to_anchor=(1, 1),
-                        frameon=False, title='species', fontsize=min_fontsize-2)
-    ax.set_xlabel('Object position (deg)')
-    ax.set_ylabel('Ang. vel. shifted (rad/s)')
-  
-figname = 'turns_by_objectpos_{}_by_stimdir'.format(yvar)
-print(figdir, figname)
-#plt.savefig(os.path.join(figdir, '{}.png'.format(figname)))
-# %%
-
+mean_vel_by_stimhz = None
+#if 'stim_hz' in df0.columns:
+mean_vel_by_stimhz = chase_.groupby('stim_hz')['target_vel'].mean().round(1).reset_index()
+print(mean_vel_by_stimhz)
 
 #%%
 # Split by stim_hz?
-
 n_stim_levels = chase_['stim_hz'].nunique()
 
 fig, axn = plt.subplots(2, n_stim_levels, 
@@ -976,14 +776,15 @@ for sp, (curr_species, curr_df) in enumerate(chase_.groupby('species')):
 
     for si, (stim_hz, plotd) in enumerate(curr_df.groupby('stim_hz')):
         ax=axn[sp, si]
- 
+        mean_vel = mean_vel_by_stimhz[mean_vel_by_stimhz['stim_hz']==stim_hz]['target_vel'].values[0]
+
         sns.lineplot(data=plotd, x='binned_theta_error', y=yvar, ax=ax,
                     hue='stim_direction', palette=stim_palette,
                     errorbar='se', marker='o', 
                     legend= (si==n_stim_levels-1 and sp==0)) #errwidth=0.5)
         ax.axvline(x=0, color=bg_color, linestyle='--', lw=0.5)
         ax.axhline(y=0, color=bg_color, linestyle='--', lw=0.5)
-        ax.set_title('stim_hz: {}'.format(stim_hz))
+        ax.set_title('{}mm/s'.format(mean_vel))
         ax.set_xlabel('')
         if si==0:
             ax.set_ylabel(curr_species)
@@ -992,7 +793,8 @@ for sp, (curr_species, curr_df) in enumerate(chase_.groupby('species')):
         ax.set_box_aspect(1)
 
     ax.set_xlim([-180, 180])
-    ax.set_ylim([-15, 15])
+    ax.set_ylim([-8, 8])
+    #ax.set_ylim([-15, 15])
 
 
     if si==n_stim_levels-1 and sp==0:
@@ -1021,8 +823,9 @@ print(figdir, figname)
 # For each stim_hz epoch, caluclate the average vel of the target
 
 fig, ax = plt.subplots(1, 1, figsize=(5, 5), sharex=True, sharey=True)
-sns.pointplot(data=chase_, x='stim_hz', y='target_vel', 
-                ax=ax, hue='species', palette=species_palette)
+sns.pointplot(data=df0, x='stim_hz', y='target_vel', 
+                ax=ax, hue='species', palette=species_palette,
+                errorbar='sd', marker='o')
 
 
 #%%
