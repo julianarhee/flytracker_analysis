@@ -127,6 +127,31 @@ def groupby_aggr_if_numeric(f1, groupby_cols=[],
     return meanbouts
 
 
+def convert_time_to_seconds(time_str):
+    '''
+    Convert time string to seconds.
+    Assumes that time_str is in MM:SS format.
+    
+    Arguments:
+        time_str -- time string in MM:SS format
+
+    Returns:
+        seconds -- time in seconds
+    
+    Example:
+        >>> convert_time_to_seconds('00:01:00')
+        60
+        >>> convert_time_to_seconds('01:00:00')
+        3600
+    '''
+    # if only 2 elements, assume it's MM:SS
+    if len(time_str.split(':')) == 2:
+        time_str = '00:' + time_str
+        
+    h, m, s = time_str.split(':')
+    return int(h)*60 + int(m)*60 + int(s)
+
+
 #%% bouts
 def get_indices_of_consecutive_rows(passdf):
     '''
