@@ -236,8 +236,8 @@ bg_color = [0.7]*3 if plot_style=='dark' else 'k'
 # Set directories
 # Main assay containing all the acquisitions
 #assay = '38mm_dyad_GG' #'38mm_projector'
-#assay = '38mm_dyad_Dele'
-assay = '38mm_projector'
+assay = '38mm_dyad_Dele'
+#assay = '38mm_projector'
 
 if assay == '38mm_projector':
     # Dropbox/source directory:
@@ -694,7 +694,7 @@ if filter_chase:
 if filter_chase:
     n_species = chase_['species'].nunique()
 
-    fig, axn = plt.subplots(1, n_species, figsize=(n_species*3.5, 4), sharex=True, sharey=True)
+    fig, axn = plt.subplots(1, n_species, figsize=(n_species*4.5, 5), sharex=True, sharey=True)
     for si, (sp, plotd) in enumerate(chase_.groupby('species')):
 
         if n_species==1:
@@ -713,17 +713,21 @@ if filter_chase:
                         errorbar='se', legend=si==0)
         if si==0:
             sns.move_legend(ax, 'upper left', 
-                    bbox_to_anchor=(n_species+0.6, 1),
+                    bbox_to_anchor=(n_species+0.5, 1),
                         frameon=False, fontsize=min_fontsize-2)
         ax.set_box_aspect(1) 
 
-        ax.set_ylim([-3.5, 3.5])
-        ax.set_xticks([-180, -90, 0, 90, 180])
+        ax.set_ylim([-4., 4.])
+        ax.set_xticks([-180, 0, 180])
         #ax.set_xlim([-195, 195])
 
         ax.axvline(x=0, color=bg_color, linestyle='--', lw=0.5)
         ax.axhline(y=0, color=bg_color, linestyle='--', lw=0.5)
-
+       
+        # Target position label using degree symbol
+        ax.set_xlabel('Target position (°)')
+        # Angular velocity label using omega symbol
+        ax.set_ylabel('Male $\omega$ (rad/s)')
     plt.subplots_adjust(wspace=0.5, right=0.8)
     fig.suptitle('filter-chase={}'.format(filter_chase), fontsize=8)     
 
@@ -732,6 +736,8 @@ if filter_chase:
     # Save
     figname = 'split-by-courtship-level_{}_filter-chase-{}_CCW-CW'.format(yvar, filter_chase)
     plt.savefig(os.path.join(figdir, '{}.png'.format(figname))) 
+    plt.savefig(os.path.join(figdir, '{}.svg'.format(figname))) 
+
     print(figdir, figname)
 
 
