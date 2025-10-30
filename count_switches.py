@@ -62,9 +62,13 @@ df = df0[df0['courtship_duration'].notna()].copy()
 
 df['courtship_duration_sec'] = df['courtship_duration'].astype(str).apply(util.convert_time_to_seconds)
 
-df['chaining'] = False
-df['note'].fillna('', inplace=True)
-df.loc[df['note'].str.contains('chaining'), 'chaining'] = True
+#df['chaining'] = False
+#df['note'].fillna('', inplace=True)
+#df['chaining'].fillna('', inplace=True)
+#df.loc[df['chaining'].str.contains('chaining'), 'chaining'] = True
+#df.loc[df['note'].str.contains('chaining'), 'chaining'] = True
+
+df['chaining'] = df['chaining'].astype(bool)
 
 plotd = df[(df['chaining']==False)].copy()
 meandf = plotd.groupby(['species', 'videoname']).agg({'switch': 'sum',
@@ -81,7 +85,12 @@ meandf
 markersize = 10
 alpha=0.75
 
+counts = meandf.groupby('species')['videoname'].count()
+
 fig, axn = plt.subplots(1, 2, figsize=(6.5, 3), sharex=True)
+# add title with counts
+fig.text(0.15, 0.94, 'n={} Dmel, n={} Dyak'.format(counts['Dmel'], counts['Dyak']),
+         fontsize=12, ha='left')
 ax=axn[0]
 sns.stripplot(data=meandf, x='species', y='switch_rate', ax=ax,
               hue='species', palette=species_palette, s=markersize,
@@ -111,8 +120,29 @@ plt.subplots_adjust(wspace=0.6)
 
 putil.label_figure(fig, figid)
 
-plt.savefig(os.path.join(figdir, 'switch_rate.png'))
-plt.savefig(os.path.join(figdir, 'switch_rate.svg'))
+# Do stats
+import scipy.stats as spstats
+res_switch = spstats.mannwhitneyu(meandf[meandf['species']=='Dmel']['switch_rate'],
+                     meandf[meandf['species']=='Dyak']['switch_rate'])
+print(res_switch)
+res_aggr = spstats.mannwhitneyu(meandf[meandf['species']=='Dmel']['aggregate_rate'],
+                     meandf[meandf['species']=='Dyak']['aggregate_rate'])
+print(res_aggr)
+
+# Annotate plots with stars
+for ai, res_ in enumerate([res_switch, res_aggr]):
+    ax=axn[ai]
+    if res_.pvalue < 0.01:
+        ax.annotate('**', xy=(0.5, 0.9), #ax.get_ylim()[-1]), 
+                    xycoords='axes fraction', ha='center', va='center')
+    elif res_.pvalue < 0.05:
+        ax.annotate('*', xy=(0.5, 0.9), #ax.get_ylim()[-1]), 
+                    xycoords='axes fraction', ha='center', va='center')
+    else:
+        ax.annotate('ns', xy=(0.5, 0.9), #ax.get_ylim()[-1]), 
+                    xycoords='axes fraction', ha='center', va='center')
+#plt.savefig(os.path.join(figdir, 'switch_rate.png'))
+#plt.savefig(os.path.join(figdir, 'switch_rate.svg'))
 
 
 # %%
