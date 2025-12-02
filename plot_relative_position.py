@@ -27,12 +27,16 @@ import transform_data.relative_metrics as rel
 import plotting as putil
 
 #%%
-plot_style='white'
-putil.set_sns_style(style=plot_style, min_fontsize=18)
+plot_style='dark'
+min_fontsize=18
+putil.set_sns_style(style=plot_style, min_fontsize=min_fontsize)
 bg_color = [0.7]*3 if plot_style=='dark' else 'k'
 #%%
-rootdir = '/Users/julianarhee/Dropbox @RU Dropbox/Juliana Rhee/caitlin_data'
-assay = '38mm_projector'
+#rootdir = '/Users/julianarhee/Dropbox @RU Dropbox/Juliana Rhee/caitlin_data'
+#assay = '38mm_projector'
+
+rootdir = '/Volumes/Juliana/Caitlin_RA_data'
+assay = 'Caitlin_projector'
 
 #%% Set save directories
 processedmat_dir = '/Volumes/Juliana/2d_projector_analysis/circle_diffspeeds_painted_eyes/FlyTracker/processed_mats'
@@ -59,9 +63,12 @@ src = os.path.join(rootdir, assay)
 
 meta_fpath = glob.glob(os.path.join(src, '*.csv'))[0]
 meta0 = pd.read_csv(meta_fpath)
-meta = meta0[meta0['tracked in matlab and checked for swaps ']=='yes']
-meta['acquisition'] = ['_'.join( [f.split('-')[0], f.split('_')[1]] ) for f in meta['file_name']]
-
+meta = meta0[(meta0['tracked in matlab and checked for swaps']==1)
+           & (meta0['exclude']==0) 
+           & (meta0['annotated']==1)]
+meta['acquisition'] = ['_'.join( [f.split('-')[0], \
+                        f.split('_')[1]] ) for f in meta['file_name']]
+print(meta.shape)
 meta.head()
 
 #%% Transform data
@@ -72,36 +79,52 @@ flyid2=1
 subdir=None
 
 #%%
-session = '20250205-11'
-flynum = 3
-acqs = glob.glob(os.path.join(src, '{}*_fly{}_*'.format(session, flynum)))
-#acq = '20250205-1113_fly3_Dmel-p1-left-pwder_2do-gh_2dR_cw'
-
-session = '20250205-15'
-flynum = 1
-acqs2 = glob.glob(os.path.join(src, '{}*_fly{}_*'.format(session, flynum)))
-for a in acqs2:
-    acqs.append(a)
-    
-for a in acqs:
-    print(a)
-
+# session = '20250205-11'
+# flynum = 3
+# acqs = glob.glob(os.path.join(src, '{}*_fly{}_*'.format(session, flynum)))
+# #acq = '20250205-1113_fly3_Dmel-p1-left-pwder_2do-gh_2dR_cw'
+# 
+# session = '20250205-15'
+# flynum = 1
+# acqs2 = glob.glob(os.path.join(src, '{}*_fly{}_*'.format(session, flynum)))
+# for a in acqs2:
+#     acqs.append(a)
+#     
+# for a in acqs:
+#     print(a)
+ 
 #%%
 acq_dirs = glob.glob(os.path.join(src, '20*'))
 found_acqs = [os.path.split(a)[-1] for a in acq_dirs]
 print("Found {} {} acqs.".format(len(found_acqs), assay))
 
-acqs = meta['file_name'].values
+meta_acqs = meta['file_name'].values
 
-not_in_meta = [a for a in found_acqs if a not in meta['file_name'].values]
-not_in_src = [a for a in found_acqs if not os.path.exists(os.path.join(src, a))]
+not_in_meta = [a for a in found_acqs if a not in meta_acqs]
+not_in_src = [a for a in meta_acqs if not os.path.exists(os.path.join(src, a))]
 if len(not_in_src)>0:
     print("Not in src: {}".format(len(not_in_src)))
     for i in not_in_src:
         print(i)
 else:
     print("All acqs in src")
-    
+
+#%%
+#% Check processed
+processed_acqs = [a.split('_df.pkl')[0] for a in os.listdir(processedmat_dir)]
+print('Found {} processed acqs'.format(len(processed_acqs)))
+
+# Meta includes subset, for ex. annotated/tracked/excluded
+proc_not_in_meta = [a for a in processed_acqs if a not in meta_acqs]
+print('Found {} processed acqs not in meta'.format(len(proc_not_in_meta)))
+
+not_processed_acqs = [a for a in meta_acqs if a not in processed_acqs]
+print('Found {} meta acqs not processed'.format(len(not_processed_acqs)))
+if len(not_processed_acqs)>0:
+    for a in not_processed_acqs:
+        print(a)
+else:
+    print('All meta acqs processed')
 
 #%%
 
@@ -114,9 +137,9 @@ else:
 create_new=False
 d_list = []
 errors = []
-for i, acq in enumerate(acqs):
+for i, acq in enumerate(meta_acqs):
     if i%10==0:
-        print('Processing {} of {}: {}'.format(i, len(acqs), acq))
+        print('Processing {} of {}: {}'.format(i, len(meta_acqs), acq))
     #% Load mats
     acq_dir = os.path.join(rootdir, assay, acq)
     
@@ -129,7 +152,8 @@ for i, acq in enumerate(acqs):
                                                 movie_fmt=movie_fmt, 
                                                 mov_is_upstream=subdir is not None,
                                                 flyid1=flyid1, flyid2=flyid2,
-                                                plot_checks=False, create_new=create_new,
+                                                plot_checks=False, 
+                                                create_new=create_new,
                                                 get_relative_sizes=False)
     except Exception as e:
         errors.append((acq, e))
@@ -138,13 +162,15 @@ for i, acq in enumerate(acqs):
     df_['file_name'] = os.path.split(acq)[-1]
     df_['acquisition'] = ['_'.join( [f.split('-')[0], f.split('_')[1]] ) for f in df_['file_name']]    
     df_['species'] = 'Dmel' if 'mel' in acq else 'Dyak' 
+    df_['date'] = [int(a.split('_')[0]) for a in df_['acquisition']]
+
     d_list.append(df_)
     
 df0 = pd.concat(d_list)
-
 print(df0.shape)
 
-assert len(acqs) - len(errors) == df0['file_name'].nunique(), 'Not all acqs processed'  
+#
+assert len(meta_acqs) - len(errors) == df0['file_name'].nunique(), 'Not all acqs processed'  
 
 #%%
 
@@ -155,7 +181,6 @@ assert len(acqs) - len(errors) == df0['file_name'].nunique(), 'Not all acqs proc
 
 #%%
 # Add all paint conditions
-
 for fn, df_ in df0.groupby('file_name'):
     currm = meta[meta['file_name']==fn]
     assert len(currm)>0, 'No meta data for {}'.format(fn)
@@ -176,12 +201,10 @@ for fn, df_ in df0.groupby('file_name'):
     df0.loc[df0['file_name']==fn, 'paint_side'] = paint_side 
 
 #%%
-
 #df0['species'] = [ 'Dmel' if 'mel' in a else 'Dyak' for a in df0['file_name'] ]
 
 df0.groupby(['species', 'paint_side', 'paint_coverage'])['acquisition'].nunique()
 
-df0['date'] = [int(a.split('_')[0]) for a in df0['acquisition']]
 
 #%%
 # --------------------------------------------------------
