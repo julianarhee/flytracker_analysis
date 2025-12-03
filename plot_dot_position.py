@@ -67,29 +67,82 @@ def transform_projector_data(rootdir, assay, acqs, processedmat_dir,
     
     return df0, errors
 
-def assign_paint_conditions(df0, meta):
-    # Add all paint conditions
-    for fn, df_ in df0.groupby('file_name'):
-        currm = meta[meta['file_name']==fn]
-        assert len(currm)>0, 'No meta data for {}'.format(fn)
-        #df0.loc[df0['file_name']==fn, 'stim_direction'] = currm['stim_direction'].values[0]
-        stim_dir = currm['stim_direction'].unique()[0] #fn.split('_')[-1]
-        df0.loc[df0['file_name']==fn, 'stim_direction'] = stim_dir
-        df0.loc[df0['file_name']==fn, 'paint_coverage'] = currm['painted'].values[0]
-        manipulation_ = currm['manipulation_male'].values[0]
-        if manipulation_.startswith('no '):
-            paint_side = 'none'
-        elif manipulation_.startswith('left '):
-            paint_side = 'left'
-        elif manipulation_.startswith('right '):
-            paint_side = 'right'
-        elif manipulation_.startswith('both '):
-            paint_side = 'both'
-        df0.loc[df0['file_name']==fn, 'paint_side'] = paint_side 
-        df0.loc[df0['file_name']==fn, 'genotype'] = currm['genotype_male']
+def extract_paint_side(manipulation):
+    """Extract paint side from manipulation string."""
+    if pd.isna(manipulation):
+        return 'none'
+    manipulation_str = str(manipulation)
+    if manipulation_str.startswith('no '):
+        return 'none'
+    elif manipulation_str.startswith('left '):
+        return 'left'
+    elif manipulation_str.startswith('right '):
+        return 'right'
+    elif manipulation_str.startswith('both '):
+        return 'both'
+    return 'none'
 
+def extract_stim_direction(file_name):
+    if '_ccw' in file_name:
+        return 'ccw'
+    else:
+        return 'cw'
+    
+def assign_paint_conditions(df0, meta):
+    # Create mappings from meta dataframe (one-time computation)
+    # Handle duplicate file_name values by keeping the first occurrence
+    meta_unique = meta.drop_duplicates(subset='file_name', keep='first')
+    
+    # Check for duplicates and warn if found
+    if len(meta_unique) < len(meta):
+        duplicates = meta[meta.duplicated(subset='file_name', keep=False)]['file_name'].unique()
+        print(f"Warning: Found {len(duplicates)} duplicate file_name(s) in meta. Keeping first occurrence.")
+        print("Duplicate filenames:")
+        for dup_fn in duplicates:
+            dup_count = len(meta[meta['file_name'] == dup_fn])
+            print(f"  - {dup_fn} (appears {dup_count} times)")
+    
+    meta_dict = meta_unique.set_index('file_name').to_dict('index')
+
+    # Verify all file_names have metadata (assertion from original code)
+    for fn in df0['file_name'].unique():
+        assert fn in meta_dict, 'No meta data for {}'.format(fn)
+
+    # Build mapping dictionaries for vectorized assignment
+    stim_dir_map = {fn: meta_dict[fn]['stim_direction'] for fn in df0['file_name'].unique()}
+    paint_coverage_map = {fn: meta_dict[fn]['painted'] for fn in df0['file_name'].unique()}
+    paint_side_map = {fn: extract_paint_side(meta_dict[fn]['manipulation_male']) 
+                    for fn in df0['file_name'].unique()}
+
+    # Vectorized assignment (much faster than .loc in loop)
+    df0['stim_direction'] = df0['file_name'].map(stim_dir_map)
+    df0['paint_coverage'] = df0['file_name'].map(paint_coverage_map)
+    df0['paint_side'] = df0['file_name'].map(paint_side_map) 
+
+
+    # Add all paint conditions
+#     for fn, df_ in df0.groupby('file_name'):
+#         currm = meta[meta['file_name']==fn]
+#         assert len(currm)>0, 'No meta data for {}'.format(fn)
+#         #df0.loc[df0['file_name']==fn, 'stim_direction'] = currm['stim_direction'].values[0]
+#         stim_dir = currm['stim_direction'].unique()[0] #fn.split('_')[-1]
+#         df0.loc[df0['file_name']==fn, 'stim_direction'] = stim_dir
+#         df0.loc[df0['file_name']==fn, 'paint_coverage'] = currm['painted'].values[0]
+#         manipulation_ = currm['manipulation_male'].values[0]
+#         if manipulation_.startswith('no '):
+#             paint_side = 'none'
+#         elif manipulation_.startswith('left '):
+#             paint_side = 'left'
+#         elif manipulation_.startswith('right '):
+#             paint_side = 'right'
+#         elif manipulation_.startswith('both '):
+#             paint_side = 'both'
+#         df0.loc[df0['file_name']==fn, 'paint_side'] = paint_side 
+#         df0.loc[df0['file_name']==fn, 'genotype'] = currm['genotype_male']
+ 
     df0['date'] = [int(a.split('_')[0]) for a in df0['acquisition']]
-    print("Adding genotype: {}".format(currm['genotype_male']))
+    #print("Adding genotype: {}".format(currm['genotype_male']))
+    
     return df0
 
 
@@ -139,32 +192,52 @@ def filter_court(df,ftjaaba=None, min_vel=10,
 #                        'subboutnum']).mean().reset_index()
 #meanbouts.head()    
 #meanbouts['stim_hz'] = meanbouts['stim_hz'].apply(lambda x: min(stimhz_palette.keys(), key=lambda y:abs(y-x)))  
-
-def plot_egocentric_hue(df_, ax=None, xvar='targ_rel_pos_x', yvar='targ_rel_pos_y', 
-                    hue_var='stim_hz', hue_norm=None, markersize=5, 
-                    edgecolor='none', lw=0.5, bg_color='k',
-                    plot_com=False,
-                    cmap='viridis', com_markersize=60, 
-                    com_edgecolor='none', com_lw=0, alpha=0.5):
+def plot_egocentric_scatter(df_, ax=None, xvar='targ_rel_pos_x', yvar='targ_rel_pos_y', 
+                            plot_hue=True, hue_var='stim_hz', marker_size=5, 
+                            plot_com=False, fly_color='r', hue_norm=None,
+                            bg_color='k', cmap='viridis', com_markersize=60, 
+                            com_edgecolor='none', com_lw=0, alpha=0.5,
+                            edgecolor='none', lw=0):
     if ax is None:
         fig, ax = plt.subplots(figsize=(5, 5))
-     
-    sns.scatterplot(data=df_, x=xvar, y=yvar, ax=ax,
-                    s=markersize, alpha=alpha, palette=cmap, hue=hue_var,
-                    legend=0, hue_norm=hue_norm, edgecolor=edgecolor, lw=lw)
-    ax.plot(0, 0, '>', color=bg_color, markersize=3)
+    
+    if plot_hue: 
+        if hue_norm is None:
+            vmin, vmax = df_[hue_var].min(), df_[hue_var].max()
+            hue_norm = plt.Normalize(vmin=vmin, vmax=vmax)
+        sns.scatterplot(data=df_, x=xvar, y=yvar, ax=ax,
+                        s=marker_size, alpha=alpha, palette=cmap, 
+                        hue=hue_var, hue_norm=hue_norm,
+                        legend=0, edgecolor=edgecolor, linewidth=lw)
+    else:
+        sns.scatterplot(data=df_, x=xvar, y=yvar, 
+                        ax=ax, s=marker_size, color=bg_color)
+
+    fly_marker = '>' if xvar=='targ_rel_pos_x' else '^'
+    ax.plot(0, 0, fly_marker, color=fly_color, markersize=3)
     ax.set_aspect(1)
     ax.axis('off')
     if plot_com:
         for hueval, f_ in df_.groupby(hue_var):
             cm_theta = pd.Series(np.unwrap(f_[xvar])).mean()
             cm_radius = f_[yvar].mean()
-            ax.scatter(cm_theta, cm_radius, s=com_markersize, c=stimhz_palette[hueval],
-                    marker='o', edgecolor=com_edgecolor, lw=com_lw,
+            ax.scatter(cm_theta, cm_radius, s=60, c=stimhz_palette[hueval],
+                    marker='o', edgecolor='none', lw=0,
                     label='COM: {:.2f}'.format(hueval))
     ax.set_aspect(1)
     ax.axis('off')
     return ax
+
+def add_stimhz_colorbar(fig, cmap, n_epochs=10, axes=[0.92, 0.6, 0.015, 0.25]):
+    # add custom colorbar for stimhz
+    cbar_ax = fig.add_axes(axes)
+    sm = plt.cm.ScalarMappable(cmap=cmap, norm=plt.Normalize(vmin=0, vmax=n_epochs-1))
+    sm.set_array([])
+    cbar = fig.colorbar(sm, cax=cbar_ax)
+    cbar.set_label('Stimulus Frequency (Hz)', fontsize=12)
+    cbar.ax.tick_params(labelsize=10)
+    return cbar
+
 
 
 #%%
@@ -174,16 +247,38 @@ bg_color = [0.7]*3 if plot_style=='dark' else 'k'
 #%%
 # Set directories
 # Dropbox/source directory:
-rootdir = '/Users/julianarhee/Dropbox @RU Dropbox/Juliana Rhee/caitlin_data'
+#rootdir = '/Users/julianarhee/Dropbox @RU Dropbox/Juliana Rhee/caitlin_data'
 # Main assay containing all the acquisitions
-assay = '38mm_projector'
+#assay = '38mm_projector'
+
+src_minerva = True
+if src_minerva: 
+    rootdir = '/Volumes/Juliana/Caitlin_RA_data'
+    assay = 'Caitlin_projector'
+    
+    src = os.path.join(rootdir, assay)
+
+    alt_rootdir = '/Users/julianarhee/Dropbox @RU Dropbox/Juliana Rhee/caitlin_data'
+    alt_assay = '38mm_projector'
+    alt_src = os.path.join(alt_rootdir, alt_assay)
+
+else:
+    rootdir = '/Users/julianarhee/Dropbox @RU Dropbox/Juliana Rhee/caitlin_data'
+    assay = '38mm_projector'
+    src = os.path.join(rootdir, assay)
+   
+    alt_rootdir = '/Volumes/Juliana/Caitlin_RA_data'
+    alt_assay = 'Caitlin_projector'
+    alt_src = os.path.join(alt_rootdir, alt_assay)  
+
+#%%
 # Processed data directory (after running transform_data.py)
 processedmat_dir = '/Volumes/Juliana/2d_projector_analysis/circle_diffspeeds_painted_eyes/FlyTracker/processed_mats'
 if not os.path.exists(processedmat_dir):
     os.makedirs(processedmat_dir)
 
 # Set output directories: set it upstream of processedmat_dir     
-figdir = os.path.join(os.path.split(processedmat_dir)[0], 'relative_position')
+figdir = os.path.join(os.path.split(processedmat_dir)[0], 'plot_dot_position')
 if not os.path.exists(figdir):
     os.makedirs(figdir)
 if plot_style=='white':
@@ -197,7 +292,7 @@ figid = '{}|{}'.format(assay, processedmat_dir)
 #%%
 # Load meta data: .csv file
 # Assign fly numbers across acquisitions bec multiple acquisitions per fly
-src = os.path.join(rootdir, assay)
+#src = os.path.join(rootdir, assay)
 meta_fpath = glob.glob(os.path.join(src, '*.csv'))[0]
 print("Loading meta data from {}".format(meta_fpath))
 meta0 = pd.read_csv(meta_fpath)
@@ -259,7 +354,7 @@ if create_new:
         
     # Assign paint conditions
     print("Assigning paint conditions to DataFrame")
-    df0 = assign_paint_conditions(df0, meta0)
+    df0 = assign_paint_conditions(df0, meta)
     
     # Save the DataFrame to a pickle file
     print("Saving transformed data to {}".format(output_fpath))
@@ -275,7 +370,7 @@ print(df0['genotype'].unique())
 #%%
 # Check counts
 def print_condition_counts(df0):
-    print(df0.groupby(['species', 'paint_side', 'paint_coverage'])['acquisition'].nunique())
+    print(df0.groupby(['paint_side', 'paint_coverage', 'species'])['acquisition'].nunique())
 
 print_condition_counts(df0)
 
@@ -401,7 +496,7 @@ annotated = [
 # Name: acquisition, dtype: int64
  
 #%%
-coverage = 'front 1/4 parallel' # 'whole eye ' # 'front 1/2 vertical' #'whole eye '
+coverage = 'front 1/4 vertical' # 'whole eye ' # 'front 1/2 vertical' #'whole eye '
 side = 'both'
 df = df0[(df0['paint_side']==side)
        & (df0['paint_coverage']==coverage)].copy()
@@ -416,16 +511,14 @@ for fn, df_ in df.groupby('file_name'):
         print(fn, df_.shape)
 
 #%%
-# Add additional metrics
-import theta_error as the
+# # Add additional metrics
+# import theta_error as the
 f1 = df[df['id']==0].copy()
-f1 = rel.calculate_angle_metrics_focal_fly(f1, winsize=5, grouper='file_name')
-f1['targ_ang_vel_abs'] = np.abs(f1['targ_ang_vel'])
-f1 = the.shift_variables_by_lag(f1, lag=2)
-    
+# f1 = rel.calculate_angle_metrics_focal_fly(f1, winsize=5, grouper='file_name')
+# f1['targ_ang_vel_abs'] = np.abs(f1['targ_ang_vel'])
+# f1 = the.shift_variables_by_lag(f1, lag=2)
+     
 #%%
-xvar = 'targ_rel_pos_x'
-yvar = 'targ_rel_pos_y'
 hue_var = 'stim_hz' #'epoch'
 cmap='viridis'
 #stimhz_palette = putil.get_palette_dict(df[df[hue_var]>=0], hue_var, cmap=cmap)
@@ -436,18 +529,19 @@ incl_cols_for_mean = [c for c in df0.columns if c not in exclude_cols]
 
 # 
 chasing_var = 'chasing_manual'
-groupby_cols = ['species', 'acquisition', 'file_name', 'id', 
-                'stim_direction', 'paint_side', 'paint_coverage', 'stim_hz', 
-                'subboutnum', chasing_var]
-meanbouts = util.groupby_aggr_if_numeric(f1, groupby_cols, aggr_type='mean')
-#meanbouts = f1[incl_cols_for_mean].groupby().mean().reset_index()   
-meanbouts['stim_hz'] = meanbouts['stim_hz'].apply(lambda x: min(stimhz_palette.keys(), key=lambda y:abs(y-x)))  
 
 plot_com = False
 use_bouts = False
 use_frames=True
 
 if use_bouts:
+    groupby_cols = ['species', 'acquisition', 'file_name', 'id', 
+                'stim_direction', 'paint_side', 'paint_coverage', 'stim_hz', 
+                'subboutnum', chasing_var]
+    meanbouts = util.groupby_aggr_if_numeric(f1, groupby_cols, aggr_type='mean')
+    #meanbouts = f1[incl_cols_for_mean].groupby().mean().reset_index()   
+    meanbouts['stim_hz'] = meanbouts['stim_hz'].apply(lambda x: min(stimhz_palette.keys(), key=lambda y:abs(y-x)))  
+
     plotd = meanbouts.copy()
 elif use_frames:
     plotd = f1.copy()
@@ -460,18 +554,18 @@ nr=plotd['acquisition'].nunique()
 nc=plotd.groupby('acquisition')['file_name'].nunique().max()
 print(nr, nc)
 
-rows_are_conds=False
-if nc<=2:
-    rows_are_conds=True
-    nc=nr
-    nr=plotd.groupby('acquisition')['file_name'].nunique().max()
+rows_are_conds=True
+#if nc<=2:
+#    rows_are_conds=True
+#    nc=nr
+#    nr=plotd.groupby('acquisition')['file_name'].nunique().max()
 print(nr, nc)
 print("Rows are conds: {}".format(rows_are_conds))
 
 #%%
 classifier_type = 'manual'
 # -------------------------------------------
-min_vel = 5
+min_vel = 10
 max_facing_angle = np.deg2rad(80)
 max_dist_to_other = 20
 max_targ_pos_theta = np.deg2rad(180) #270) #270 #160
@@ -491,12 +585,15 @@ court_ = court_.reset_index(drop=True)
 print(clf_str)
 
 #%%
-markersize=1 if classifier_type=='none' else 5
+xvar = 'targ_rel_pos_y'
+yvar = 'targ_rel_pos_x'
+
+marker_size=1 if classifier_type=='none' else 5
 cmap='viridis'
 
 # Make hue_norm for stim_hz
-hue_min = 0 
-hue_max = 1
+hue_min = 0 #court_['stim_hz'].min()
+hue_max = 1 ##court_['stim_hz'].max()
 hue_norm = plt.Normalize(vmin=hue_min, vmax=hue_max)
 # PLOT, egocentric, color by stim Hz
 min_courted_stimhz = court_['stim_hz'].min()
@@ -510,7 +607,7 @@ for sp, tmpdf in plotd.groupby('species'):
     #    rows_are_conds=True
     #j    nc=nr
     #    nr=curr_court.groupby('acquisition')['file_name'].nunique().max()
-    fig, axn = plt.subplots(nr, nc, sharex=True, sharey=True, 
+    fig, axn = plt.subplots(2, nc, sharex=True, sharey=True, 
                             figsize=(nc*2, nr*2))
     for ai, (acq, currdf) in enumerate(tmpdf.groupby('acquisition')):
         #acq = currdf['acquisition'].unique()[0]
@@ -519,7 +616,7 @@ for sp, tmpdf in plotd.groupby('species'):
             curr_court = court_[(court_['acquisition']==acq)
                                 & (court_['stim_direction']==stim_dir)].copy() 
 
-            if stim_dir == 'CW':
+            if stim_dir == 'cw':
                 col_ix = 1
             else:
                 col_ix = 0
@@ -532,11 +629,10 @@ for sp, tmpdf in plotd.groupby('species'):
                 ax=axn[col_ix]
             else:
                 ax=axn[col_ix, ai]
-            ax = plot_egocentric_hue(curr_court, ax=ax, xvar=xvar, yvar=yvar, 
+            ax = plot_egocentric_scatter(curr_court, ax=ax, xvar=xvar, yvar=yvar, 
                                      hue_var=hue_var, hue_norm=hue_norm,
-                                markersize=markersize, plot_com=plot_com,
-                                bg_color=bg_color, cmap=cmap, alpha=0.75,
-                                edgecolor=bg_color, lw=0.1)
+                                marker_size=marker_size, plot_com=plot_com,
+                                bg_color=bg_color, cmap=cmap, alpha=0.75)
             # plot grid
             ax.axvline(x=0, color=bg_color, linestyle='--', lw=0.5)
             ax.axhline(y=0, color=bg_color, linestyle='--', lw=0.5)
@@ -546,10 +642,9 @@ for sp, tmpdf in plotd.groupby('species'):
             cond_str = '{}_{}_{}'.format(sp, paint_coverage, paint_side) 
             title = '{} ({})\n{}'.format(cond_str, stim_dir, acq)
             ax.set_title(title, loc='left', fontsize=6)
-    if nr > 1 and nc >= 1:
-        for ax in axn.flat:
-            ax.axis('off')
-    ax.invert_yaxis() # to match video POV
+    for ax in axn.flat:
+        ax.axis('off')
+    #ax.invert_yaxis() # to match video POV
      
     # Add colorbar
     cbar_ax = fig.add_axes([0.93, 0.4, 0.01, 0.3])

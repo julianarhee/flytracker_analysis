@@ -567,6 +567,9 @@ def do_transformations_on_df(trk_, frame_width, frame_height,
     fly1 = trk_[trk_['id']==flyid1].copy().reset_index(drop=True)
     fly2 = trk_[trk_['id']==flyid2].copy().reset_index(drop=True)
 
+    fly1_feat = feat_[feat_['id']==flyid1].copy().reset_index(drop=True)
+    fly2_feat = feat_[feat_['id']==flyid2].copy().reset_index(drop=True)
+    
     # FIRST, do fly1: -------------------------------------------------
     # translate coordinates so that focal fly is at origin
     # Creates trans_x, trans_y
@@ -579,8 +582,9 @@ def do_transformations_on_df(trk_, frame_width, frame_height,
     fly1['targ_centered_to_focal_x'] = fly2['trans_x']
     fly1['targ_centered_to_focal_y'] = fly2['trans_y']
 
-    fly1['target_vel'] = fly2['vel']
-    fly1['target_ang_vel'] = fly2['ang_vel']
+    # add vel
+    fly1['target_vel'] = fly2_feat['vel']
+    fly1['target_ang_vel'] = fly2_feat['ang_vel']
 
     # rotate coordinates so that fly1 is facing 0 degrees (East)
     # Assumes fly1 ORI goes from 0 to pi CCW, with y-axis NOT-inverted.
@@ -608,8 +612,8 @@ def do_transformations_on_df(trk_, frame_width, frame_height,
     fly2['targ_centered_to_focal_x'] = fly1['trans_x']
     fly2['targ_centered_to_focal_y'] = fly1['trans_y']
 
-    fly2['target_vel'] = fly1['vel']
-    fly2['target_ang_vel'] = fly1['ang_vel']
+    fly2['target_vel'] = fly1_feat['vel']
+    fly2['target_ang_vel'] = fly1_feat['ang_vel']
 
 
     # rotate coordinates so that fly1 is facing 0 degrees (East)
@@ -721,9 +725,10 @@ def get_metrics_relative_to_focal_fly(acqdir, mov_is_upstream=False, fps=60, cop
 
     if not create_new and os.path.exists(df_fpath):
         df_ = pd.read_pickle(df_fpath)
-        print('Loaded: {}'.format(df_fpath))
+        #print('Loaded: {}'.format(df_fpath))
         return df_
-    
+    else:
+        print("Unable to load, creating new: {}".format(os.path.split(df_fpath)[-1]) )
     # load flyracker data
     if mov_is_upstream:
         subfolder = ''
