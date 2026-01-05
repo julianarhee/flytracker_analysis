@@ -8,6 +8,7 @@
  # @ Modified time: 2025-06-23 10:12:06
  # @ Description:
  Read projector data and plot target position relative to focal fly.
+ NOTE: similar to plot_relative_position.py, but for manual annotations in actions.mat
  '''
 
 #%%
@@ -357,8 +358,9 @@ if create_new:
     df0 = assign_paint_conditions(df0, meta)
     
     # Save the DataFrame to a pickle file
-    print("Saving transformed data to {}".format(output_fpath))
-    df0.to_pickle(output_fpath)
+    # Dont save, bec these are ANNOTATED
+    #print("Saving transformed data to {}".format(output_fpath))
+    #df0.to_pickle(output_fpath)
 
 else:
     # Load existing data

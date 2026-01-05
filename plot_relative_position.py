@@ -203,6 +203,10 @@ assert len(meta_acqs) - len(errors) == df0['file_name'].nunique(), 'Not all acqs
 for err in errors:
     print(err)
     
+# Save
+#save_fpath = os.path.join(os.path.split(processedmat_dir)[0], 'transformed_projector_data.parquet')
+#df0.to_parquet(save_fpath)
+#print(f"Saved to: {save_fpath}")
 
 #%%
 
@@ -396,6 +400,33 @@ df0 = util.add_stim_hz(df0, n_frames=24000, n_epochs=10)
 #         df_.loc[(df_['frame']>=v) & (df_['frame']<v+n_frames_per_epoch), 'stim_hz'] = i 
 #     wstim.append(df_)
 # df0 = pd.concat(wstim)
+
+#%%
+# Check stim_hz
+curr_sp = 'Dmel'
+curr_dir = 'CW'
+curr_cond = 'none'
+tmpd = df0[(df0['species']==curr_sp) & (df0['stim_direction']==curr_dir) & (df0['paint_coverage']==curr_cond)]
+curr_acq = tmpd['acquisition'].unique()[0]
+
+#%%
+d = tmpd[tmpd['acquisition']==curr_acq].copy()
+
+fig, axn = plt.subplots(1, 2, figsize=(12, 5), sharex=True, sharey=True)
+sns.barplot(data=d[d['id']==0], ax=axn[0], y='vel', x='stim_hz')
+sns.barplot(data=d[d['id']==1], ax=axn[1], y='vel', x='stim_hz')
+# Reduce xtick fontsize to be smaller 
+for ax in axn.flat:
+    ax.tick_params(axis='x', labelsize=8)
+
+#%%
+# Plot distribution of vel for each id and stim_hz
+fig, ax = plt.subplots(figsize=(10, 5))
+sns.displot(d[d['id']==1], x='vel', hue='stim_hz', ax=ax,
+            kind='kde', legend=True, common_norm=False,
+            palette='viridis')
+
+
  
 #%%
 # subdivide into smaller boutsa
