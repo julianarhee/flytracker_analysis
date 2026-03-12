@@ -21,8 +21,8 @@ module_path = os.path.abspath(os.path.join('..'))
 if module_path not in sys.path:
     sys.path.append(module_path)
 from relative_metrics import load_processed_data
-import utils as util
-import plotting as putil
+import libs.utils as util
+import libs.plotting as putil
 
 #%%
 plot_style='dark'
@@ -1018,7 +1018,7 @@ putil.label_figure(fig, figid)
 
 #%%
 
-import regplot as rpl
+import libs.regplot as rpl
 
 #%% 
 # Scatterplot:  ANG_VEL vs. THETA_ERROR -- color coded by STIM_HZ

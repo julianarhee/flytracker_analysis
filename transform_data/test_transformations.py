@@ -19,9 +19,9 @@ import pylab as pl
 
 import matplotlib as mpl
 
-import plotting as putil
-import dlc as dlc
-import utils as util
+import libs.plotting as putil
+import libs.dlc as dlc
+import libs.utils as util
 import cv2
 import importlib
 

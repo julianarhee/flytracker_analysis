@@ -229,15 +229,15 @@ def bin_by_object_position(chase_, start_bin = -180, end_bin=180, bin_size=20):
 
 #%%
 plot_style='white'
-min_fontsize=24
+min_fontsize=6
 putil.set_sns_style(style=plot_style, min_fontsize=min_fontsize)
 bg_color = [0.7]*3 if plot_style=='dark' else 'k'
 
 # Set directories
 # Main assay containing all the acquisitions
 #assay = '38mm_dyad_GG' #'38mm_projector'
-assay = '38mm_dyad_Dele'
-#assay = '38mm_projector'
+#assay = '38mm_dyad_Dele'
+assay = '38mm_projector'
 
 if assay == '38mm_projector':
     # Dropbox/source directory:

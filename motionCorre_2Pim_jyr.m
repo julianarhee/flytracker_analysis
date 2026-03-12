@@ -41,10 +41,10 @@ for i = 1:length(names)
     outFname = strrep(name,'.tif','_nrAligned.tif');
     %outPname = [pwd '/' outFname];
     outPname = [outFname];
-    if isfile(outFname)
-        fprintf('Already MCed: %s\n', outFname)
-        continue
-    end
+    %if isfile(outFname)
+    %    fprintf('Already MCed: %s\n', outFname)
+    %    continue
+    %end
 
     tic; Y = read_file(name); toc; % read the file 
     Y = single(Y);                 % convert to single precision

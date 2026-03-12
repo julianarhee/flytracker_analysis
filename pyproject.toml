@@ -1,0 +1,12 @@
+[build-system]
+requires = ["setuptools", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "flytracker_analysis"
+version = "0.1.0"
+description = "FlyTracker behavioral analysis tools"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["libs*", "transform_data*", "data_io*", "analyses*"]

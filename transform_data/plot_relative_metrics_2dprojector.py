@@ -20,8 +20,8 @@ module_path = os.path.abspath(os.path.join('..'))
 if module_path not in sys.path:
     sys.path.append(module_path)
 from relative_metrics import load_processed_data
-import utils as util
-import plotting as putil
+import libs.utils as util
+import libs.plotting as putil
 
 #%%
 plot_style='dark'
@@ -73,7 +73,7 @@ def load_aggregate_data(savedir, mat_type='df'):
     return feat
 #%%
 
-import dlc as dlc
+import libs.dlc as dlc
 import plot_dlc_frames as pdlc
 
 #%%
