@@ -425,14 +425,18 @@ def additional_angle_metrics_single(df_, winsize=5, fps=60, filter_funky=True):
                             smooth_var='facing_angle', vel_var='facing_angle_vel',)
 
     # Calculate "theta-error"
+    # Pass a copy so the bad_ixs wipe inside smooth_and_calculate_velocity_circvar
+    # cannot corrupt ori/sec and other source columns in df_ when theta_error is all NaN.
     try:
-        df_tmp = util.smooth_and_calculate_velocity_circvar(df_, 
+        df_tmp = util.smooth_and_calculate_velocity_circvar(df_.copy(), 
                                 smooth_var='theta_error', vel_var='theta_error_dt', 
                                 time_var='sec', winsize=winsize)
-        assert all(np.isnan(df_tmp['theta_error']))==False
-    except AssertionError as e:
-        print("AssertionError: {}".format(e))
-        df_['theta_error_dt'] = np.nan
+        #assert all(np.isnan(df_tmp['theta_error']))==False, "theta error is nan"
+        df_['theta_error_dt'] = df_tmp['theta_error_dt']
+        df_['theta_error_smoothed'] = df_tmp['theta_error_smoothed']
+    #except Exception as e:
+        #print("AssertionError: {}".format(e))
+        #df_['theta_error_dt'] = np.nan
     except Exception as e:
         print("Error calculating theta error: {}".format(e))
         df_['theta_error_dt'] = np.nan
@@ -662,6 +666,8 @@ def do_transformations_on_df(trk_, frame_width, frame_height,
     if verbose:
         print("... calculating relative velocity")
     if feat_ is not None:
+        if verbose:
+            print("... calculating relative velocity from feat df")
         f_list = []
         for fi, df_ in feat_.groupby('id'):
             df_ = get_relative_velocity(df_, win=1, 
@@ -673,7 +679,10 @@ def do_transformations_on_df(trk_, frame_width, frame_height,
         df = pd.concat([trk, 
                 feat.drop(columns=[c for c in feat.columns if c in trk.columns])], axis=1)
         assert df.shape[0]==trk.shape[0], "Bad merge: {}, {}".format(feat.shape, trk.shape)
+        print("df shape:", df.shape)
     else:
+        if verbose:
+            print("(no feat df provided, using trk df)")
         # feat_ and trk_ are already combined 
         f_list = []
         assert 'dist_to_other' in trk.columns, "No feat df provided. Need dist_to_other."
@@ -685,6 +694,13 @@ def do_transformations_on_df(trk_, frame_width, frame_height,
 
 
     # Add addtional angular metrics (like ang_vel_fly and smoothing)
+    if verbose:
+        print("... calculating additional angle metrics")
+        print(df['id'].unique())
+        f1_slice = df[df['id']==flyid1]
+        print("theta_error NaN:", f1_slice['theta_error'].isna().sum(), "/", len(f1_slice))
+        print("theta_error sample:", f1_slice['theta_error'].dropna().head())
+
     f1 = additional_angle_metrics_single(df[df['id']==flyid1].copy(), winsize=winsize, fps=fps, filter_funky=True)
     f2 = additional_angle_metrics_single(df[df['id']==flyid2].copy(), winsize=winsize, fps=fps, filter_funky=True)
     # Recombine f1 and f2
@@ -721,14 +737,17 @@ def get_metrics_relative_to_focal_fly(acqdir, mov_is_upstream=False, fps=60, cop
         savedir = acqdir
         
     acq = os.path.split(acqdir)[-1]
-    df_fpath = os.path.join(savedir, '{}_df.pkl'.format(acq))
+    parquet_fpath = os.path.join(savedir, '{}_df.parquet'.format(acq))
+    pkl_fpath = os.path.join(savedir, '{}_df.pkl'.format(acq))
 
-    if not create_new and os.path.exists(df_fpath):
-        df_ = pd.read_pickle(df_fpath)
-        #print('Loaded: {}'.format(df_fpath))
-        return df_
-    else:
-        print("Unable to load, creating new: {}".format(os.path.split(df_fpath)[-1]) )
+    if not create_new:
+        if os.path.exists(parquet_fpath):
+            return pd.read_parquet(parquet_fpath)
+        elif os.path.exists(pkl_fpath):
+            df_, _ = util.replace_pkl_with_parquet(pkl_fpath)
+            return df_
+
+    print("Not loading old, creating new: {}".format('{}_df.parquet'.format(acq)))
     # load flyracker data
     if mov_is_upstream:
         subfolder = ''
@@ -782,13 +801,14 @@ def get_metrics_relative_to_focal_fly(acqdir, mov_is_upstream=False, fps=60, cop
                                    get_relative_sizes=get_relative_sizes)
 
     # save
-    #% save
     if savedir is not None:
         if not os.path.exists(savedir):
             os.makedirs(savedir)
-        with open(df_fpath, 'wb') as f: 
-            pkl.dump(df_, f)
-        print('Saved: {}'.format(df_fpath))
+        df_.to_parquet(parquet_fpath, engine='pyarrow', compression='snappy')
+        print('Saved: {}'.format(parquet_fpath))
+        # remove any stale pkl
+        if os.path.exists(pkl_fpath):
+            os.remove(pkl_fpath)
 
     #% plot - sanity checks
     if plot_checks:
