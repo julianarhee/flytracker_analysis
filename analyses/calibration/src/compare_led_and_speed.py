@@ -210,7 +210,7 @@ meta_fpath = glob.glob(os.path.join(rootdir, '*.csv'))[0]
 meta0 = pd.read_csv(meta_fpath)
 meta0.head()
 
-# %%
+#%
 # Get calibration data only
 calib = meta0[meta0['calibration']==1].copy()
 calib.shape
@@ -309,8 +309,17 @@ for fn in meta['file_name'].unique():
 
 courtship_counts_all = pd.concat(courtship_counts_all)
 
+# %%
+# Get number of files for each age-ATR and include in legend
+conds = ['species', 'age-ATR', 'led_type', 'speed_type']
+age_counts = courtship_counts_all.groupby(conds)['file_name'].nunique()
+age_counts = age_counts.reset_index()
+age_counts.columns = conds + ['file_count']
+print(age_counts)
+
 
 # %%
+# Overall courtship vs. LED speed (ignore conditions)
 species_palette = {'Dmel': 'plum', 
                    'Dyak': 'mediumseagreen'} 
 for sp, df_ in courtship_counts_all.groupby('species'):
@@ -324,30 +333,47 @@ for sp, df_ in courtship_counts_all.groupby('species'):
     ax.set_ylabel('Courtship frames')
 #plt.show()
 # %%
-
+# Split by speed and age-ATR
 g = sns.FacetGrid(courtship_counts_all, 
         col='speed_hz', row='age-ATR')
 g.map_dataframe(sns.lineplot, x='led_intensity', y='courtship_frac',
                 hue='species', palette=species_palette)
 g.add_legend()
-# %%
+
+
+#%%
+#conds = ['led_type', 'speed_type']
+f = sns.FacetGrid(courtship_counts_all, 
+row='led_type', col='speed_hz')
+f.map_dataframe(sns.lineplot, 
+            x='led_intensity', y='courtship_frac', 
+            style='age-ATR', hue='species', 
+            palette=species_palette)
+f.add_legend()
+
+#%%
 xvar = 'led_level'
+mel_led_type = 'low_led'
+yak_led_type = 'full_led'
+
 mel = courtship_counts_all[
     (courtship_counts_all['species']=='Dmel') &
-    (courtship_counts_all['led_type']=='low_led')].copy()
+    (courtship_counts_all['led_type']==mel_led_type)].copy()
 
 yak = courtship_counts_all[
     (courtship_counts_all['species']=='Dyak') &
-    (courtship_counts_all['led_type']=='full_led')].copy()
+    (courtship_counts_all['led_type']==yak_led_type)].copy()
 
 #for age_str, age_df in courtship_counts_all.groupby('age-ATR'):
 #fig, ax = plt.subplots(figsize=(10, 5))
 # Combine mel unique speed_hz and yak unique speed_hz
 unique_speed_hz = sorted(list(set(mel['speed_hz'].unique()) | set(yak['speed_hz'].unique())))
 
+
 #g = sns.FacetGrid(courtship_counts_all, col='speed_hz')
 fig, axn = plt.subplots(len(unique_speed_hz), 1, 
-            sharex=True, sharey=True, figsize=(10, 10))
+            sharex=True, sharey=True, figsize=(4, 12))
+fig.text(0.02, 0.95, f'mel: {mel_led_type}, yak: {yak_led_type}', fontsize=12)
 for i, speed_hz in enumerate(unique_speed_hz):
     for sp, df_ in [('Dmel', mel), ('Dyak', yak)]:
         ax=axn[i]
@@ -357,10 +383,49 @@ for i, speed_hz in enumerate(unique_speed_hz):
                     hue='species', style='age-ATR',
                     palette=species_palette,
                     legend=i==len(unique_speed_hz)-1)
-        ax.set_title(f'speed: {speed_hz} Hz')
+        ax.set_title(f'speed: {speed_hz} Hz', loc='left')
 #ax.set_box_aspect(1)
 #ax.set_ylim([0, 1])
-sns.move_legend(ax, loc='upper left', bbox_to_anchor=(1, 1), 
+plt.subplots_adjust(hspace=0.5)
+sns.move_legend(ax, loc='lower left', bbox_to_anchor=(1, 1), 
     frameon=False, title='')  
+# %
+print(mel.groupby('age-ATR')['file_name'].nunique()) # )
+print(yak.groupby('age-ATR')['file_name'].nunique()) # 4
+# Dmel:
+# age-ATR
+# 3-1.0    4
 
+# Dyak:
+# age-ATR
+# 3-3.0    4
+# 4-4.0    3
+#%
+#%% 
+# Combine mel and yak df
+comb = pd.concat([mel, yak])
+comb.shape
+
+# Get speeds where courtship level is min. > 0.4
+# for a given LED level
+min_frac = 0.5
+mean_frac = comb.groupby(['species', 'speed_hz', 'led_intensity', 'age-ATR'],
+                        as_index=False)['courtship_frac'].mean()
+means_above_thr = mean_frac[mean_frac['courtship_frac']>=min_frac]
+
+# %%
+#comb[(comb['species']=='Dyak') & (comb['speed_hz']==20)].\
+#    groupby('led_level')['courtship_frac'].mean()
+# Plot best match?
+incl_speeds = means_above_thr['speed_hz'].unique().tolist() #[40, 60 80]
+plotd = comb[comb['speed_hz'].isin(incl_speeds)]
+
+fig, ax = plt.subplots()
+sns.lineplot(data=plotd, ax=ax,
+            x='led_intensity', y='courtship_frac',
+            hue='species', palette=species_palette)
+ax.set_title('Courtship by LED and speed')
+ax.set_xlabel('LED intensity')
+ax.set_ylabel('Courtship frames')
+plt.show()
 # %%
