@@ -88,6 +88,49 @@ def circ_dist(x, y):
     r = np.angle(np.exp(1j * x) / np.exp(1j * y))
     return r
 
+def wrap_pi(a):  # (-pi, pi]
+    return (a + np.pi) % (2*np.pi) - np.pi
+
+def circ_dist2(x, y):
+    '''
+    % r = circ_dist(alpha, beta)
+    %   All pairwise difference x_i-y_j around the circle computed efficiently.
+    %
+    %   Input:
+    %     alpha       sample of linear random variable
+    %     beta       sample of linear random variable
+    %
+    %   Output:
+    %     r       matrix with pairwise differences
+    %
+    % References:
+    %     Biostatistical Analysis, J. H. Zar, p. 651
+    %
+    % PHB 3/19/2009
+    %
+    % Circular Statistics Toolbox for Matlab
+
+    % By Philipp Berens, 2009
+    % berens@tuebingen.mpg.de - www.kyb.mpg.de/~berens/circStat.html
+
+    np.angle:  Calculates the phase angle of a complex number or 
+               array of complex numbers, returning the angle in radians by default
+               Uses the atan2 function internally to compute the angle between 
+               the positive real axis and the complex number on the complex plane
+               Returns in range (-pi, pi].
+    ''' 
+
+    #np.tile(A, (m, n)) like repmat(A, m, n) in MATLAB
+
+    at = np.angle( np.tile( np.exp(1j*x), (1, np.size(y)) ) / np.tile( np.exp(1j*y), (np.size(x), 1) ) )
+
+    if len(at) == 1:
+        return float(at)
+    else:
+        return at #np.exp(1j*x) / np.exp(1j*y) )
+
+
+
 # Function to keep value if all are the same, else return NaN
 def only_if_unique(x):
     ''' 
@@ -151,8 +194,30 @@ def convert_time_to_seconds(time_str):
     h, m, s = time_str.split(':')
     return int(h)*60 + int(m)*60 + int(s)
 
+# ---------------------------------------------------------------------
+# Data loading and formatting
+# ---------------------------------------------------------------------
+def get_species_from_acquisition_name(acq: str) -> str:
+    """
+    Extract 4-letter species code starting with 'D' from acquisition name.
+    Example: '..._Dele-HK_...' -> 'Dele'. Falls back to known substrings.
+    """
+    m = re.search(r'_(D[a-zA-Z]{3})', acq)
+    if m:
+        return m.group(1)
+    if 'mel' in acq:
+        return 'Dmel'
+    if 'yak' in acq:
+        return 'Dyak'
+    if 'ele' in acq:
+        return 'Dele'
+    return 'Unknown'
 
-#%% bouts
+
+#%% 
+# ---------------------------------------------------------------------
+# Bout parsing
+# ---------------------------------------------------------------------
 def get_indices_of_consecutive_rows(passdf):
     '''
     Find start and stop indices of consecutive rows in a dataframe.
@@ -324,10 +389,14 @@ def smooth_and_calculate_velocity_circvar(df, smooth_var='ori', vel_var='ang_vel
         df.loc[df['id']==i, '{}_smoothed'.format(vel_var)] = ang_vel_smoothed #.values
         #df.loc[df['id']==i, '{}_smoothed_range'.format(smooth_var)] = [set_angle_range_to_neg_pos_pi(i) for i in smoothed_wrap]
 
-    #df.loc[df[df[smooth_var].isna()].index, :] = np.nan
+    # Only wipe columns that this call produced, not all columns.
+    # Wiping all columns here destroys source data (ori, theta_error, sec, etc.)
+    # whenever ANY input variable has NaN frames.
     bad_ixs = df[df[smooth_var].isna()]['frame'].dropna().index.tolist()
-    cols = [c for c in df.columns if c not in ['frame', 'id', 'acquisition', 'species']]
-    df.loc[bad_ixs, cols] = np.nan
+    produced_cols = [vel_var, '{}_smoothed'.format(smooth_var),
+                     '{}_diff'.format(smooth_var), '{}_smoothed'.format(vel_var)]
+    wipe_cols = [c for c in produced_cols if c in df.columns]
+    df.loc[bad_ixs, wipe_cols] = np.nan
 
     df['{}_abs'.format(vel_var)] = np.abs(df[vel_var])
 
@@ -523,6 +592,26 @@ def pol2cart(rho, phi):
 # ---------------------------------------------------------------------
 # Data loading and formatting
 # ---------------------------------------------------------------------
+def replace_pkl_with_parquet(pkl_fpath):
+    '''
+    Load a pickle file, save it as parquet alongside, and delete the pkl.
+
+    Arguments:
+        pkl_fpath -- path to the .pkl file to migrate
+
+    Returns:
+        df -- loaded DataFrame
+        parquet_fpath -- path to the written .parquet file
+    '''
+    parquet_fpath = pkl_fpath.replace('.pkl', '.parquet')
+    df = pd.read_pickle(pkl_fpath)
+    df.to_parquet(parquet_fpath, engine='pyarrow', compression='snappy')
+    os.remove(pkl_fpath)
+    print('Migrated {} -> {}'.format(os.path.basename(pkl_fpath),
+                                     os.path.basename(parquet_fpath)))
+    return df, parquet_fpath
+
+
 def load_ft_actions(found_actions_paths, split_end=False):
     a_ = []
     for fp in found_actions_paths:
@@ -1319,13 +1408,18 @@ def load_flytracker_data(acq_dir, calib_is_upstream=False, fps=60,
     NOTE: filter_ori NaNs ori if wing position is missing.
     
     Args:
-        calib_is_upstream: (bool) calibration.mat file is upstream of flytracker output directory (default should prob be true)
-        subfolder: (str) subfolder where -feat.mat and -track.mat are stored if NOT in default level of where video .avi file is
-        filter_ori: (bool) if True, set ORI to NaN where wing info is missing
+    -----
+    acq_dir: (str) directory containing FlyTracker output
+    calib_is_upstream: (bool) calibration.mat file is upstream of flytracker output directory (default should prob be true)
+    subfolder: (str) subfolder where -feat.mat and -track.mat are stored if NOT in default level of where video .avi file is
+    filter_ori: (bool) if True, set ORI to NaN where wing info is missing
+    fps: (int) frames per second of video
+    
     Returns:
-        calib: 
-        trackdf: raw tracking data (e.g., position, orientation, left wing ang)
-        featdf: features derived from tracking data (e.g., velocity, dist to x)
+    --------
+    calib: 
+    trackdf: raw tracking data (e.g., position, orientation, left wing ang)
+    featdf: features derived from tracking data (e.g., velocity, dist to x)
     '''
     #% Get corresponding calibration file
     calib=None; trackdf=None; featdf=None;
