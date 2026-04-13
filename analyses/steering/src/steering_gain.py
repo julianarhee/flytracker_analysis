@@ -25,221 +25,190 @@ import libs.utils as util
 import libs.theta_error as the
 
 import transform_data.relative_metrics as rel
+import gain_funcs as gf
 
-def get_species_from_acquisition_name(acq: str) -> str:
-    """
-    Extract 4-letter species code starting with 'D' from acquisition name.
-    Example: '..._Dele-HK_...' -> 'Dele'. Falls back to known substrings.
-    """
-    m = re.search(r'_(D[a-zA-Z]{3})', acq)
-    if m:
-        return m.group(1)
-    if 'mel' in acq:
-        return 'Dmel'
-    if 'yak' in acq:
-        return 'Dyak'
-    if 'ele' in acq:
-        return 'Dele'
-    return 'Unknown'
+# Moved to utils.py
+# def get_species_from_acquisition_name(acq: str) -> str:
+#     """
+#     Extract 4-letter species code starting with 'D' from acquisition name.
+#     Example: '..._Dele-HK_...' -> 'Dele'. Falls back to known substrings.
+#     """
+#     m = re.search(r'_(D[a-zA-Z]{3})', acq)
+#     if m:
+#         return m.group(1)
+#     if 'mel' in acq:
+#         return 'Dmel'
+#     if 'yak' in acq:
+#         return 'Dyak'
+#     if 'ele' in acq:
+#         return 'Dele'
+#     return 'Unknown'
 
-def transform_projector_data(acquisition_parentdir, acqs, processedmat_dir, 
-                            movie_fmt='.avi',subdir=None, flyid1=0, flyid2=1,
-                            create_new=False, reassign_acquisition_name=False):
-    """
-    Load transformed projector data for specified acquisitions.
-    Assumes that acquisitions are in the acquisition_parentdir.
-    Assumes that flytracker output is in the processedmat_dir.
-
-    Arguments:
-        acquisition_parentdir (str): Parent directory of acquisitions.
-        acqs (list): List of acquisitions.
-        processedmat_dir (str): Directory to save processed mats.
-        movie_fmt (str): Movie format.
-        subdir (str): Subdirectory of acquisitions.
-        flyid1 (int): Flytracker male index.
-        flyid2 (int): Flytracker female index.
-        create_new (bool): Create new processed mats.
-        reassign_acquisition_name (bool): Reassign acquisition name, TRUE if one data-fly has multiple files (like projector CW/CCW)
-
-    Returns:
-        df0 (pd.DataFrame): Processed data.
-        errors (list): List of errors.
-    """
-    d_list = []
-    errors = []
-    for i, acq in enumerate(acqs):
-        if i % 10 == 0:
-            print('Processing {} of {}: {}'.format(i, len(acqs), acq))
-        acq_dir = os.path.join(acquisition_parentdir, acq)
-        try:
-            # Load flytracker output
-            calib, trk, feat = util.load_flytracker_data(acq_dir, filter_ori=True)
-            # Transform data to relative coordinates
-            df_ = rel.get_metrics_relative_to_focal_fly(acq_dir,
-                                                    savedir=processedmat_dir,
-                                                    movie_fmt='.avi',
-                                                    mov_is_upstream=None,
-                                                    flyid1=0, flyid2=1,
-                                                    plot_checks=False,
-                                                    create_new=create_new,
-                                                    get_relative_sizes=False)
-            assert len(df_['targ_centered_x'].unique()) > 1, "Bad targ calculation"
-        except Exception as e:
-            errors.append((acq, e))
-            print("ERROR: {}".format(e))
-            continue
-        df_['file_name'] = os.path.split(acq)[-1]
-        # Get species from acquisition
-        
-        df_['species'] = get_species_from_acquisition_name(acq)
-        if reassign_acquisition_name:
-            df_['date_fly'] = ['_'.join([f.split('-')[0], f.split('_')[1]]) for f in df_['file_name']]
-            df_['acquisition'] = ['_'.join([a, b]) for a, b in df_[['date_fly', 'species']].values]
-        else:
-            df_['acquisition'] = acq #os.path.split(acq)[-1] 
-        d_list.append(df_)
-
-    df0 = pd.concat(d_list)
-    
-    return df0, errors
-
-def assign_paint_conditions(df0, meta):
-    # Add all paint conditions
-    for fn, df_ in df0.groupby('file_name'):
-        currm = meta[meta['file_name']==fn]
-        assert len(currm)>0, 'No meta data for {}'.format(fn)
-        assert len(currm)==1, 'Multiple meta data for {}'.format(fn)
-        #df0.loc[df0['file_name']==fn, 'stim_direction'] = currm['stim_direction'].values[0]
-        stim_dir = currm['stim_direction'].unique()[0] #fn.split('_')[-1]
-        df0.loc[df0['file_name']==fn, 'stim_direction'] = stim_dir
-        df0.loc[df0['file_name']==fn, 'paint_coverage'] = currm['painted'].values[0]
-        manipulation_ = currm['manipulation_male'].values[0]
-        if manipulation_.startswith('no '):
-            paint_side = 'none'
-        elif manipulation_.startswith('left '):
-            paint_side = 'left'
-        elif manipulation_.startswith('right '):
-            paint_side = 'right'
-        elif manipulation_.startswith('both '):
-            paint_side = 'both'
-        df0.loc[df0['file_name']==fn, 'paint_side'] = paint_side 
-    df0['date'] = [int(a.split('_')[0]) for a in df0['acquisition']]
-
-    return df0
-
-def load_transformed_data(parquet_path):
-    """Load DataFrame from parquet. If not found, load from pkl and save as parquet for next time."""
-    pkl_path = parquet_path.replace('.parquet', '.pkl') if parquet_path.endswith('.parquet') else parquet_path + '.pkl'
-    if os.path.exists(parquet_path):
-        print("Loading parquet from: {}".format(parquet_path))
-        return pd.read_parquet(parquet_path)
-    if os.path.exists(pkl_path):
-        print("Loading pkl from: {}".format(pkl_path))
-        df = pd.read_pickle(pkl_path)
-        df.to_parquet(parquet_path, index=False)
-        print("Saved parquet to: {}".format(parquet_path))
-        return df
-    raise FileNotFoundError("Neither {} nor {} found".format(parquet_path, pkl_path))
-
-def wrap_pi(a):  # (-pi, pi]
-    return (a + np.pi) % (2*np.pi) - np.pi
-
-def circ_dist2(x, y):
-    '''
-    % r = circ_dist(alpha, beta)
-    %   All pairwise difference x_i-y_j around the circle computed efficiently.
-    %
-    %   Input:
-    %     alpha       sample of linear random variable
-    %     beta       sample of linear random variable
-    %
-    %   Output:
-    %     r       matrix with pairwise differences
-    %
-    % References:
-    %     Biostatistical Analysis, J. H. Zar, p. 651
-    %
-    % PHB 3/19/2009
-    %
-    % Circular Statistics Toolbox for Matlab
-
-    % By Philipp Berens, 2009
-    % berens@tuebingen.mpg.de - www.kyb.mpg.de/~berens/circStat.html
-
-    np.angle:  Calculates the phase angle of a complex number or 
-               array of complex numbers, returning the angle in radians by default
-               Uses the atan2 function internally to compute the angle between 
-               the positive real axis and the complex number on the complex plane
-               Returns in range (-pi, pi].
-    ''' 
-
-    #np.tile(A, (m, n)) like repmat(A, m, n) in MATLAB
-
-    at = np.angle( np.tile( np.exp(1j*x), (1, np.size(y)) ) / np.tile( np.exp(1j*y), (np.size(x), 1) ) )
-
-    if len(at) == 1:
-        return float(at)
-    else:
-        return at #np.exp(1j*x) / np.exp(1j*y) )
+# Moved to gain_funcs.py
+# def transform_projector_data(acquisition_parentdir, acqs, processedmat_dir, 
+#                             movie_fmt='.avi',subdir=None, flyid1=0, flyid2=1,
+#                             create_new=False, reassign_acquisition_name=False):
+#     """
+#     Load transformed projector data for specified acquisitions.
+#     Assumes that acquisitions are in the acquisition_parentdir.
+#     Assumes that flytracker output is in the processedmat_dir.
+# 
+#     Arguments:
+#         acquisition_parentdir (str): Parent directory of acquisitions.
+#         acqs (list): List of acquisitions.
+#         processedmat_dir (str): Directory to save processed mats.
+#         movie_fmt (str): Movie format.
+#         subdir (str): Subdirectory of acquisitions.
+#         flyid1 (int): Flytracker male index.
+#         flyid2 (int): Flytracker female index.
+#         create_new (bool): Create new processed mats.
+#         reassign_acquisition_name (bool): Reassign acquisition name, TRUE if one data-fly has multiple files (like projector CW/CCW)
+# 
+#     Returns:
+#         df0 (pd.DataFrame): Processed data.
+#         errors (list): List of errors.
+#     """
+#     d_list = []
+#     errors = []
+#     for i, acq in enumerate(acqs):
+#         if i % 10 == 0:
+#             print('Processing {} of {}: {}'.format(i, len(acqs), acq))
+#         acq_dir = os.path.join(acquisition_parentdir, acq)
+#         try:
+#             # Load flytracker output
+#             calib, trk, feat = util.load_flytracker_data(acq_dir, filter_ori=True)
+#             # Transform data to relative coordinates
+#             df_ = rel.get_metrics_relative_to_focal_fly(acq_dir,
+#                                                     savedir=processedmat_dir,
+#                                                     movie_fmt='.avi',
+#                                                     mov_is_upstream=None,
+#                                                     flyid1=0, flyid2=1,
+#                                                     plot_checks=False,
+#                                                     create_new=create_new,
+#                                                     get_relative_sizes=False)
+#             assert len(df_['targ_centered_x'].unique()) > 1, "Bad targ calculation"
+#         except Exception as e:
+#             errors.append((acq, e))
+#             print("ERROR: {}".format(e))
+#             continue
+#         df_['file_name'] = os.path.split(acq)[-1]
+#         # Get species from acquisition
+#         
+#         df_['species'] = util.get_species_from_acquisition_name(acq)
+#         if reassign_acquisition_name:
+#             df_['date_fly'] = ['_'.join([f.split('-')[0], f.split('_')[1]]) for f in df_['file_name']]
+#             df_['acquisition'] = ['_'.join([a, b]) for a, b in df_[['date_fly', 'species']].values]
+#         else:
+#             df_['acquisition'] = acq #os.path.split(acq)[-1] 
+#         d_list.append(df_)
+# 
+#     df0 = pd.concat(d_list)
+#     
+#     return df0, errors
+# 
+# 
+# def assign_paint_conditions(df0, meta):
+#     # Add all paint conditions
+#     for fn, df_ in df0.groupby('file_name'):
+#         currm = meta[meta['file_name']==fn]
+#         assert len(currm)>0, 'No meta data for {}'.format(fn)
+#         assert len(currm)==1, 'Multiple meta data for {}'.format(fn)
+#         #df0.loc[df0['file_name']==fn, 'stim_direction'] = currm['stim_direction'].values[0]
+#         stim_dir = currm['stim_direction'].unique()[0] #fn.split('_')[-1]
+#         df0.loc[df0['file_name']==fn, 'stim_direction'] = stim_dir
+#         df0.loc[df0['file_name']==fn, 'paint_coverage'] = currm['painted'].values[0]
+#         manipulation_ = currm['manipulation_male'].values[0]
+#         if manipulation_.startswith('no '):
+#             paint_side = 'none'
+#         elif manipulation_.startswith('left '):
+#             paint_side = 'left'
+#         elif manipulation_.startswith('right '):
+#             paint_side = 'right'
+#         elif manipulation_.startswith('both '):
+#             paint_side = 'both'
+#         df0.loc[df0['file_name']==fn, 'paint_side'] = paint_side 
+#     df0['date'] = [int(a.split('_')[0]) for a in df0['acquisition']]
+# 
+#     return df0
+# 
+# def load_transformed_data(parquet_path):
+#     """Load DataFrame from parquet. If not found, load from pkl and save as parquet for next time."""
+#     pkl_path = parquet_path.replace('.parquet', '.pkl') if parquet_path.endswith('.parquet') else parquet_path + '.pkl'
+#     if os.path.exists(parquet_path):
+#         print("Loading parquet from: {}".format(parquet_path))
+#         return pd.read_parquet(parquet_path)
+#     if os.path.exists(pkl_path):
+#         print("Loading pkl from: {}".format(pkl_path))
+#         df = pd.read_pickle(pkl_path)
+#         df.to_parquet(parquet_path, index=False)
+#         print("Saved parquet to: {}".format(parquet_path))
+#         return df
+#     raise FileNotFoundError("Neither {} nor {} found".format(parquet_path, pkl_path))
+# 
+ # Moved to utils.py
+# def wrap_pi(a):  # (-pi, pi]
+#     return (a + np.pi) % (2*np.pi) - np.pi
+# 
 
 
-def get_heading_diff(expr, heading_var='integrated_heading', invert_heading=True):
-    '''
-    Calculate the stepwise wrapped difference in heading.
-    Note, is same whether you use integrated_heading or heading_wrapped.
-
-    Parameters:
-        expr (pd.DataFrame): DataFrame containing the heading data.
-        heading_var (str): Name of the heading column in the DataFrame.
-
-    Returns:
-        np.ndarray: Stepwise wrapped difference in heading.
-    '''
-    # Stepwise warpped difference in heading (new - old), 
-    # CCW is positive by convention
-    hdiffs = []
-    for i, v in zip(expr[heading_var].iloc[0:-1], 
-                    expr[heading_var].iloc[1:]):
-        hd = circ_dist2(v, i) #i, v) #* -1 # match matlab
-        hdiffs.append(hd)
-    heading_diff = np.array(hdiffs)
-
-    # Make CW-positive (custom convention, so left->right is positive)
-    if invert_heading:
-        heading_diff_cw = -1*heading_diff
-    else:
-        heading_diff_cw = heading_diff
-
-    # add 0
-    heading_diffs = np.concatenate( ([0], heading_diff_cw) )
-    
-    return heading_diffs
-
-def bin_x(chase_, xvar, start_bin = -180, end_bin=180, bin_size=20):
-    '''
-    Bin xvar by object position. Convert xvar to degrees.
-    '''
-    chase_['binned_{}'.format(xvar)] = pd.cut(chase_[xvar],
-                                    bins=np.arange(start_bin, end_bin, bin_size),
-                                    labels=np.arange(start_bin+bin_size/2, 
-                                                     end_bin-bin_size/2, bin_size))
-    return chase_
-
-
-# Group by binned theta errors
-def bin_by_object_position(chase_, start_bin = -180, end_bin=180, bin_size=20):
-    '''
-    Bin theta error by object position. Convert theta error to degrees.
-    '''
-    chase_['binned_theta_error'] = pd.cut(chase_['theta_error_deg'],
-                                    bins=np.arange(start_bin, end_bin, bin_size),
-                                    labels=np.arange(start_bin+bin_size/2,
-                                            end_bin-bin_size/2, bin_size))    
-    return chase_
-
+# Moved to gain_funcs.py
+#def get_heading_diff(expr, heading_var='integrated_heading', invert_heading=True):
+#    '''
+#    Calculate the stepwise wrapped difference in heading.
+#    Note, is same whether you use integrated_heading or heading_wrapped.
+#
+#    Parameters:
+#        expr (pd.DataFrame): DataFrame containing the heading data.
+#        heading_var (str): Name of the heading column in the DataFrame.
+#
+#    Returns:
+#        np.ndarray: Stepwise wrapped difference in heading.
+#    '''
+#    # Stepwise warpped difference in heading (new - old), 
+#    # CCW is positive by convention
+#    hdiffs = []
+#    for i, v in zip(expr[heading_var].iloc[0:-1], 
+#                    expr[heading_var].iloc[1:]):
+#        hd = util.circ_dist(v, i) #i, v) #* -1 # match matlab
+#        hdiffs.append(hd)
+#    heading_diff = np.array(hdiffs)
+#
+#    # Make CW-positive (custom convention, so left->right is positive)
+#    if invert_heading:
+#        heading_diff_cw = -1*heading_diff
+#    else:
+#        heading_diff_cw = heading_diff
+#
+#    # add 0
+#    heading_diffs = np.concatenate( ([0], heading_diff_cw) )
+#    
+#    return heading_diffs
+#
+#def bin_x(chase_, xvar, start_bin = -180, end_bin=180, bin_size=20):
+#    '''
+#    Bin xvar by object position. Convert xvar to degrees.
+#    '''
+#    chase_['binned_{}'.format(xvar)] = pd.cut(chase_[xvar],
+#                                    bins=np.arange(start_bin, end_bin, bin_size),
+#                                    labels=np.arange(start_bin+bin_size/2, 
+#                                                     end_bin-bin_size/2, bin_size))
+#    return chase_
+#
+#
+## Group by binned theta errors
+#def bin_by_object_position(chase_, start_bin = -180, end_bin=180, bin_size=20):
+#    '''
+#    Bin theta error by object position. Convert theta error to degrees.
+#    '''
+#    chase_['binned_theta_error'] = pd.cut(chase_['theta_error_deg'],
+#                                    bins=np.arange(start_bin, end_bin, bin_size),
+#                                    labels=np.arange(start_bin+bin_size/2,
+#                                            end_bin-bin_size/2, bin_size))    
+#    return chase_
+#
 #%%
 plot_style='white'
-min_fontsize=6
+min_fontsize=18
 putil.set_sns_style(style=plot_style, min_fontsize=min_fontsize)
 bg_color = [0.7]*3 if plot_style=='dark' else 'k'
 
@@ -350,13 +319,13 @@ if load_local:
 
 if create_new:
     # Transform data 
-    df0_all, errors = transform_projector_data(acquisition_parentdir, acqs,
+    df0_all, errors = gf.transform_projector_data(acquisition_parentdir, acqs,
                                         processedmat_dir, movie_fmt='.avi',
                                         subdir=None, flyid1=0, flyid2=1,
                                         create_new=create_new, 
                                         reassign_acquisition_name=reassign_acquisition_name)
     if assay == '38mm_projector':
-        df0_all = assign_paint_conditions(df0_all, meta1)
+        df0_all = gf.assign_paint_conditions(df0_all, meta1)
         
     # Save transformed data
     df0_all.to_pickle(output_fpath)
@@ -366,7 +335,7 @@ else:
     # Load existing data (prefer parquet; convert pkl to parquet if needed)
     pkl_path = local_fpath if (load_local and local_fpath is not None and os.path.exists(local_fpath)) else output_fpath
     parquet_path = pkl_path.replace('.pkl', '.parquet') if pkl_path.endswith('.pkl') else pkl_path + '.parquet'
-    df0_all = load_transformed_data(parquet_path)
+    df0_all = gf.load_transformed_data(parquet_path)
     print("Loaded transformed.")
 
 df0_all[['species', 'acquisition']].drop_duplicates().groupby('species')['acquisition'].count()
@@ -482,9 +451,9 @@ if calculate_target_direction:
     for a, f1_ in f1.groupby('acquisition'):
         #print(a, f1_.shape)
         # Plot ang_vel from x and y
-        f1_['target_angular_position'] = -1*wrap_pi(np.arctan2(f1_['targ_centered_x'], f1_['targ_centered_y']))
+        f1_['target_angular_position'] = -1*util.wrap_pi(np.arctan2(f1_['targ_centered_x'], f1_['targ_centered_y']))
 
-        f1_['target_angle_diff'] = get_heading_diff(f1_, 'target_angular_position',
+        f1_['target_angle_diff'] = gf.get_heading_diff(f1_, 'target_angular_position',
                                                     invert_heading=False)
         f1_['ang_vel_target'] = f1_['target_angle_diff'] / f1_['sec'].diff() #.mean()
         f_list.append(f1_)
@@ -601,7 +570,7 @@ if split_by_acquisition and filter_chase:
     # actually, can't do this because there is no
     # "tracking_index" in a given bout
 chase_['theta_error_deg'] = np.rad2deg(chase_['theta_error'])
-chase_ = bin_by_object_position(chase_, start_bin=-180, end_bin=180, bin_size=20)
+chase_ = gf.bin_by_object_position(chase_, start_bin=-180, end_bin=180, bin_size=20)
 chase_.reset_index(drop=True, inplace=True)
 
 #chase_['binned_theta_error_num'] = chase_['binned_theta_error'].astype(int)
@@ -616,7 +585,7 @@ stim_palette = pr_palette if hue_var == 'pr_direction' else cw_palette
 hue_str = 'PRO-REG' if hue_var == 'pr_direction' else 'CW-CCW'
 start_bin = -180
 end_bin = 180
-lw = 0.75
+lw = 1
 
 n_species = chase_['species'].nunique()
 species_str = '_'.join(chase_['species'].unique())
