@@ -373,7 +373,7 @@ def get_turn_bouts(flydf, min_dist_to_other=15, min_ang_acc=100, #min_ang_vel=5,
     return turnbouts
 
 
-def shift_variables_by_lag(df, lag=2):
+def shift_variables_by_lag(df, file_grouper='acquisition', lag=2):
     '''
     shift fly response variables BACK by lag, so that the value at time t=0 corresponds to variable's value at lag N frames (future)
     x 0, y 2 (instead of 0).
@@ -387,13 +387,13 @@ def shift_variables_by_lag(df, lag=2):
     Returns:
         _description_
     '''
-    df['ang_vel_abs_shifted'] = df.groupby('acquisition')['ang_vel_abs'].shift(-lag)
-    df['ang_vel_fly_shifted'] = df.groupby('acquisition')['ang_vel_fly'].shift(-lag)
-    df['vel_fly_shifted'] = df.groupby('acquisition')['vel_fly'].shift(-lag)
+    df['ang_vel_abs_shifted'] = df.groupby(file_grouper)['ang_vel_abs'].shift(-lag)
+    df['ang_vel_fly_shifted'] = df.groupby(file_grouper)['ang_vel_fly'].shift(-lag)
+    df['vel_fly_shifted'] = df.groupby(file_grouper)['vel_fly'].shift(-lag)
 
-    df['vel_shifted'] = df.groupby('acquisition')['vel'].shift(-lag)
+    df['vel_shifted'] = df.groupby(file_grouper)['vel'].shift(-lag)
     df['vel_shifted_abs'] = np.abs(df['vel_shifted']) 
-    df['ang_vel_shifted'] = df.groupby('acquisition')['ang_vel'].shift(-lag)
+    df['ang_vel_shifted'] = df.groupby(file_grouper)['ang_vel'].shift(-lag)
 
     return df
 
