@@ -431,6 +431,77 @@ def get_heading_vector(f_ori, f_len):
     x_ = f_len/2 * np.cos(th)
     return np.array([x_, y_])
 
+def compute_dist_to_other(pos_x, pos_y, other_pos_x, other_pos_y,
+                          pix_per_mm=1, smooth=True):
+    '''Compute Euclidean distance between two flies, matching FlyTracker's
+    feat_compute.m (lines ~140-146).
+
+    FlyTracker computes the raw pixel distance, smooths with a [1 2 1]/4
+    kernel, then converts to mm via pix_per_mm.  Both flies receive the
+    same symmetric distance value.
+
+    Reference
+    ---------
+    kristinbranson/FlyTracker  tracking/feat_compute.m  lines 140-146
+    https://github.com/kristinbranson/FlyTracker/blob/main/tracking/feat_compute.m
+
+    Args
+    ----
+    pos_x, pos_y :             (np.ndarray) position of focal fly (pixels)
+    other_pos_x, other_pos_y : (np.ndarray) position of other fly (pixels)
+    pix_per_mm :               (float) pixels per mm from calibration
+                               (default 1, returns pixels)
+    smooth :                   (bool) apply [1,2,1]/4 smoothing kernel
+                               (default True, matching FlyTracker)
+
+    Returns
+    -------
+    dist : (np.ndarray) distance in mm (or pixels if pix_per_mm=1)
+    '''
+    dist = np.sqrt((pos_x - other_pos_x)**2 + (pos_y - other_pos_y)**2)
+    if smooth and len(dist) >= 3:
+        kernel = np.array([1, 2, 1]) / 4.0
+        dist[1:-1] = np.convolve(dist, kernel, mode='valid')
+    return dist / pix_per_mm
+
+
+def compute_facing_angle(ori, pos_x, pos_y, other_pos_x, other_pos_y):
+    '''Compute the facing angle between a fly's heading and the direction
+    toward another fly, matching FlyTracker's feat_compute.m (lines ~157-162).
+
+    The heading vector is [cos(ori), -sin(ori)] (image coordinates where
+    y increases downward).  The facing angle is the unsigned angle between
+    this heading and the unit vector pointing from the focal fly to the
+    other fly:  facing_angle = acos(dot(heading, direction_to_other)).
+
+    Result is in radians, range [0, pi].  0 = pointing at the other fly,
+    pi = facing away.
+
+    Reference
+    ---------
+    kristinbranson/FlyTracker  tracking/feat_compute.m  lines 149-162
+    https://github.com/kristinbranson/FlyTracker/blob/main/tracking/feat_compute.m
+
+    Args
+    ----
+    ori :          (np.ndarray) orientation of focal fly (radians)
+    pos_x, pos_y : (np.ndarray) position of focal fly
+    other_pos_x, other_pos_y : (np.ndarray) position of other fly
+
+    Returns
+    -------
+    facing_angle : (np.ndarray) unsigned angle in [0, pi] radians
+    '''
+    heading = np.column_stack([np.cos(ori), -np.sin(ori)])
+    vec_to_other = np.column_stack([other_pos_x - pos_x,
+                                    other_pos_y - pos_y])
+    norm = np.linalg.norm(vec_to_other, axis=1, keepdims=True)
+    norm[norm == 0] = np.nan
+    vec_to_other = vec_to_other / norm
+    dot = np.clip(np.sum(heading * vec_to_other, axis=1), -1, 1)
+    return np.arccos(dot)
+
+
 def proj_a_onto_b(a, b):
     #np.sqrt(female_hat[0]**2 + female_hat[1]**2)
     #sign = -1 if f_ori < 0 else 1
@@ -1923,3 +1994,16 @@ def add_stim_hz(df0, n_frames=24000, n_epochs=10, file_grouper='file_name'):
     df0 = pd.concat(wstim)
 
     return df0
+
+
+def find_video(video_dir, exts=('.avi', '.mp4', '.mov')):
+    """Search for a video file in a directory (or as a direct path)."""
+    import glob
+    for ext in exts:
+        matches = glob.glob(os.path.join(video_dir, '*' + ext))
+        if matches:
+            return matches[0]
+    for ext in exts:
+        if os.path.isfile(video_dir + ext):
+            return video_dir + ext
+    return None
