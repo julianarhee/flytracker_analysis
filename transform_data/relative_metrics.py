@@ -679,7 +679,8 @@ def do_transformations_on_df(trk_, frame_width, frame_height,
         df = pd.concat([trk, 
                 feat.drop(columns=[c for c in feat.columns if c in trk.columns])], axis=1)
         assert df.shape[0]==trk.shape[0], "Bad merge: {}, {}".format(feat.shape, trk.shape)
-        print("df shape:", df.shape)
+        if verbose:
+            print("... df shape:", df.shape)
     else:
         if verbose:
             print("(no feat df provided, using trk df)")
