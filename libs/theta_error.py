@@ -387,12 +387,14 @@ def shift_variables_by_lag(df, file_grouper='acquisition', lag=2):
     Returns:
         _description_
     '''
-    df['ang_vel_abs_shifted'] = df.groupby(file_grouper)['ang_vel_abs'].shift(-lag)
     df['ang_vel_fly_shifted'] = df.groupby(file_grouper)['ang_vel_fly'].shift(-lag)
     df['vel_fly_shifted'] = df.groupby(file_grouper)['vel_fly'].shift(-lag)
 
+    df['ang_vel_abs_shifted'] = np.abs(df['ang_vel_fly_shifted']) #df.groupby(file_grouper)['ang_vel_abs'].shift(-lag)
+
     df['vel_shifted'] = df.groupby(file_grouper)['vel'].shift(-lag)
     df['vel_shifted_abs'] = np.abs(df['vel_shifted']) 
+    
     df['ang_vel_shifted'] = df.groupby(file_grouper)['ang_vel'].shift(-lag)
 
     return df
