@@ -489,7 +489,7 @@ f1 = df[df['id']==0].copy()
 f1 = the.calculate_angle_metrics_focal_fly(f1, winsize=5, grouper='file_name',
                                            has_size=False)
 f1['targ_ang_vel_abs'] = np.abs(f1['targ_ang_vel'])
-f1 = the.shift_variables_by_lag(f1, lag=2)
+f1 = util.shift_variables_by_lag(f1, lag=2)
 
 #%%
 xvar = 'targ_rel_pos_x'

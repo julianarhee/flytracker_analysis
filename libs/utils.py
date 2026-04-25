@@ -2057,3 +2057,54 @@ def find_action_snippet(flydf, action='chasing', fps=60, snippet_dur_sec=3):
     stretch = flydf[(flydf['frame'] >= f_start) & (flydf['frame'] <= f_end)].copy()
     stretch.drop(columns=[block_col], inplace=True, errors='ignore')
     return stretch, f_start, f_end
+
+
+def cross_correlation_lag(x, y, fps=60):
+    """Cross-correlation between two signals x and y.
+
+    Returns the normalized cross-correlation, lags, lag in frames, and lag in
+    seconds.  Lag is defined as how much Y lags relative to X.
+
+    Args:
+        x: first signal (array-like).
+        y: second signal (array-like).
+        fps: frames per second (default 60).
+
+    Returns:
+        correlation: normalized cross-correlation array.
+        lags: displacement indices for the cross-correlation.
+        lag_frames: displacement in frames at peak correlation.
+        t_lag: displacement in seconds.
+    """
+    import scipy.signal as signal
+    correlation = signal.correlate(x - np.mean(x), y - np.mean(y), mode="full")
+    npoints = len(x)
+    ccorr = correlation / (npoints * y.std() * x.std())
+    lags = signal.correlation_lags(len(x), len(y), mode="full")
+    lag_frames = lags[np.argmax(correlation)]
+    t_lag = lag_frames / fps
+    return ccorr, lags, lag_frames, t_lag
+
+
+def shift_variables_by_lag(df, file_grouper='acquisition', lag=2):
+    """Shift fly response variables forward by *lag* frames within each group.
+
+    After shifting, the value at time t corresponds to the variable's value
+    at t + lag (i.e., the future response aligned to the current stimulus).
+
+    Args:
+        df: DataFrame with columns 'ang_vel_fly', 'vel_fly', 'vel', 'ang_vel'.
+        file_grouper: column name to group by (default 'acquisition').
+        lag: number of frames to shift forward (default 2).
+
+    Returns:
+        df with new columns: ang_vel_fly_shifted, vel_fly_shifted,
+        ang_vel_abs_shifted, vel_shifted, vel_shifted_abs, ang_vel_shifted.
+    """
+    df['ang_vel_fly_shifted'] = df.groupby(file_grouper)['ang_vel_fly'].shift(-lag)
+    df['vel_fly_shifted'] = df.groupby(file_grouper)['vel_fly'].shift(-lag)
+    df['ang_vel_abs_shifted'] = np.abs(df['ang_vel_fly_shifted'])
+    df['vel_shifted'] = df.groupby(file_grouper)['vel'].shift(-lag)
+    df['vel_shifted_abs'] = np.abs(df['vel_shifted'])
+    df['ang_vel_shifted'] = df.groupby(file_grouper)['ang_vel'].shift(-lag)
+    return df

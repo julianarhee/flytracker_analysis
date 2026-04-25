@@ -441,7 +441,7 @@ if __name__ == '__main__':
     pl.savefig(os.path.join(curr_figdir, '{}.png'.format(figname)))
 
     #%%  Cross Correlate vars
-    correlation, lags, lag_frames, t_lag = the.cross_correlation_lag(mean_turns_[yvar2], mean_turns_[yvar1], fps=60)
+    correlation, lags, lag_frames, t_lag = util.cross_correlation_lag(mean_turns_[yvar2], mean_turns_[yvar1], fps=60)
 
     fig = the.plot_mean_cross_corr_results(mean_turns_, correlation, lags, t_lags, t_lag=t_lag,
                                   yvar1=yvar1, yvar2=yvar2, col1=col1, col2=col2, bg_color=bg_color)

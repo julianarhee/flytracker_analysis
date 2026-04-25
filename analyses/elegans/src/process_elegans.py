@@ -105,7 +105,7 @@ df0 = pd.concat(d_list)
 importlib.reload(the)
 #%
 df = the.calculate_additional_angle_metrics(df0, winsize=5)
-df = the.shift_variables_by_lag(df, lag=2)
+df = util.shift_variables_by_lag(df, lag=2)
 
 #%% JAABA
 importlib.reload(util)
@@ -185,7 +185,7 @@ print(jaaba_thresh_dict)
 
 #%%
 # ftjaaba['ang_vel_abs'] = np.abs(ftjaaba['ang_vel'])
-ftjaaba = the.shift_variables_by_lag(ftjaaba, lag=2)
+ftjaaba = util.shift_variables_by_lag(ftjaaba, lag=2)
 
 #    ftjaaba['ang_vel_deg'] = np.rad2deg(ftjaaba['ang_vel'])
 #    ftjaaba['ang_vel_abs_shifted'] = ftjaaba.groupby('acquisition')['ang_vel_abs'].shift(-2)

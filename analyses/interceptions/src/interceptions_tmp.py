@@ -70,7 +70,7 @@ f1 = df0[df0['id']==0].copy()
 f1 = th.calculate_angle_metrics_focal_fly(f1, winsize=5)
 
 #%%
-f1 = th.shift_variables_by_lag(f1, lag=2)
+f1 = util.shift_variables_by_lag(f1, lag=2)
 
 #%%
 

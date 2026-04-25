@@ -485,7 +485,7 @@ f1.loc[(f1['stim_direction']=='CW') & (f1['targ_pos_theta']<0), 'pr_direction'] 
 
 
 #%%
-f1 = the.shift_variables_by_lag(f1, lag=2)
+f1 = util.shift_variables_by_lag(f1, lag=2)
 f1['ang_vel_fly_shifted_abs'] = np.abs(f1['ang_vel_fly_shifted'])
 f1['ang_vel_fly_shifted_deg'] = np.rad2deg(f1['ang_vel_fly_shifted'])
 f1['ang_vel_fly_deg'] = np.rad2deg(f1['ang_vel_fly'])

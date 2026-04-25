@@ -197,7 +197,7 @@ print(f"Head-tail flips per file: {flips_per_file.mean():.1f} +/- {flips_per_fil
 f1.loc[flip_mask, ['ori', 'ang_vel_fly']] = np.nan
 
 # Shift variables by lag of 200ms delay
-f1 = terr.shift_variables_by_lag(f1, lag=12, file_grouper='file_name')
+f1 = util.shift_variables_by_lag(f1, lag=12, file_grouper='file_name')
 f1['ang_vel_fly_shifted_abs'] = np.abs(f1['ang_vel_fly_shifted'])
 f1['ang_vel_fly_shifted_deg'] = np.rad2deg(f1['ang_vel_fly_shifted'])
 f1['ang_vel_fly_deg'] = np.rad2deg(f1['ang_vel_fly'])
