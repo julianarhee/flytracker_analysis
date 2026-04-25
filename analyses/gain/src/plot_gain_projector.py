@@ -181,17 +181,8 @@ f1.loc[(f1['stim_direction']=='CW') & (f1['targ_pos_theta']>0), 'pr_direction'] 
 f1.loc[(f1['stim_direction']=='CW') & (f1['targ_pos_theta']<0), 'pr_direction'] = 'regressive'
 #%%
 # Recompute ang_vel_fly from ori, fixing head-tail flips with discont=pi/2
-#fps_val = 60.0
-def _recompute_ang_vel(ori_series, fps=60):
-    unwrapped = np.unwrap(ori_series.interpolate().ffill().bfill().values,
-                          discont=np.pi/2)
-    ang_vel = np.gradient(unwrapped) * fps
-    ft_kernel = np.array([1, 2, 1]) / 4.0
-    ang_vel = np.convolve(ang_vel, ft_kernel, mode='same')
-    return pd.Series(ang_vel, index=ori_series.index)
-
 fps = 60
-f1['ang_vel_fly'] = f1.groupby('file_name')['ori'].transform(_recompute_ang_vel, fps=fps)
+f1['ang_vel_fly'] = f1.groupby('file_name')['ori'].transform(util.recompute_ang_vel, fps=fps)
 
 # NaN out head-tail flip frames (ori jumps > 90°) + 1 frame margin on each side
 ori_diff = f1.groupby('file_name')['ori'].diff().abs()
@@ -445,7 +436,7 @@ os.makedirs(save_example_dir, exist_ok=True)
 edf = f1[f1['file_name'] == example_file].sort_values('frame').copy()
 targ_df = df0[(df0['file_name'] == example_file) & (df0['id'] == 1)].sort_values('frame').copy()
 
-stretch, f_start, f_end = gf.find_chase_snippet(edf, fps=fps, snippet_dur_sec=snippet_dur_sec)
+stretch, f_start, f_end = util.find_action_snippet(edf, action='chasing', fps=fps, snippet_dur_sec=snippet_dur_sec)
 stretch_targ = targ_df[(targ_df['frame'] >= f_start) & (targ_df['frame'] <= f_end)]
 print(f"Showing frames {f_start}-{f_end} ({(f_end-f_start)/fps:.1f}s)")
 
@@ -455,20 +446,20 @@ stretch['ori_deg'] = np.rad2deg(stretch['ori'])
 stretch['ang_vel_fly_deg'] = np.rad2deg(stretch['ang_vel_fly'])
 
 # ---- Figure 1: time-course ----
-fig_tc, _ = gf.diagnostics_plot_timecourses(stretch, f_start, f_end, example_lag=example_lag,
-                                            fps=fps, bg_color=bg_color,
-                                            title=f'{example_file}  |  frames {f_start}–{f_end}')
+fig_tc, _ = putil.diagnostics_plot_timecourses(stretch, f_start, f_end, example_lag=example_lag,
+                                               fps=fps, bg_color=bg_color,
+                                               title=f'{example_file}  |  frames {f_start}–{f_end}')
 fig_tc.savefig(os.path.join(save_example_dir, 'timecourse.png'), dpi=150, bbox_inches='tight')
 
 # ---- Figure 1b: zoomed time-course ----
-fig_zoom, _ = gf.diagnostics_plot_timecourses_zoom(stretch, bg_color=bg_color)
+fig_zoom, _ = putil.diagnostics_plot_timecourses_zoom(stretch, bg_color=bg_color)
 fig_zoom.savefig(os.path.join(save_example_dir, 'timecourse_zoom.png'), dpi=150, bbox_inches='tight')
 
 # ---- Figure 2: 2D trajectory + relative target position ----
 arrow_len = 20
-fig2, _ = gf.diagnostics_plot_2d_traj_and_rel(stretch, stretch_targ, f_start, f_end,
-                                               arrow_len=arrow_len,
-                                               title=f'{example_file}  |  {(f_end-f_start)/fps:.1f}s snippet')
+fig2, _ = putil.diagnostics_plot_2d_traj_and_rel(stretch, stretch_targ, f_start, f_end,
+                                                  arrow_len=arrow_len,
+                                                  title=f'{example_file}  |  {(f_end-f_start)/fps:.1f}s snippet')
 fig2.savefig(os.path.join(save_example_dir, 'trajectory_2d.png'), dpi=150, bbox_inches='tight')
 
 #%%
