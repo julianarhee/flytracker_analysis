@@ -20,7 +20,7 @@ def add_ft_actions(procdir, rawdir, currf, verbose=False):
 
     Arguments:
         procdir -- Directory to save processed data, ends with processed_mats
-        rawdir -- Directory containing processed FlyTracker folders
+        rawdir -- Directory containing the raw video folders 
         currf -- Current FlyTracker folder name (should be same as base file_name)
 
     Keyword Arguments:
