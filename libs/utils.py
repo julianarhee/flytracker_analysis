@@ -2007,3 +2007,53 @@ def find_video(video_dir, exts=('.avi', '.mp4', '.mov')):
         if os.path.isfile(video_dir + ext):
             return video_dir + ext
     return None
+
+
+def recompute_ang_vel(ori_series, fps=60):
+    """Recompute angular velocity from orientation with head-tail flip correction.
+
+    Uses np.unwrap with discont=pi/2 to aggressively correct head-tail flips,
+    then applies the FlyTracker-style [1, 2, 1]/4 smoothing kernel.
+
+    Args:
+        ori_series: pd.Series of orientation values in radians.
+        fps: frames per second (used to scale gradient to rad/s).
+
+    Returns:
+        pd.Series of angular velocity in rad/s, same index as input.
+    """
+    unwrapped = np.unwrap(ori_series.interpolate().ffill().bfill().values,
+                          discont=np.pi/2)
+    ang_vel = np.gradient(unwrapped) * fps
+    ft_kernel = np.array([1, 2, 1]) / 4.0
+    ang_vel = np.convolve(ang_vel, ft_kernel, mode='same')
+    return pd.Series(ang_vel, index=ori_series.index)
+
+
+def find_action_snippet(flydf, action='chasing', fps=60, snippet_dur_sec=3):
+    """Find the longest contiguous bout of an action and return a snippet.
+
+    Args:
+        flydf: DataFrame with 'frame' and the action column.
+        action: name of the binary (0/1) column to search for bouts.
+        fps: frames per second.
+        snippet_dur_sec: max duration of returned snippet in seconds.
+
+    Returns:
+        stretch: DataFrame slice of the snippet (with 'sec' column added).
+        f_start, f_end: start and end frame numbers.
+    """
+    flydf = flydf.sort_values('frame').copy()
+    flydf['sec'] = flydf['frame'] / fps
+    block_col = f'__{action}_block'
+    flydf[block_col] = (flydf[action] != flydf[action].shift()).cumsum()
+    action_blocks = (flydf[flydf[action] == 1]
+                     .groupby(block_col)['frame']
+                     .agg(['min', 'max', 'count'])
+                     .sort_values('count', ascending=False))
+    best = action_blocks.iloc[0]
+    f_start = int(best['min'])
+    f_end = min(f_start + int(snippet_dur_sec * fps), int(best['max']))
+    stretch = flydf[(flydf['frame'] >= f_start) & (flydf['frame'] <= f_end)].copy()
+    stretch.drop(columns=[block_col], inplace=True, errors='ignore')
+    return stretch, f_start, f_end
