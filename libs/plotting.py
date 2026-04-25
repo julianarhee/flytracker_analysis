@@ -585,3 +585,136 @@ def plot_grouped_boxplots(mean_, palette='PRGn',
 #                     linewidth=5)
 #         ax.legend(title='Strain', bbox_to_anchor=(1.05, 1), loc='upper left')
     return ax
+
+
+# ----------------------------------------------------------------------
+# Video / trajectory overlay utilities
+# ----------------------------------------------------------------------
+def load_video_frames(video_path, frame_indices):
+    """Load specific frames from a video file.
+
+    Returns an (N, H, W, 3) float32 array of RGB frames.
+    """
+    import cv2
+    cap = cv2.VideoCapture(video_path)
+    frames = []
+    for fr in frame_indices:
+        cap.set(cv2.CAP_PROP_POS_FRAMES, fr)
+        ret, frame = cap.read()
+        if ret:
+            frames.append(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
+    cap.release()
+    return np.array(frames, dtype=np.float32)
+
+
+def composite_silhouettes(frame_stack, bg_threshold=15):
+    """Create a time-weighted silhouette composite from stacked video frames.
+
+    Pixels darker than the mean background (by bg_threshold) are stamped
+    with increasing opacity so early positions are faint and later ones
+    are bold.
+
+    Args:
+        frame_stack: (N, H, W, 3) float32 array from load_video_frames.
+        bg_threshold: intensity difference to detect the fly vs background.
+
+    Returns:
+        (H, W, 3) uint8 composite image.
+    """
+    bg = frame_stack.mean(axis=0)
+    composite = bg.copy()
+    n = len(frame_stack)
+    for i in range(n):
+        alpha = 0.15 + 0.85 * (i / max(n - 1, 1))
+        fly_mask = frame_stack[i] < (bg - bg_threshold)
+        composite[fly_mask] = ((1 - alpha) * composite[fly_mask]
+                               + alpha * frame_stack[i][fly_mask])
+    return np.clip(composite, 0, 255).astype(np.uint8)
+
+
+def plot_orientation_arrows(ax, x, y, ori, t_norm, arrow_len=20,
+                            cmap='cool', width=0.005, **kwargs):
+    """Plot quiver arrows colored by a time-normalized variable.
+
+    Args:
+        ax: matplotlib Axes.
+        x, y: 1-D arrays of positions.
+        ori: 1-D array of orientations (radians).
+        t_norm: 1-D array in [0, 1] for colormap mapping.
+        arrow_len: length of each arrow in data units.
+        cmap: colormap name.
+        width: arrow shaft width (fraction of axes width).
+        **kwargs: forwarded to ax.quiver.
+    """
+    u = arrow_len * np.cos(ori)
+    v = arrow_len * np.sin(ori)
+    kw = dict(scale=1, scale_units='xy', angles='xy',
+              headwidth=3, headlength=4, zorder=3)
+    kw.update(kwargs)
+    return ax.quiver(x, y, u, v, t_norm, cmap=cmap, width=width, **kw)
+
+
+def plot_video_overlay(ax, video_path, frame_indices, flydf=None, targdf=None,
+                       f_start=None, f_end=None, arrow_len=20,
+                       fly_cmap='cool', targ_cmap='autumn',
+                       bg_threshold=15, targ_size=6):
+    """Plot a silhouette composite with orientation arrows and target dots.
+
+    Args:
+        ax: matplotlib Axes.
+        video_path: path to the video file.
+        frame_indices: list of frame numbers to load.
+        flydf: DataFrame with columns 'frame', 'pos_x', 'pos_y', 'ori'
+               (only rows matching frame_indices are plotted).
+        targdf: DataFrame with 'frame', 'pos_x', 'pos_y' for the target.
+        f_start, f_end: frame range for time-normalization.
+        arrow_len: length of orientation arrows.
+        fly_cmap, targ_cmap: colormaps for fly and target.
+        bg_threshold: passed to composite_silhouettes.
+        targ_size: marker size for target dots.
+
+    Returns:
+        composite image (H, W, 3) uint8.
+    """
+    frame_stack = load_video_frames(video_path, frame_indices)
+    composite = composite_silhouettes(frame_stack, bg_threshold=bg_threshold)
+    h, w = composite.shape[:2]
+    ax.imshow(composite, extent=[0, w, h, 0])
+
+    if f_start is None:
+        f_start = frame_indices[0]
+    if f_end is None:
+        f_end = frame_indices[-1]
+    f_range = max(f_end - f_start, 1)
+
+    if flydf is not None:
+        fdf = flydf[flydf['frame'].isin(frame_indices)]
+        t_norm = (fdf['frame'].values - f_start) / f_range
+        plot_orientation_arrows(ax, fdf['pos_x'].values, fdf['pos_y'].values,
+                                fdf['ori'].values, t_norm,
+                                arrow_len=arrow_len, cmap=fly_cmap)
+
+    if targdf is not None:
+        tdf = targdf[targdf['frame'].isin(frame_indices)]
+        t_norm_t = (tdf['frame'].values - f_start) / f_range
+        ax.scatter(tdf['pos_x'], tdf['pos_y'],
+                   c=t_norm_t, cmap=targ_cmap, s=targ_size, zorder=3)
+
+    ax.set_xlim([0, w])
+    ax.set_ylim([h, 0])
+    ax.set_xlabel('x (px)')
+    ax.set_ylabel('y (px)')
+    return composite
+
+
+def colored_line(ax, x, y, c, cmap, lw=1.2):
+    """Draw a line colored by array *c* using LineCollection."""
+    points = np.column_stack([x, y]).reshape(-1, 1, 2)
+    segments = np.concatenate([points[:-1], points[1:]], axis=1)
+    lc = mpl.collections.LineCollection(segments, cmap=cmap,
+                                        norm=plt.Normalize(0, 1))
+    lc.set_array(c[:-1])
+    lc.set_linewidth(lw)
+    ax.add_collection(lc)
+    ax.autoscale_view()
+    return lc
