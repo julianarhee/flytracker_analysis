@@ -19,6 +19,7 @@ import seaborn as sns
 import libs.utils as util
 import libs.plotting as putil
 import libs.stats as lstats
+import transform_data.relative_metrics as rel
 
 # %%
 # Set plotting
@@ -64,11 +65,9 @@ df0 = pd.concat(d_list, ignore_index=True)
 acq = '20231213-1103_fly1_eleWT_5do_sh_eleWT_5do_gh'
 
 #%%
-import libs.theta_error as th
-importlib.reload(th)
 
 f1 = df0[df0['id']==0].copy()
-f1 = th.calculate_angle_metrics_focal_fly(f1, winsize=5)
+f1 = rel.calculate_angle_metrics_focal_fly(f1, winsize=5)
 
 #%%
 f1 = util.shift_variables_by_lag(f1, lag=2)

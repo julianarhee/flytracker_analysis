@@ -341,10 +341,9 @@ f2 = df_[df_['id']==1].copy().reset_index(drop=True)
 
 #%% 
 importlib.reload(pp)
-import libs.theta_error as the
 # Is theta error same as targ_pos_theta??
 #th_err = f2['pos_theta'].values - f1['traveling_dir'].values
-f1 = the.calculate_theta_error(f1, f2) #, heading_var='ori')
+f1 = rem.calculate_theta_error(f1, f2) #, heading_var='ori')
 
 fig, axn =pl.subplots(1, 2, sharex=True, sharey=True)
 ax=axn[0]

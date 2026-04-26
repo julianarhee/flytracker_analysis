@@ -481,12 +481,8 @@ bout_dur = 0.20
 df = util.subdivide_into_subbouts(df, bout_dur=bout_dur, grouper='file_name')
 
 #%%
-import libs.theta_error as the
-
-importlib.reload(the)
-
 f1 = df[df['id']==0].copy()
-f1 = the.calculate_angle_metrics_focal_fly(f1, winsize=5, grouper='file_name',
+f1 = rel.calculate_angle_metrics_focal_fly(f1, winsize=5, grouper='file_name',
                                            has_size=False)
 f1['targ_ang_vel_abs'] = np.abs(f1['targ_ang_vel'])
 f1 = util.shift_variables_by_lag(f1, lag=2)

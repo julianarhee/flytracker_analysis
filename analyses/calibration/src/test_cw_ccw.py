@@ -653,8 +653,6 @@ f1.loc[(f1['stim_direction']=='cw') & (f1['targ_pos_theta']>0), 'pr_direction'] 
 f1.loc[(f1['stim_direction']=='cw') & (f1['targ_pos_theta']<0), 'pr_direction'] = 'regressive'
 
 #%%
-import libs.theta_error as the
-
 f1['ang_vel_abs'] = np.abs(f1['ang_vel'])
 f1 = util.shift_variables_by_lag(f1, file_grouper='file_name', lag=12)
 f1['ang_vel_fly_shifted_abs'] = np.abs(f1['ang_vel_fly_shifted'])

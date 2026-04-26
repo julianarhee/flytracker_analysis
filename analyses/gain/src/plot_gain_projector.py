@@ -15,7 +15,6 @@ import seaborn as sns
 
 import libs.utils as util
 import libs.plotting as putil
-import libs.theta_error as terr
 import transform_data.relative_metrics as rem
 
 from analyses.preprocessing.src.add_ft_actions import add_ft_actions

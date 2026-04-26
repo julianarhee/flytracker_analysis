@@ -22,7 +22,6 @@ import matplotlib as mpl
 
 import libs.plotting as putil
 import libs.utils as util
-import libs.theta_error as the
 
 import transform_data.relative_metrics as rel
 

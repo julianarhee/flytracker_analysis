@@ -417,7 +417,6 @@ for fn, df_ in df.groupby('file_name'):
 
 #%%
 # Add additional metrics
-import libs.theta_error as the
 f1 = df[df['id']==0].copy()
 f1 = rel.calculate_angle_metrics_focal_fly(f1, winsize=5, grouper='file_name')
 f1['targ_ang_vel_abs'] = np.abs(f1['targ_ang_vel'])
