@@ -14,13 +14,16 @@ import pylab as pl
 import matplotlib as mpl
 import matplotlib.gridspec as gridspec
 
-from transform_data.relative_metrics import load_processed_data, calculate_angle_metrics_focal_fly 
+import transform_data.relative_metrics as rel
 import libs.utils as util
 import libs.plotting as putil
+import libs.stats as lstats
 
 import statsmodels.api as sm
 import libs.regplot as rpl
 import scipy.stats as spstats
+
+import analyses.pursuit.src.pursuit_funcs as pf
 
 
 #%% FUNCTIONS 
@@ -249,197 +252,15 @@ def add_jaaba_to_flydf(df, jaaba): #$jaaba_fpath) #jaaba_fname='projector_data_m
     ftjaaba = util.binarize_behaviors(ftjaaba, jaaba_thresh_dict=jaaba_thresh_dict)
 
     #% TEMP THINGS:
-    ftjaaba = shift_variables_by_lag(ftjaaba, lag=2)
+    ftjaaba = util.shift_variables_by_lag(ftjaaba, lag=2)
     ftjaaba['ang_vel_fly_shifted_abs'] = np.abs(ftjaaba['ang_vel_fly_shifted'])
 
     return ftjaaba
 
 
 
-#%
-def cross_correlation_lag(x, y, fps=60):
-    '''
-    Cross-correlation between two signals x and y, with a given fps.
-    Returns the cross-correlation, lags, lag in frames, and lag in seconds.
-    Lag is defined as how much Y lags relative to X.
-
-    Arguments:
-        x -- _description_
-        y -- _description_
-
-    Keyword Arguments:
-        fps -- _description_ (default: {60})
-
-    Returns:
-        correlation (n.array): cross-correlation between x and y
-        lags (np.array): lag / displacement indices array for 1D cross-correlation 
-        lag_frames (int): lag/displacement in frames
-        t_lag (flat): lag in seconds
-
-    '''
-    import scipy.signal as signal
-    correlation = signal.correlate(x-np.mean(x), y - np.mean(y), mode="full")
-    npoints = len(x)
-    ccorr = correlation / (npoints * y.std() * x.std()) 
-
-    lags = signal.correlation_lags(len(x), len(y), mode="full")
-    lag_frames = lags[np.argmax(correlation)] #lags[np.argmax(abs(correlation))]
-    t_lag = lag_frames / fps 
-    return ccorr, lags, lag_frames, t_lag
-
-
-def get_window_centered_bouts(turn_start_frames, flydf, nframes_win):
-    '''
-    For each provided frame, get a window of nframes_win before and after the frame.
-
-    Arguments:
-        turn_start_frames (list/n.array): list of frame indices (int) to center windows around
-        flydf (pd.DataFrame): dataframe with focal fly data
-        nframes_win (int): N frames to include before and after the turn start frame
-
-    Returns:
-        turnbouts (pd.DataFrame): columns include turn_bout_num and rel_sec.
-    '''
-    d_list = []
-    for i, ix in enumerate(turn_start_frames):
-        start_ = ix - nframes_win
-        stop_ = ix + nframes_win
-        t_onset = flydf.loc[ix]['sec']
-        d_  = flydf.loc[start_:stop_].copy()
-        d_['turn_bout_num'] = i
-        d_['rel_sec'] = (d_['sec'].interpolate().ffill().bfill().astype(float) - t_onset).round(2)
-        d_['turn_start_frame'] = ix
-        if len(d_['rel_sec'].values) < 13:
-            print("bad len")
-            break
-        d_list.append(d_)
-
-    turnbouts = pd.concat(d_list)
-
-    return turnbouts
-
-
-def get_turn_bouts(flydf, min_dist_to_other=15, min_ang_acc=100, #min_ang_vel=5, 
-                   min_facing_angle=np.deg2rad(90), 
-                   min_vel=15, nframes_win=0.1*60, filter_dur=False):
-    # prev used min_acc = 100, but it's weird
-
-    #min_ang_vel = 4.36
-#    turndf = flydf[ (flydf['stim_hz']>0) 
-#                & (flydf['ang_acc']>=min_acc)
-#                #& (flydf['chasing']>8)
-#                #& (flydf['chasing']>10)
-#                & (flydf['good_frames']==1)
-#                & (flydf['dist_to_other']<=min_dist_to_other)
-#                & (flydf['facing_angle'] <= min_facing_angle)
-#                & (flydf['vel']>min_vel)
-#                ]
-
-    passdf = flydf[ (flydf['stim_hz']>0) 
-                #& (flydf['ang_vel']>=min_ang_vel)
-                #& (flydf['ang_vel_fly_abs']>=min_ang_vel)
-                & (flydf['ang_acc']>=min_ang_acc)
-                #& (flydf['chasing']>8)
-                & (flydf['chasing_binary']>0)
-                & (flydf['good_frames']==1)
-                & (flydf['dist_to_other']<=min_dist_to_other)
-                & (flydf['facing_angle']<min_facing_angle)
-                & (flydf['vel']>min_vel)
-                ]
-    # get start/stop indices of consecutive rows
-    high_ang_vel_bouts = util.get_indices_of_consecutive_rows(passdf)
-    if len(high_ang_vel_bouts) == 0:
-        print("No turn bouts! - {}".format(flydf['acquisition'].unique()))
-        return None
-    
-    #print(len(high_ang_vel_bouts))
-
-    # filter duration?
-    if filter_dur:
-        min_bout_len = 2/60 #min 2 frames
-        print(min_bout_len)
-        fps = 60.
-        incl_bouts = util.filter_bouts_by_frame_duration(high_ang_vel_bouts, min_bout_len, fps)
-        print("{} of {} bouts pass min dur {}sec".format(len(incl_bouts), 
-                                                len(high_ang_vel_bouts), min_bout_len))
-
-        turn_start_frames = [c[0] for c in incl_bouts]
-    else:
-        # find turn starts
-        turn_start_frames = [c[0] for c in high_ang_vel_bouts] #incl_bouts]
-
-    turnbouts = get_window_centered_bouts(turn_start_frames, flydf, nframes_win)
-
-    return turnbouts
-
-
-def shift_variables_by_lag(df, file_grouper='acquisition', lag=2):
-    '''
-    shift fly response variables BACK by lag, so that the value at time t=0 corresponds to variable's value at lag N frames (future)
-    x 0, y 2 (instead of 0).
-    
-    Arguments:
-        df -- _description_
-
-    Keyword Arguments:
-        lag -- _description_ (default: {2})
-
-    Returns:
-        _description_
-    '''
-    df['ang_vel_fly_shifted'] = df.groupby(file_grouper)['ang_vel_fly'].shift(-lag)
-    df['vel_fly_shifted'] = df.groupby(file_grouper)['vel_fly'].shift(-lag)
-
-    df['ang_vel_abs_shifted'] = np.abs(df['ang_vel_fly_shifted']) #df.groupby(file_grouper)['ang_vel_abs'].shift(-lag)
-
-    df['vel_shifted'] = df.groupby(file_grouper)['vel'].shift(-lag)
-    df['vel_shifted_abs'] = np.abs(df['vel_shifted']) 
-    
-    df['ang_vel_shifted'] = df.groupby(file_grouper)['ang_vel'].shift(-lag)
-
-    return df
-
-def cross_corr_each_bout(turnbouts, v1='facing_angle', v2='ang_vel', fps=60):
-    '''
-    Cycle through all turns specified in turnbouts dataframe and do cross-correlation
-    between v1 and v2. Calls cross_correlation_lag()
-
-    Arguments:
-        turnbouts -- _description_
-
-    Keyword Arguments:
-        v1 -- _description_ (default: {'facing_angle'})
-        v2 -- _description_ (default: {'ang_vel'})
-        fps -- _description_ (default: {60})
-
-    Returns:
-        xcorr (np.array) -- M x N array, M = num of turn bouts, N = length of windowed cross-correlation 
-        all_lags -- lag indices
-        t_lags -- calculate lag (in sec) for each turn bout 
-    '''
-    # Get all turn bouts, windowed +/-
-    xcorr = []
-    t_lags = []
-    all_lags = []
-    for i, d_ in turnbouts.groupby('turn_bout_num'):
-        # cross corr
-        correlation, lags, lag_frames, t_lag = cross_correlation_lag(d_[v2].interpolate().ffill().bfill(), 
-                                                                     d_[v1].interpolate().ffill().bfill(), fps=fps)
-        xcorr.append(correlation)
-        all_lags.append(lags)
-        t_lags.append(t_lag)
-
-    return np.array(xcorr), np.array(all_lags), np.array(t_lags)
-
-
-def split_theta_error(chase_, theta_error_small=np.deg2rad(10), theta_error_large=np.deg2rad(25)):
-    chase_['error_size'] = None
-    chase_.loc[(chase_['theta_error'] < theta_error_small) \
-            & (chase_['theta_error'] > -theta_error_small), 'error_size'] = 'small'
-    chase_.loc[(chase_['theta_error'] > theta_error_large) \
-            | (chase_['theta_error'] < -theta_error_large), 'error_size'] = 'large'
-
-    return chase_
+#% Functions moved to libs/utils.py, libs/stats.py, libs/plotting.py,
+#  and analyses/pursuit/src/pursuit_funcs.py -- imported at top of file.
 
 #% PLOTTING
 
@@ -509,7 +330,7 @@ def plot_regr_by_species(chase_, xvar, yvar, hue_var=None, plot_hue=False,
                     color=bg_color, scatter=False, line_kws={'lw': regr_lw}) #, ax=ax)
         # res.params: [intercept, slope]
         ax.set_box_aspect(1)
-        lr, r2 = get_R2_ols(df_, xvar, yvar)
+        lr, r2 = lstats.get_R2_ols(df_, xvar, yvar)
         r2_str = 'OLS: y = {:.2f}x + {:.2f}\nR2={:.2f}'.format(lr.coef_[0], 
                                                                     lr.intercept_,
                                                                     r2)
@@ -528,90 +349,6 @@ def plot_regr_by_species(chase_, xvar, yvar, hue_var=None, plot_hue=False,
     if plot_hue:
         putil.colorbar_from_mappable(ax, cmap=cmap, norm = mpl.colors.Normalize(vmin=vmin, vmax=vmax),
                                 axes=[0.92, 0.3, 0.01, 0.4], hue_title='stim. freq. (Hz)', fontsize=18)
-
-    return fig
-
-def plot_ang_v_fwd_vel_by_theta_error_size(chase_, var1='vel_shifted', var2='ang_vel_shifted', 
-                        lw=1, err_palette={'small': 'r', 'large': 'b'}, 
-                        figsize=(10, 4), fly_marker='o', fly_marker_size=5, fly_color='gray',
-                        median_marker_size=3, scatter_size=3, scatter_alpha=0.5,
-                        axis_off=True, plot_dir='E', use_mm=True,
-                        plot_scatter_axes=True, x_scale=5,
-                        scatter_xlim=None, scatter_ylim=None, scatter_int=1):
-
-    '''
-    3-subplot figure: (1) spatial distribution of small vs. large theta errors, (2) velocity histograms, (3) angular vel histograms
-
-    Returns:
-        fig
-    ''' 
-    fig = pl.figure(figsize=figsize, dpi=300) #, axn = pl.subplots(1, 3, figsize=(7,4))
-
-    # plot theta error relative to focal male
-    ax = fig.add_subplot(1, 3, 1)
-    if plot_dir == 'E':
-        xvar = 'targ_rel_pos_x_mm' if use_mm else 'targ_rel_pos_x'
-        yvar = 'targ_rel_pos_y_mm' if use_mm else 'targ_rel_pos_y'
-    elif plot_dir == 'N':
-        xvar = 'targ_rel_pos_y_mm' if use_mm else 'targ_rel_pos_y'
-        yvar = 'targ_rel_pos_x_mm' if use_mm else 'targ_rel_pos_x'
-    # Scatter plot of relative position
-    sns.scatterplot(data=chase_.iloc[0::scatter_int], x=xvar, y=yvar, ax=ax, 
-                    hue='error_size', palette=err_palette, s=scatter_size,
-                    alpha=scatter_alpha)
-    if plot_scatter_axes:
-        ax.set_xlabel('Relative x (mm)' if use_mm else 'Relative x (px)', labelpad=2)
-        ax.set_ylabel('Relative y (mm)' if use_mm else 'Relative y (px)', labelpad=2)
-        pl.tick_params(axis='both', which='both', pad=0)    
-    else:
-        # only plot scale bar
-        ax.set_xticks([0, x_scale])
-        ax.set_xticklabels(['', '{} mm'.format(x_scale) if use_mm else '{} px'.format(x_scale)])
-        ax.set_xlabel('')
-        ax.set_ylabel('')
-        ax.set_yticks([])
-        sns.despine(ax=ax, bottom=True, left=True, trim=True)
-        ax.spines['left'].set_visible(False)
-    if scatter_xlim is not None:
-        if plot_dir == 'E':
-            ax.set_xlim([0, scatter_xlim])
-            ax.set_ylim([-scatter_ylim, scatter_ylim])
-        else:
-            ax.set_xlim([-scatter_xlim, scatter_xlim])
-            ax.set_ylim([0, scatter_ylim])
-           
-    ax.set_aspect(1)
-    ax.plot(0, 0, marker=fly_marker, color=fly_color, markersize=fly_marker_size)
-    if axis_off==True:
-        ax.axis('off')
-    ax.legend_.remove()
-    #sns.move_legend(ax, bbox_to_anchor=(1,1), loc='upper left', frameon=False)
-
-    #% plot HISTS ------------------------------------------------
-    ax1 = fig.add_subplot(1, 3, 2)
-    sns.histplot(data=chase_, x=var1,  ax=ax1, bins=50, linewidth=lw,
-                stat='probability', cumulative=False, element='step', fill=False,
-                hue='error_size', palette=err_palette, common_norm=False, legend=0)
-    ax1.set_xlabel('Forward vel', labelpad=2)
-    pl.tick_params(axis='both', which='both', pad=0)    
-
-    ax2 = fig.add_subplot(1, 3, 3, sharey=ax1)
-    sns.histplot(data=chase_, x=var2, ax=ax2, color='r', bins=50, 
-                stat='probability', cumulative=False, element='step', fill=False,
-                hue='error_size', palette=err_palette, common_norm=False)
-    ax2.set_xlabel('Angular vel', labelpad=2)
-    pl.tick_params(axis='both', which='both', pad=0)    
-
-    sns.move_legend(ax2, bbox_to_anchor=(1,1), loc='upper left', frameon=False)
-
-    # plot median values
-    curr_ylim = np.round(ax1.get_ylim()[-1], 2)*1.15
-    for v, ax in zip([var1, var2], [ax1, ax2]):
-        med_ = chase_.groupby('error_size')[v].median()
-        for mval, cval in err_palette.items():
-           ax.plot(med_[mval], curr_ylim, color=cval, marker='v', markersize=median_marker_size) #ax.axvline(x=m, color=c, linestyle='--')
-        #print(med_)
-        ax.set_box_aspect(1)
 
     return fig
 
@@ -695,668 +432,6 @@ def plot_allo_ego_frames_by_species(plotdf, xvar='facing_angle', yvar='targ_pos_
 
 
 # ---- turn analysis -----
-
-def plot_individual_turns(turnbouts, v1='facing_angle', v2='ang_vel'):
-    
-    fig, axn = pl.subplots(1, 2, sharex=True, figsize=(10,5))
-    ax=axn[0]
-    sns.lineplot(data=turnbouts, x='rel_sec', y=v1, ax=ax, hue='turn_bout_num', palette='Reds', legend=0,
-                lw=0.5, alpha=0.5)
-    ax.set_ylabel(r'$\theta_{E}$')
-    ax=axn[1]
-    sns.lineplot(data=turnbouts, x='rel_sec', y=v2, ax=ax, hue='turn_bout_num', palette='Blues', legend=0,
-                lw=0.5, alpha=0.5)
-    ax.set_ylabel(r'$\omega_{f}$')
-    pl.subplots_adjust(wspace=0.5, top=0.8)
-
-    return fig
-
-
-def plot_cross_corr_results(turnbouts, xcorr, lags, t_lags, v1='facing_angle', v2='ang_vel',
-                            v1_label = None, v2_label = None,
-                            col1='r', col2='dodgerblue', bg_color=[0.7]*3,
-                            fig_w=10, fig_h=5):
-
-    if v1_label is None:
-        v1_label = r'$\theta_{E}$' + '\n{}'.format(v1)
-    if v2_label is None:
-        v2_label = r'$\omega_{f}$' + '\n{}'.format(v2)
-
-    # PLOT MEAN + SEM of aligned turn bout traces
-    fig, axn =pl.subplots(1, 3, figsize=(fig_w, fig_h))
-    ax1 = axn[0]
-    ax2 = ax1.twinx()
-    sns.lineplot(data=turnbouts, x='rel_sec', y=v1, ax=ax1, lw=0.5, color=col1)
-    sns.lineplot(data=turnbouts, x='rel_sec', y=v2, ax=ax2, lw=0.5, color=col2)
-    # Change spine colors
-    for ax, sp, lb, col in zip([ax1, ax2], ['left', 'right'], [v1_label, v2_label], [col1, col2]):
-        ax.set_ylabel(lb)
-        putil.change_spine_color(ax, col, sp)
-    ax1.axvline(x=0, color=bg_color, linestyle='--')
-
-    #% PLOT cross-correlation (mean + sem)
-    ax=axn[1]
-    xcorr_mean = np.array(xcorr).mean(axis=0)
-    xcorr_sem = np.array(xcorr).std(axis=0) / np.sqrt(len(xcorr))
-    lags_mean = np.array(lags).mean(axis=0)
-    ax.plot(lags_mean, xcorr_mean, color=bg_color)
-    ax.fill_between(lags_mean, xcorr_mean-xcorr_sem, xcorr_mean+xcorr_sem, color=bg_color, alpha=0.5)
-    ax.set_ylabel('cross corr.')
-    ax.set_xlabel('lag of {} relative to {}'.format(v2, v1))
-
-    # PLOT distribution of TIME LAGS
-    ax=axn[2]
-    ax.hist(t_lags, bins=20, color=bg_color)
-    med_lag = np.median(np.array(t_lags))
-    ax.axvline(x=med_lag, color='w', linestyle='--')
-    ax.set_title('Median lag: {:.2f}ms'.format(med_lag*1000))
-    ax.set_xlabel("lags (sec)")
-
-    for ax in fig.axes:
-        ax.set_box_aspect(1)
-
-    pl.subplots_adjust(wspace=1)
-
-    return fig
-
-def compare_regr_pre_post_shift(flydf, shifted, x='facing_angle', y='ang_vel', y1='turn_size',
-                                x1='facing_angle_vel', lag_frames=2, col=[0.7]*3, markersize=5):
-    '''
-    Regression plots of y on x, before and after shifting by lag_frames.
-
-    Returns:
-        _description_
-    '''
-    turn_start_frames = shifted['turn_start_frame'].values
-    unshifted = flydf.loc[turn_start_frames].copy() #.dropna()
-
-    scatter_kws={'s': markersize}
-    fig, axn = pl.subplots(2, 3, figsize=(15, 10))
-
-    # unshifted
-    plotdf_shifted = shifted[(shifted['turn_size']<=np.pi) 
-                    & (shifted['turn_size']>=-np.pi)]
-    plotdf_unshifted = unshifted[(unshifted['turn_size']<=np.pi) 
-                    & (unshifted['turn_size']>=-np.pi)]
-
-    plotd_ = plotdf_unshifted.copy()
-    title_ = 'unshifted'
-    for ai, (x_, y_) in enumerate(zip([x, x, x1], [y, y1, y])): 
-        ax=axn[0, ai]
-        # Plot X vs. Y
-        sns.regplot(data=plotd_, x=x_, y=y_, ax=ax, color=col, scatter_kws=scatter_kws) 
-        ax.set_title(title_)
-        # Annotate
-        putil.annotate_regr(plotd_, ax, x=x_, y=y_, fontsize=12)
-
-        model_ = sm.OLS(plotd_[y_], sm.add_constant(plotd_[x_]))
-        res_ = model_.fit()
-        fit_str = 'OLS: y = {:.2f}x + {:.2f}, R2={:.2f}'\
-                    .format(res_.params[1], res_.params[0], res_.rsquared)
-        ax.text(0.1, 0.9, fit_str, transform=ax.transAxes)
-        if 'dt' in x_ or 'vel' in x_:
-            ax.set_xlabel(r'$\omega_{\theta_{E}}$' + '\n{}'.format(x_))
-        else:
-            ax.set_xlabel(r'$\theta_{E}$' + '\n{}'.format(x_))
-        ax.set_ylabel(r'$\omega_{f}$' + '\n{}'.format(y_))
-
-    # SHFITED
-#    ax=axn[0, 1]
-#    plotd_ = shifted.dropna()
-#
-#    sns.regplot(data=plotd_, x=x, y=y, ax=ax, 
-#                color=col, scatter_kws=scatter_kws) #markersize=markersize)
-#    ax.set_title('lag {} frames'.format(lag_frames))
-#    putil.annotate_regr(plotd_, ax, x=x, y=y, fontsize=12)
-#    # Annotate
-#    model_ = sm.OLS(plotd_[y], sm.add_constant(plotd_[x]))
-#    res_ = model_.fit()
-#    fit_str = 'OLS: y = {:.2f}x + {:.2f}, R2={:.2f}'\
-#                .format(res_.params[1], res_.params[0],
-#                        res_.rsquared)
-#    ax.text(0.1, 0.9, fit_str, transform=ax.transAxes)
-#
-#    ax.set_xlabel(r'$\theta_{E}$' + '\n{}'.format(x))
-#    ax.set_ylabel(r'$\omega_{f}$' + '\n{}'.format(y))
-
-#    ax=axn[0, 2] # Time derivatives
-#    # Shoudl this be facing_angle??
-#    plotd_ = shifted.dropna()
-#    sns.regplot(data=plotd_, x=x1, y=y, ax=ax, color=col, scatter_kws=scatter_kws) #markersize=markersize)
-#    ax.set_title('lag {} frames'.format(lag_frames))
-#    putil.annotate_regr(plotd_, ax, x=x1, y=y, fontsize=12)
-#    # Annotate
-#    model_ = sm.OLS(plotd_[y], sm.add_constant(plotd_[x1]))
-#    res_ = model_.fit()
-#    fit_str = 'OLS: y = {:.2f}x + {:.2f}, R2={:.2f}'\
-#                .format(res_.params[1], res_.params[0], res_.rsquared)
-#    ax.text(0.1, 0.9, fit_str, transform=ax.transAxes)
-#
-#    ax.set_xlabel(r'$\omega_{\theta_{E}}$' + '\n{}'.format(x1))
-#    ax.set_ylabel(r'$\omega_{f}$' + '\n{}'.format(y))
-
-    plotd_ = plotdf_shifted.copy()
-    ax=axn[1, 0] # Time derivatives
-    # Shoudl this be facing_angle??
-    title_ = 'lag {}'.format(lag_frames)
-    for ai, (x_, y_) in enumerate(zip([x, x, x1], [y, y1, y])): 
-        ax=axn[1, ai]
-        sns.regplot(data=plotd_, x=x_, y=y_, ax=ax, color=col, scatter_kws=scatter_kws) #markersize=markersize)
-        ax.set_title(title_)
-        putil.annotate_regr(plotd_, ax, x=x_, y=y_, fontsize=12)
-        # Annotate
-        model_ = sm.OLS(plotd_[y_], sm.add_constant(plotd_[x_]))
-        res_ = model_.fit()
-        fit_str = 'OLS: y = {:.2f}x + {:.2f}, R2={:.2f}'\
-                    .format(res_.params[1], res_.params[0], res_.rsquared)
-        ax.text(0.1, 0.9, fit_str, transform=ax.transAxes)
-        if 'dt' in x_ or 'vel' in x_:
-            ax.set_xlabel(r'$\omega_{\theta_{E}}$' + '\n{}'.format(x_))
-        else:
-            ax.set_xlabel(r'$\theta_{E}$' + '\n{}'.format(x_))
-        if 'turn_size' in y_:
-            ax.set_ylabel(y_)
-        else:
-            ax.set_ylabel(r'$\omega_{f}$' + '\n{}'.format(y_))
-
-    for ax in axn.flat:
-        ax.set_box_aspect(1)
-
-    return fig
-
-
-
-def count_n_turns_in_window(flydf, turn_bout_starts, high_ang_start_frames, fps=60.):
-    '''
-    For longer chunks entered around turn bout (2 seconds), count the number of actual turns (high_ang_start_frames)
-    Assumes that high_ang_vel_bouts were filtered to be min. 2 frames or longer (turn_bout_starts).
-
-    Arguments:
-        flydf -- _description_
-        turn_bout_starts -- _description_
-        high_ang_start_frames -- _description_
-
-    Keyword Arguments:
-        fps -- _description_ (default: {60.})
-    '''
-    nframes_win = 2*fps
-    t_list = []
-    for turn_ix, frame_num in enumerate(turn_bout_starts):
-        start_ix = turn_bout_starts[turn_ix] - nframes_win #12049 #18320 #turn_start_frames[4] #- nframes_win
-        stop_ix = turn_bout_starts[turn_ix] + nframes_win #-60 #*2
-        plotdf = flydf.loc[start_ix:stop_ix]
-
-        n_turns = len(plotdf[plotdf['frame'].isin(high_ang_start_frames)])
-        t_list.append(pd.DataFrame({'turn_ix': turn_ix, 'frame_num': frame_num, 
-                                    'n_turns': n_turns, 'start_ix': start_ix, 'stop_ix': stop_ix},
-                                index=[turn_ix]))
-    turn_counts = pd.concat(t_list)
-
-    return turn_counts
-
-
-def plot_timecourses_for_turn_bouts(plotdf, high_ang_start_frames, xvar = 'sec', varset='varset2_smoothed', 
-                                    targ_color='r', fly_color='cornflowerblue', accel_color=[0.7]*3):
-    '''
-    Plot timecourses of theta_error, facing_angle, facing_angle_vel, ang_vel, ang_acc, ang_acc_fly
-    Three subplots, first 2 have twin axes with ang vel of fly
-
-    varset: 'varset2' or 'varset2_smoothed'
-        - use varset1 to use FlyTracker's direct output (facing_angle and ang_vel/ang_acc)
-        - use varset2 to use theta_error and ang_vel_fly (calculated from ori/etc.)
-        - use varset2_smoothed to more closely match FT's output, but with own calculated metrics.
-        
-    ''' 
-    if 'varset2' in varset:
-        smooth_sfx = '_smoothed' if 'smoothed' in varset else ''
-        var1 = 'theta_error{}'.format(smooth_sfx) #'facing_angle'
-        vel_var1 = 'theta_error_dt{}'.format(smooth_sfx) #'facing_angle_vel'
-        var2 = 'ang_vel_fly{}'.format(smooth_sfx) #'ang_vel'
-        acc_var2 = 'ang_acc_fly{}'.format(smooth_sfx) #'ang_acc'
-        center_yaxis = True
-    else:
-        var1 = 'facing_angle'
-        vel_var1 = 'facing_angle_vel'
-        var2 = 'ang_vel'
-        acc_var2 = 'ang_acc'
-        center_yaxis=False
-
-    fig, axn = pl.subplots(3, 1, figsize=(8,6), sharex=True)
-
-    # Plot theta_error and fly's angular velocity
-    ax=axn[0]
-    ax.plot(plotdf[xvar], plotdf[var1], targ_color)
-    # color y-axis spine and ticks red
-    ax.set_ylabel(r'$\theta_{E}$' + '\n{}'.format(var1)) #, color=targ_color) #r'$\theta_{E}$'
-    putil.change_spine_color(ax, targ_color, 'left')
-    ax.axhline(y=0, color=targ_color, linestyle='--', lw=0.5)
-
-    ax2 = ax.twinx()
-    ax2.plot(plotdf[xvar], plotdf[var2], fly_color)
-    # Color y-axis spine and ticks blue
-    ax2.set_ylabel(r'$\omega_{f}$' + '\n{}'.format(var2)) #, color=fly_color)
-    putil.change_spine_color(ax2, fly_color, 'right')
-    # Center around 0
-    if center_yaxis:
-        curr_ylim = np.round(plotdf[var2].abs().max(), 0)
-        ax2.set_ylim(-curr_ylim, curr_ylim)
-        
-    mean_ang_vel = np.mean(plotdf[plotdf['frame'].isin(high_ang_start_frames)][var2]) #'ang_vel']) 
-    ax2.axhline(y=mean_ang_vel, color='w', linestyle='--', lw=0.5)
-    ax2.axhline(y=-1*mean_ang_vel, color='w', linestyle='--', lw=0.5)
-
-    # plot time derivative of ax0's 1st axis
-    ax=axn[1]
-    ax.plot(plotdf[xvar], plotdf[vel_var1], targ_color)
-    ax.set_ylabel(r'$\omega_{\theta_{E}}$' + '\n{}'.format(vel_var1)) # color=targ_color)
-    putil.change_spine_color(ax, targ_color, 'left')
-    ax2 = ax.twinx()
-    ax2.plot(plotdf[xvar], plotdf[var2], fly_color)
-    ax2.set_ylabel(r'$\omega_{f}$' + '\n{}'.format(var2)) # color=fly_color)
-    putil.change_spine_color(ax2, fly_color, 'right')
-
-    # plot acceleration (used to find peaks for turn bouts to align)
-    ax=axn[2]
-    ax.plot(plotdf[xvar], plotdf[acc_var2], fly_color)
-    ax.set_ylabel(acc_var2) #color=fly_color)
-
-    angf = []
-    for i, f in enumerate(high_ang_start_frames):
-        #print(f)
-        ax.plot(plotdf.loc[plotdf['frame']==f][xvar], 
-                plotdf.loc[plotdf['frame']==f][acc_var2], 
-                color = 'w', marker='o', markersize=5)
-        angf.append(f)
-
-
-    return fig
-
-def select_turn_bouts_for_plotting(flydf, min_ang_acc=100, min_dist_to_other=25, 
-                                   min_facing_angle=np.deg2rad(90), min_vel=15, fps=60.):
-    '''
-    Filter flydf (assumes good_frames==1) for turn bouts that meet criteria for high angular acceleration,
-    but return longer bouts that have multiple turns in them (in contrast to `get_turn_bouts()` which returns 
-    the turn-centered bout.
-
-    Arguments:
-        flydf -- _description_
-
-    Keyword Arguments:
-        min_ang_acc -- _description_ (default: {100})
-        min_dist_to_other -- _description_ (default: {25})
-        min_facing_angle -- _description_ (default: {np.deg2rad(90)})
-        min_vel -- _description_ (default: {15})
-        fps -- _description_ (default: {60.})
-
-    Returns:
-        _description_
-    '''
-    passdf = flydf[ (flydf['stim_hz']>0) 
-                & (flydf['ang_acc']>min_ang_acc)
-                & (flydf['dist_to_other']<=min_dist_to_other)
-                & (flydf['facing_angle']<min_facing_angle)
-                & (flydf['vel']>min_vel)
-                ]
-    # get start/stop indices of consecutive rows
-    high_ang_vel_bouts = util.get_indices_of_consecutive_rows(passdf)
-    print(len(high_ang_vel_bouts))
-
-    # For plotting, find epochs where turn bouts were at leat 2 frames
-    # filter duration?
-    min_bout_len = 2/fps #min 2 frames
-    incl_bouts = util.filter_bouts_by_frame_duration(high_ang_vel_bouts, min_bout_len, fps)
-    print("{} of {} bouts pass min dur {}sec".format(len(incl_bouts), 
-                                            len(high_ang_vel_bouts), min_bout_len))
-
-    # find turn starts
-    turn_bout_starts = [c[0] for c in incl_bouts]
-
-    # find turn starts
-    high_ang_start_frames = [c[0] for c in high_ang_vel_bouts] #onsec_bouts]
-    print(len(high_ang_start_frames))
-
-    return turn_bout_starts, high_ang_start_frames
-
-
-def get_turn_psth_values(plotdf, high_ang_start_frames, interval=10,
-                                 yvar1='facing_angle', yvar2='ang_vel', nframes_win=0.1*60, fps=60):
-
-    '''
-    For EACH turn (specified by high_ang_start_frames), calculate cross-correlation between yvar1 and yvar2.
-    Returns a dataframe with the values of yvar1 and yvar2, relative to the start of the turn.
-    Also returns the time lag (in seconds) calculated for each turn.
-
-    Returns:
-        _description_
-    '''
-    d_list = []
-    t_lags = []
-    for i, ix in enumerate(high_ang_start_frames[0::interval]):
-        start_ = ix - nframes_win
-        stop_ = ix + nframes_win
-        t_onset = plotdf.loc[ix]['sec']
-        d_  = plotdf.loc[start_:stop_].copy()
-        # Skip too short bouts
-        if d_.shape[0] < (nframes_win*2 + 1):
-            continue
-        # Shift time to 0
-        d_['rel_sec'] = d_['sec'] - t_onset
-        # cross corr
-        correlation, lags, lag_frames, t_lag = cross_correlation_lag(d_[yvar2].interpolate(), 
-                                                                     d_[yvar1].interpolate(), fps=fps)
-        # Append
-        d_[[yvar1, yvar2, 'rel_sec']] = d_[[yvar1, yvar2, 'rel_sec']].interpolate().ffill().bfill()
-        d_['rel_sec'] = d_['rel_sec'].round(3) # round so we can use these to average later
-        d_['turn_ix'] = i
-        d_['turn_frame'] = ix
-        d_list.append(d_[[yvar1, yvar2, 'rel_sec', 'turn_ix', 'turn_frame']])
-        t_lags.append(t_lag)
-    t_lags = np.array(t_lags)
-    turns_ = pd.concat(d_list).reset_index(drop=True)
-
-    return turns_, t_lags
-
-
-def plot_psth_all_turns(turns_, yvar1='theta_error', yvar2='ang_vel_fly', col1='r', col2='cornflowerblue',
-                        bg_color=[0.7]*3, ax1=None, ax2=None, lw_all=0.5, lw_mean=3):
-    '''
-    Plot all turns (thin lines), and mean (thick) vals for theta_error (yvar1) and ang_vel_fly (yvar2).
-    Plots on twin y axes.
-    ''' 
-    if ax1 is None or ax2 is None:
-        fig, ax1 = pl.subplots()
-        ax2 = ax1.twinx()
-
-    #% PLOT each turn
-    for i_, d_ in turns_.groupby('turn_ix'):
-        sns.lineplot(data=d_, x='rel_sec', y=yvar1, ax=ax1, color=col1, lw=lw_all, alpha=0.5)
-        sns.lineplot(data=d_, x='rel_sec', y=yvar2, ax=ax2, color=col2, lw=lw_all, alpha=0.5)
-
-    # Center y axes
-    if turns_[yvar2].min() < -1*turns_[yvar2].max():
-        ylim2 = turns_[yvar2].abs().max()
-        ax2.set_ylim([-ylim2, ylim2])
-
-    if turns_[yvar1].min() < -1*turns_[yvar1].max():
-        ylim1 = turns_[yvar1].abs().max()
-        ax1.set_ylim([-ylim1, ylim1])
-
-    # Plot MEAN turns
-    mean_turns_ = turns_.groupby('rel_sec').mean().reset_index()
-    for xv, col, ax, var_ in zip([yvar1, yvar2], [col1, col2], [ax1, ax2], [yvar1, yvar2] ):
-        ax.plot(mean_turns_['rel_sec'], mean_turns_[var_], color=col, lw=lw_mean)
-
-    #ax.set_box_aspect(1)
-    ax1.set_ylabel(r'$\theta_{E}$' + '\n{}'.format(yvar1))
-    ax2.set_ylabel(r'$\omega_{f}$' + '\n{}'.format(yvar2))
-    putil.change_spine_color(ax1, col1, 'left')
-    putil.change_spine_color(ax2, col2, 'right')
-
-    # Plot vertical line at 0
-    ax1.axvline(x=0, color=bg_color, linestyle='--')
-    for ax in fig.axes:
-        ax.set_box_aspect(1)
-
-    return fig
-
-def plot_mean_cross_corr_results(mean_turns_, correlation, lags, t_lags, t_lag=2, yvar1='theta_error', yvar2='ang_vel_fly', 
-                         col1='r', col2='cornflowerblue', bg_color=[0.7]*3): 
-    '''
-    Plot the meant turns and cross-correlation between yvar1 and yvar2 for a set of turns shown in a selected chunk of time.
-    For visualizing example set (does not include ALL turns).
-
-    Arguments:
-        mean_turns_ -- _description_
-        correlation -- _description_
-        lags -- _description_
-        t_lags -- _description_
-
-    Keyword Arguments:
-        yvar1 -- _description_ (default: {'theta_error'})
-        yvar2 -- _description_ (default: {'ang_vel_fly'})
-        col1 -- _description_ (default: {'r'})
-        col2 -- _description_ (default: {'cornflowerblue'})
-        bg_color -- _description_ (default: {[0.7]*3})
-
-    Returns:
-        _description_
-    '''
-    # plot means
-    fig, axn =pl.subplots(1, 3, figsize=(16,4))
-    ax1 = axn[0]
-    ax2 = ax1.twinx()
-    for xv, col, ax in zip([yvar1, yvar2], [col1, col2], [ax1, ax2]):
-        sns.lineplot(data=mean_turns_, x='rel_sec', y=xv, ax=ax, color=col, lw=3)
-
-    #for xv, col, mean_, ax in zip([yvar1, yvar2], [col1, col2], [mean_v1, mean_v2], [ax1, ax2]):
-    #    ax.plot(mean_sec, mean_, color=col, lw=3)
-    ax1.set_ylabel(r'$\theta_{E}$' + '\n{}'.format(yvar1))
-    ax2.set_ylabel(r'$\omega_{f}$' + '\n{}'.format(yvar2))
-    putil.change_spine_color(ax1, col1, 'left')
-    putil.change_spine_color(ax2, col2, 'right')
-    ax1.set_xlabel('time (sec)')
-    ax1.set_title('mean bout vals')
-
-    # plot cross-corr
-    ax=axn[1]
-    ax.plot(lags, correlation, c=bg_color)
-    max1 = np.argmax(mean_turns_[yvar1])
-    max2 = np.argmax(mean_turns_[yvar2])
-    #print(max1, max2)
-    peak_diff_sec = mean_turns_['rel_sec'].iloc[max2] - mean_turns_['rel_sec'].iloc[max1]
-    ax.set_ylabel('cross correlation')
-    ax.set_xlabel('lag of {} rel. to {} (frames)'.format(yvar2, yvar1))
-    ax.set_title('Peak diff: {:.2f}sec\nx-corr peak: {:.2f}msec'.format(peak_diff_sec, t_lag*1E3))
-
-    # plot distribution of time lags
-    ax=axn[2]
-    ax.hist(t_lags, color=bg_color)
-    ax.set_title('Median lag: {:.2f}msec'.format(np.median(t_lags)*1E3))
-    ax.set_xlabel("lags (sec)")
-
-    for ax in fig.axes:
-        ax.set_box_aspect(1)
-
-    pl.subplots_adjust(wspace=1)
-
-    return fig
-
-#% 
-
-def shift_vars_by_lag(flydf, high_ang_start_frames, med_lag, fps=60):
-    '''
-    Shift a subset of variables in flydf by a median lag (med_lag) to align with high_ang_start_frames.
-
-    Arguments:
-        flydf -- _description_
-        high_ang_start_frames -- _description_
-        med_lag -- _description_
-
-    Keyword Arguments:
-        fps -- _description_ (default: {60})
-
-    Returns:
-        _description_
-    '''
-    lag_frames = np.round(med_lag * fps)
-
-    orig_list = []
-    d_list = []
-
-    unshifted_vars = ['ang_vel', 'ang_acc', 'turn_size', 'ang_vel_fly', 'ang_acc_fly', 
-                      'ang_vel_fly_smoothed', 'ang_acc_fly_smoothed']
-    shifted_vars = ['theta_error', 'theta_error_dt', 'facing_angle', 'facing_angle_vel', 
-                    'facing_angle_vel_abs', 'facing_angle_acc', 
-                    'theta_error_smoothed', 'theta_error_dt_smoothed']
-    all_vars =  unshifted_vars + shifted_vars
-
-    for f in high_ang_start_frames: #turn_start_frames:
-        fly_ = flydf.loc[f][unshifted_vars]
-        targ_ = flydf.loc[f-lag_frames][shifted_vars].interpolate().ffill().bfill()
-        d_ = pd.concat([fly_, targ_], axis=0)
-        d_['turn_start_frame'] = f
-
-        d2_ = flydf.loc[f][all_vars]        
-        d2_['turn_start_frame'] = f
-        orig_list.append(d2_)
-        d_list.append(d_)
-    shifted = pd.concat(d_list, axis=1).T
-    shifted = shifted.astype(float)
-
-    unshifted = pd.concat(orig_list, axis=1).T
-    unshifted = unshifted.astype(float)
-
-    return shifted, unshifted
-
-#%
-def aggregate_turns_across_flies(ftjaaba, v1='theta_error', v2='ang_vel_fly', min_n_turns=5,
-                                 min_ang_acc=100, min_vel=15, min_dist_to_other=25,
-                                 min_facing_angle=np.deg2rad(90), fps=60, nframes_win=0.1*60):
-    no_turns = []
-    few_turns = []
-
-    t_list = []
-    f_list = []
-    for acq, flydf in ftjaaba.groupby('acquisition'):
-        # Get turn bouts for current acquisition 
-        turns_ = get_turn_bouts(flydf, min_ang_acc=min_ang_acc, #min_ang_vel=min_ang_vel, 
-                                min_vel=min_vel, min_dist_to_other=min_dist_to_other,
-                                min_facing_angle=min_facing_angle, 
-                                nframes_win=nframes_win)
-        # Identify funky files
-        if turns_ is None:
-            no_turns.append(acq)
-            continue
-
-        if turns_['turn_bout_num'].nunique() < min_n_turns:
-            few_turns.append(acq)
-            continue
-
-        # Do cross-correlation
-        turns_ = turns_.reset_index(drop=True)
-        xcorr, lags, t_lags = cross_corr_each_bout(turns_, v1=v1, v2=v2)
-
-        # Save delta_t_lag
-        for ((turn_ix, t), l) in zip(turns_.groupby('turn_bout_num'), t_lags):
-            turns_.loc[t.index, 'delta_t_lag'] = l
-
-        # Append
-        t_list.append(turns_)
-
-    # Aggregate
-    aggr_turns = pd.concat(t_list)
-
-    return aggr_turns 
-
-def get_theta_errors_before_turns(aggr_turns, fps=60):
-    # For each turn_bout_num in each acquisition, get the mean delta_t_lag for that turn_bout_num
-    # Then, shift theta_error by that mean delta_t_lag and call it 'previous_theta_error'
-    # Finally, add a column 'previous_theta_error' to the turn_bouts dataframe
-
-    t_list = []
-    for acq, d_ in aggr_turns.groupby('acquisition'):
-        for ti, t_ in d_.groupby('turn_bout_num'):
-            mean_delta_t = d_['delta_t_lag'].mean()
-            t_['previous_theta_error'] = t_['theta_error'].shift(int(mean_delta_t*fps))
-            t_list.append(t_[t_['frame']==int(t_['turn_start_frame'].unique())])
-    #%
-    turn_starts = pd.concat(t_list).reset_index(drop=True)
-
-    return turn_starts
-
-
-# some stats
-def mixed_anova_stats(stimhz_means, yvar, within='stim_hz', between='species', 
-                        subject='acquisition',
-                        between1='Dmel', between2='Dyak'): 
-    '''
-    Do mixed anova, with between & within factors. Expect 2 bewteen groups (usually species),
-    and the within factor is some measure within pair (like testing multiple stim_hz).
-    Uses pingouin's mixed_anova function and the Mann-Whitney U test to compare.
-    
-    Returns:
-        results_df -- DataFrame with Mann-Whitney U test results for each frequency
-        aov -- ANOVA results
-    '''
-    aov = pg.mixed_anova(data=stimhz_means, dv=yvar,
-                        within=within, between=between, 
-                        subject=subject)
-    # Perform the Mann-Whitney U test for each frequency
-    # Store results
-    results = []
-    # Loop over each frequency and run the Mann-Whitney U test
-    for freq, subset in stimhz_means.groupby(within):#['frequency'].unique():        
-        group1 = subset[subset['species'] == between1][yvar]
-        group2 = subset[subset['species'] == between2][yvar]
-        
-        stat, pval = spstats.mannwhitneyu(group1, group2, 
-                                            alternative='two-sided') 
-        results.append({
-            'frequency': freq,
-            'U_statistic': stat,
-            'p_value': pval
-        })
-
-    # Convert to DataFrame for display
-    results_df = pd.DataFrame(results).sort_values('frequency')
-    
-    return results_df, aov
-
-def add_multiple_comparisons(results_df):
-    '''
-    For each comparison, has a p-value -- returns if significant after multiple comparisons
-    using FDR and Bonferroni correction.
-    
-    Returns:
-    - results_df: DataFrame with p-values and significance columns
-    '''
-    from statsmodels.stats.multitest import multipletests
-    # Extract p-values
-    pvals = results_df['p_value'].values
-    
-    # Apply corrections
-    reject_fdr, pvals_fdr, _, _ = multipletests(pvals, alpha=0.05, method='fdr_bh')
-    reject_bonf, pvals_bonf, _, _ = multipletests(pvals, alpha=0.05, method='bonferroni')
-
-    # Add to DataFrame
-    results_df['p_fdr'] = pvals_fdr
-    results_df['sig_fdr'] = reject_fdr
-    results_df['p_bonf'] = pvals_bonf
-    results_df['sig_bonf'] = reject_bonf
-
-    return results_df
-
-def get_R2_ols(plotd, xvar, yvar):
-    from sklearn import linear_model
-    X = plotd[xvar].interpolate().ffill().bfill().values
-    y = plotd[yvar].interpolate().ffill().bfill().values
-    lr = linear_model.LinearRegression()
-    lr.fit(X.reshape(len(X), 1), y)
-    r2 = lr.score(X.reshape(len(X), 1), y)
-    return lr, r2
-
-def annotate_axis(ax, annot_str, fontsize=6, color='k'):
-    ax.annotate(annot_str, xy=(0.5, 0.95), xycoords='axes fraction', 
-                fontsize=fontsize,
-                ha='center', va='center', color=color)
-
-
-def count_chasing_frames(ftjaaba, grouper=['species', 'acquisition'],
-                         chase_var = 'chasing_binary'):
-    # N frames of chasing each out of all frames by acquisition in ftjaaba 
-    n_frames_chasing = ftjaaba[ftjaaba[chase_var]>0].groupby(grouper)['frame'].count().reset_index()
-    n_frames_chasing.rename(columns={'frame': 'n_frames_chasing'}, inplace=True)
-    
-    n_frames_total = ftjaaba.groupby(grouper)['frame'].count().reset_index()
-    n_frames_total.rename(columns={'frame': 'n_frames_total'}, inplace=True)
-    # Merge the two dataframes
-    chase_counts = n_frames_chasing.merge(n_frames_total, on=grouper, how='left')  
-    chase_counts['frac_frames_chasing'] = chase_counts['n_frames_chasing'] / chase_counts['n_frames_total']
-   
-    return chase_counts
-
-
-#%%
 
 if __name__ == '__main__':
     #%% 
@@ -1714,7 +789,7 @@ if __name__ == '__main__':
     fits_ = []
     for acq, df_ in chase_.groupby('acquisition'):    
         # Fit linear regression for each acquisition
-        lr, r2 = get_R2_ols(df_, xvar, yvar)
+        lr, r2 = lstats.get_R2_ols(df_, xvar, yvar)
         fit_tmp = pd.DataFrame({'species': df_['species'].unique()[0],
                                 'acquisition': acq,
                                 'coef': lr.coef_[0],
@@ -1764,7 +839,7 @@ if __name__ == '__main__':
             annot_str = '*'
         else:
             annot_str = 'ns'
-        annotate_axis(ax, annot_str, fontsize=min_fontsize-2, color=bg_color)
+        putil.annotate_axis(ax, annot_str, fontsize=min_fontsize-2, color=bg_color)
     # Plot continuous colorbar for hue variable
     # Plot colorbar, keep subplot axes the same size
     ax = fig.add_axes([0.92, 0.15, 0.1, 0.7])  # [left, bottom, width, height]
@@ -1847,7 +922,7 @@ if __name__ == '__main__':
     pl.savefig(os.path.join(figdir, '{}.png'.format(figname)))
     #%%
     
-    chase_counts = count_chasing_frames(ftjaaba)
+    chase_counts = util.count_chasing_frames(ftjaaba)
     # Plot results
     fig, ax = pl.subplots(figsize=(2, 2), dpi=300)
     sns.barplot(data=chase_counts, x='species', y='frac_frames_chasing', 
@@ -2089,7 +1164,7 @@ if __name__ == '__main__':
 
             # do fit
             ax.set_box_aspect(1)
-            lr, r2 = get_R2_ols(df_, xvar, yvar)
+            lr, r2 = lstats.get_R2_ols(df_, xvar, yvar)
             r2_str = '{}. OLS: y = {:.2f}x + {:.2f}\nR2={:.2f}'.format(ai, lr.coef_[0], 
                                                                         lr.intercept_,
                                                                         r2)
@@ -2134,7 +1209,7 @@ if __name__ == '__main__':
         else:
             chase_ = filtdf[(filtdf['{}_binary'.format(behav)]>min_frac_bout)
                         & (filtdf['species']==curr_species)].copy().reset_index(drop=True)
-        chase_ = split_theta_error(chase_, theta_error_small=theta_error_small, 
+        chase_ = util.split_theta_error(chase_, theta_error_small=theta_error_small, 
                                    theta_error_large=theta_error_large)
         if 'stim_hz' in chase_.columns: #assay == '2d_projector':
             chase_ = chase_[chase_['stim_hz']>0]
@@ -2152,7 +1227,7 @@ if __name__ == '__main__':
             scatter_alpha=0.5
             plot_dir = 'N'
             fly_marker = '^'
-        fig = plot_ang_v_fwd_vel_by_theta_error_size(chase_, figsize=figsize,
+        fig = putil.plot_ang_v_fwd_vel_by_theta_error_size(chase_, figsize=figsize,
                             var1=var1, var2=var2, err_palette=err_palette, lw=1, 
                             scatter_size=scatter_size, scatter_alpha=scatter_alpha, 
                             fly_marker=fly_marker, fly_marker_size=1, 
@@ -2198,7 +1273,7 @@ if __name__ == '__main__':
         chase_ = meanbouts[(meanbouts['{}_binary'.format(behav)]>min_frac_bout)].copy().reset_index(drop=True)
     else:
         chase_ = ftjaaba[(ftjaaba['{}_binary'.format(behav)]>min_frac_bout)].copy().reset_index(drop=True)
-    chase_ = split_theta_error(chase_, theta_error_small=theta_error_small, 
+    chase_ = util.split_theta_error(chase_, theta_error_small=theta_error_small, 
                                        theta_error_large=theta_error_large)
     if 'stim_hz' in chase_.columns: #assay == '2d_projector':
         chase_ = chase_[chase_['stim_hz']>0]
@@ -2268,11 +1343,11 @@ if __name__ == '__main__':
             print('p-value:', pval)
             # Draw significance stars over the bars
             if pval < 0.01:
-                annotate_axis(ax, '**', color=bg_color, fontsize=10)
+                putil.annotate_axis(ax, '**', color=bg_color, fontsize=10)
             elif pval < 0.05:
-                annotate_axis(ax, '*', color=bg_color, fontsize=10)
+                putil.annotate_axis(ax, '*', color=bg_color, fontsize=10)
             else:
-                annotate_axis(ax, 'ns', color=bg_color, fontsize=10)
+                putil.annotate_axis(ax, 'ns', color=bg_color, fontsize=10)
             # Check if the distributions are significantly different
             if pval < 0.05:
                 print('The distributions are significantly different (reject H0)')
@@ -2305,7 +1380,7 @@ if __name__ == '__main__':
     chase_ = filtdf[(filtdf['{}_binary'.format(behav)]>min_frac_bout)].copy().reset_index(drop=True)
     #chase_ = meanbouts[(meanbouts['{}_binary'.format(behav)]>min_frac_bout)].copy().reset_index(drop=True)
 
-    chase_ = split_theta_error(chase_, theta_error_small=theta_error_small, 
+    chase_ = util.split_theta_error(chase_, theta_error_small=theta_error_small, 
                                        theta_error_large=theta_error_large)
     if 'stim_hz' in chase_.columns: #assay == '2d_projector':
         chase_ = chase_[chase_['stim_hz']>0]
@@ -2411,7 +1486,7 @@ if __name__ == '__main__':
     theta_error_large_deg = 25 #35
     theta_error_small = np.deg2rad(theta_error_small_deg)
     theta_error_large = np.deg2rad(theta_error_large_deg) 
-    chase_ = split_theta_error(chase_, theta_error_small=theta_error_small, 
+    chase_ = util.split_theta_error(chase_, theta_error_small=theta_error_small, 
                                        theta_error_large=theta_error_large)
     counts_by_fly = chase_.groupby(['species', 'acquisition', 'error_size'])['frame'].count().reset_index()
     # append courtship frame count to counts_by_fly
@@ -2459,26 +1534,26 @@ if __name__ == '__main__':
     
     #sns.histplot(data=n_frames_per_cond, x='frame', hue='error_size', ax=ax)
     # Stats
-    results_df, aov = mixed_anova_stats(counts_by_fly, yvar='frame',
+    results_df, aov = lstats.mixed_anova_stats(counts_by_fly, yvar='frame',
                                         within='error_size', between='species', 
                                         subject='acquisition', between1='Dmel', between2='Dyak')
-    results_df = add_multiple_comparisons(results_df)
+    results_df = lstats.add_multiple_comparisons(results_df)
     print(results_df)
     mc = 'p_fdr'
     large_p = results_df[results_df['frequency']=='large'][mc].values[0]  
     small_p = results_df[results_df['frequency']=='small'][mc].values[0]
     if large_p < 0.01:
-        annotate_axis(g.axes[0, 0], '**', color=bg_color, fontsize=10)
+        putil.annotate_axis(g.axes[0, 0], '**', color=bg_color, fontsize=10)
     elif large_p < 0.05:
-        annotate_axis(g.axes[0, 0], '*',  color=bg_color, fontsize=10)        
+        putil.annotate_axis(g.axes[0, 0], '*',  color=bg_color, fontsize=10)        
     else:
-        annotate_axis(g.axes[0, 0], 'ns', color=bg_color, fontsize=10)
+        putil.annotate_axis(g.axes[0, 0], 'ns', color=bg_color, fontsize=10)
     if small_p < 0.01:
-        annotate_axis(g.axes[0, 1], '**', color=bg_color, fontsize=10)
+        putil.annotate_axis(g.axes[0, 1], '**', color=bg_color, fontsize=10)
     elif small_p < 0.05: 
-        annotate_axis(g.axes[0, 1], '*', color=bg_color, fontsize=10)
+        putil.annotate_axis(g.axes[0, 1], '*', color=bg_color, fontsize=10)
     else:
-        annotate_axis(g.axes[0, 1], 'ns', color=bg_color, fontsize=10)
+        putil.annotate_axis(g.axes[0, 1], 'ns', color=bg_color, fontsize=10)
     pl.subplots_adjust(wspace=1)
     fig.text(0.01, 0.95, 
              'Proportion of courtship ({}) with large({})/small({}) err (mixed anova, {})'.format(count_var, theta_error_large_deg, theta_error_small_deg, mc), 
@@ -2515,7 +1590,7 @@ if __name__ == '__main__':
     theta_error_small = np.deg2rad(small_error_deg)
     theta_error_large = np.deg2rad(large_error_deg) #np.rad2deg(theta_error_small), np.rad2deg(theta_error_large)
     
-    chase_ = split_theta_error(chase_, theta_error_small=theta_error_small, 
+    chase_ = util.split_theta_error(chase_, theta_error_small=theta_error_small, 
                                theta_error_large=theta_error_large)
     chase_['theta_error_dt_flipped'] = chase_['theta_error_dt'] * -1
     
@@ -2544,7 +1619,7 @@ if __name__ == '__main__':
             print(pearsons)
            
             # OLS
-            lr, r2 = get_R2_ols(plotd, xvar, yvar)
+            lr, r2 = lstats.get_R2_ols(plotd, xvar, yvar)
             r2_str = 'OLS: y = {:.2f}x + {:.2f}\nR2={:.2f}'.format(lr.coef_[0], 
                                                                      lr.intercept_,
                                                                      r2)
@@ -2886,10 +1961,10 @@ if __name__ == '__main__':
                     frameon=False, title='')
 
         # Stats
-        results_df, aov = mixed_anova_stats(stimhz_means, yvar=yvar,
+        results_df, aov = lstats.mixed_anova_stats(stimhz_means, yvar=yvar,
                                             within='stim_hz', between='species', 
                                             subject=counter, between1='Dmel', between2='Dyak')
-        results_df = add_multiple_comparisons(results_df)
+        results_df = lstats.add_multiple_comparisons(results_df)
         print(results_df)
        
         # Map frequency to x-tick positions and add asterisks above max point
@@ -3007,7 +2082,7 @@ if __name__ == '__main__':
     v2 = 'ang_vel_fly' #'ang_vel_fly'
     min_n_turns = 5
 
-    aggr_turns = aggregate_turns_across_flies(ftjaaba, v1=v1, v2=v2, min_n_turns=min_n_turns,
+    aggr_turns = pf.aggregate_turns_across_flies(ftjaaba, v1=v1, v2=v2, min_n_turns=min_n_turns,
                                               min_ang_acc=min_ang_acc, min_vel=min_vel, min_dist_to_other=min_dist_to_other,
                                               min_facing_angle=min_facing_angle, fps=fps, nframes_win=nframes_win
                                               )
@@ -3040,7 +2115,7 @@ if __name__ == '__main__':
 
 #%%
     # Get theta_errors before turns
-    turn_starts = get_theta_errors_before_turns(aggr_turns, fps=fps)
+    turn_starts = pf.get_theta_errors_before_turns(aggr_turns, fps=fps)
 
 #%%
     # Plot distribution of theta-errors prior to each turn

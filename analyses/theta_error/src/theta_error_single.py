@@ -12,7 +12,7 @@ import seaborn as sns
 
 import importlib
 #%%
-import libs.theta_error as the
+import analyses.theta_error.src.theta_error_funcs as the
 import libs.plotting as putil
 import libs.utils as util
 
