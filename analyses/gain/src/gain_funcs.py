@@ -117,12 +117,64 @@ def assign_paint_conditions(df0, meta):
 
     return df0
 
+def assign_stim_directions(df_, meta):
+    '''
+    Assign stimulus direction (CW/CCW) from meta and progressive/regressive direction from target position.
+
+    Arguments:
+        df_ -- dataframe with file_name column
+        meta -- meta dataframe, loaded from csv
+
+    Returns:
+        df_ -- dataframe with stim_direction and pr_direction columns
+    '''
+    fn = df_['file_name'].unique()[0]
+    currm = meta[meta['file_name']==fn]
+    assert len(currm)>0, 'No meta data for {}'.format(fn)
+    assert len(currm)==1, 'Multiple meta data for {}'.format(fn)
+    stim_dir = currm['stim_direction'].unique()[0]
+
+    df_['stim_direction'] = stim_dir
+    df_ = assign_progressive_regressive_from_cw_ccw(df_, stim_direction_var='stim_direction')
+
+    return df_
+
+def assign_progressive_regressive_from_cw_ccw(df_, stim_direction_var='stim_direction'):
+    '''
+    Assign progressive/regressive direction from target position.
+
+    Assign "pr_direction" progressive or regressive:
+    stim_direction is CCW, and target_position < 0: progressive
+    stim_direciton is CCW, and target_position > 0: regressive
+    is CW and > 0: progressive
+    is CW and < 0: regressive
+
+    Arguments:
+        df_ -- dataframe with stim_direction and targ_pos_theta columns
+
+    Keyword Arguments:
+        stim_direction_var -- name of the stimulus direction column (default: {'stim_direction'})
+
+    Returns:
+        df_ -- dataframe with pr_direction column
+    '''
+
+    assert stim_direction_var in df_.columns, 'stim_direction_var not in df_.columns'
+    assert 'targ_pos_theta' in df_.columns, 'targ_pos_theta not in df_.columns'
+
+    df_['pr_direction'] = None
+    df_.loc[(df_[stim_direction_var]=='ccw') & (df_['targ_pos_theta']<0), 'pr_direction'] = 'progressive'
+    df_.loc[(df_[stim_direction_var]=='ccw') & (df_['targ_pos_theta']>0), 'pr_direction'] = 'regressive'
+    df_.loc[(df_[stim_direction_var]=='cw') & (df_['targ_pos_theta']>0), 'pr_direction'] = 'progressive'
+    df_.loc[(df_[stim_direction_var]=='cw') & (df_['targ_pos_theta']<0), 'pr_direction'] = 'regressive'
+
+    return df_
+
 def load_transformed_data(parquet_path):
     """Thin wrapper: derive acqdir/savedir from a parquet path, delegate to rel.load_processed_df."""
     savedir = os.path.dirname(parquet_path)
     acq = os.path.basename(parquet_path).replace('_df.parquet', '').replace('_df.pkl', '')
-    acqdir = os.path.join(savedir, acq)
-    df = rel.load_processed_df(acqdir, savedir=savedir)
+    df = rel.load_processed_df(savedir, acq=acq)
     if df is None:
         raise FileNotFoundError("No processed df found at {}".format(parquet_path))
     return df
