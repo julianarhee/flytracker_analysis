@@ -47,17 +47,7 @@ def add_ft_actions(procdir, rawdir, currf, verbose=False):
     actions = util.load_ft_actions([actions_fpath], split_end=False)
     # %%
     # Add actions to df
-    for (action_name, bout_num), a_df in actions.groupby(['action', 'boutnum']):
-        #print(action_name, bout_num)
-        if action_name not in df.columns:
-            print("Adding new action column: ", action_name)
-            df[action_name] = 0
-            df[f'{action_name}_boutnum'] = None
-        # Assign all frames between start and end in df
-        start, end = a_df['start'].item(), a_df['end'].item()
-        frame_range = np.arange(start, end + 1)
-        df.loc[df['frame'].isin(frame_range), action_name] = 1
-        df.loc[df['frame'].isin(frame_range), f'{action_name}_boutnum'] = bout_num
+    df = util.assign_action_frames_to_df(df, actions)
 
     # %%
     # Save to processed again
