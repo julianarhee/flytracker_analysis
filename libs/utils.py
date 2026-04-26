@@ -1298,7 +1298,10 @@ def load_calibration(curr_acq, calib_is_upstream=False):
     # 'data' (n_flies, n_frames, n_fields)
     # 'flags' (possible switches, check with flytracker/visualizer)
     mdtype = mdata.dtype
-    ndata = {n: mdata[n][0, 0] for n in mdtype.names}
+    if mdata.ndim == 1:
+        ndata = {n: mdata[n][0] for n in mdtype.names}
+    else:
+        ndata = {n: mdata[n][0, 0] for n in mdtype.names}
 
     all_fields = dict((k, v[0]) if len(v)>0 else (k, v) for k, v in ndata.items())
     calib = {}
@@ -1313,7 +1316,43 @@ def load_calibration(curr_acq, calib_is_upstream=False):
                 calib[k] = int(v) if v.dtype in ['uint8', 'uint16'] else float(v)
         else:
             calib[k] = np.array(v)
-            
+
+    # DEBUG: show parsed calib before w/h fallback
+    print("DEBUG load_calibration parsed: {}".format(
+        {k: (v, type(v).__name__, v.shape if isinstance(v, np.ndarray) else '') 
+         for k, v in calib.items()}))
+
+    # Estimate w/h if missing (empty arrays from some calibration files)
+    w_missing = 'w' not in calib or (isinstance(calib['w'], np.ndarray) and calib['w'].size == 0)
+    h_missing = 'h' not in calib or (isinstance(calib['h'], np.ndarray) and calib['h'].size == 0)
+    if w_missing or h_missing:
+        source = None
+        if 'rois' in calib and isinstance(calib['rois'], np.ndarray) and calib['rois'].size > 0:
+            roi = calib['rois']
+            if roi.ndim == 1:
+                # single chamber: [x, y, width, height]
+                if w_missing:
+                    calib['w'] = float(roi[0] + roi[2])
+                if h_missing:
+                    calib['h'] = float(roi[1] + roi[3])
+            else:
+                # multiple chambers: (n_chambers, 4)
+                if w_missing:
+                    calib['w'] = float((roi[:, 0] + roi[:, 2]).max())
+                if h_missing:
+                    calib['h'] = float((roi[:, 1] + roi[:, 3]).max())
+            source = 'rois'
+        elif 'centroids' in calib and isinstance(calib['centroids'], np.ndarray) and calib['centroids'].size > 0:
+            ctr = calib['centroids'].flatten()
+            if w_missing:
+                calib['w'] = float(ctr[0] * 2)
+            if h_missing:
+                calib['h'] = float(ctr[1] * 2)
+            source = 'centroids'
+        if source:
+            print("WARNING: estimated frame size from {}: w={}, h={}".format(
+                source, calib.get('w', 'MISSING'), calib.get('h', 'MISSING')))
+
     return calib
 
 def load_feat(curr_acq, subfolder='*'):
@@ -1497,7 +1536,7 @@ def load_flytracker_data(acq_dir, calib_is_upstream=False, fps=60,
     try:
         calib = load_calibration(acq_dir, calib_is_upstream=calib_is_upstream)
     except Exception as e:
-        print("No calibration!")
+        print("No calibration! Error: {}".format(e))
         calib={}
         calib['FPS'] = fps
 
@@ -1515,7 +1554,18 @@ def load_flytracker_data(acq_dir, calib_is_upstream=False, fps=60,
             trk_.loc[no_wing_info, 'ori'] = np.nan
     except Exception as e:
         print("ERROR: No TRACKS for {}".format(acq_dir))
-    
+
+    # Estimate w/h from tracking data if missing from calib
+    w_ok = 'w' in calib and np.isscalar(calib['w'])
+    h_ok = 'h' in calib and np.isscalar(calib['h'])
+    if (not w_ok or not h_ok) and trk_ is not None and 'pos_x' in trk_.columns:
+        if not w_ok:
+            calib['w'] = float(np.nanmax(trk_['pos_x']))
+        if not h_ok:
+            calib['h'] = float(np.nanmax(trk_['pos_y']))
+        print("WARNING: estimated frame size from tracking data: w={}, h={}".format(
+            calib['w'], calib['h']))
+
     return calib, trk_, feat_
 
 
