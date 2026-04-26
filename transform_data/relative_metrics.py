@@ -711,6 +711,48 @@ def do_transformations_on_df(trk_, frame_width, frame_height,
 
     return df
 
+
+def load_processed_df(acqdir, savedir=None, create_new=False):
+    '''
+    Load a processed DataFrame from the processed-mats directory.
+
+    Checks for parquet first, then falls back to pickle (migrating to parquet).
+    Returns None if ``create_new`` is True or no file is found.
+
+    Arguments:
+        acqdir (str): Path to the acquisition directory (basename used as acq name).
+
+    Keyword Arguments:
+        savedir (str or None): Directory containing processed files.
+            Defaults to *acqdir* when None. (default: {None})
+        create_new (bool): If True skip loading and return None so the
+            caller can regenerate. (default: {False})
+
+    Returns:
+        pd.DataFrame or None
+    '''
+    if savedir is None:
+        savedir = acqdir
+
+    acq = os.path.split(acqdir)[-1]
+    parquet_fpath = os.path.join(savedir, '{}_df.parquet'.format(acq))
+    pkl_fpath = os.path.join(savedir, '{}_df.pkl'.format(acq))
+
+    if create_new:
+        return None
+
+    if os.path.exists(parquet_fpath):
+        print('Loaded: {}'.format(parquet_fpath))
+        return pd.read_parquet(parquet_fpath)
+
+    if os.path.exists(pkl_fpath):
+        df_, _ = util.replace_pkl_with_parquet(pkl_fpath)
+        return df_
+
+    print('No processed df found for {}'.format(acq))
+    return None
+
+
 def get_metrics_relative_to_focal_fly(acqdir, mov_is_upstream=False, fps=60, cop_ix=None,
                                       movie_fmt='avi', flyid1=0, flyid2=1,
                                       default_frame_width=None, default_frame_height=None,
@@ -736,17 +778,15 @@ def get_metrics_relative_to_focal_fly(acqdir, mov_is_upstream=False, fps=60, cop
     if savedir is None and save is True:
         print("No save directory provided. Saving to acquisition directory.")
         savedir = acqdir
-        
+
+    # try loading existing processed df
+    cached = load_processed_df(acqdir, savedir=savedir, create_new=create_new)
+    if cached is not None:
+        return cached
+
     acq = os.path.split(acqdir)[-1]
     parquet_fpath = os.path.join(savedir, '{}_df.parquet'.format(acq))
     pkl_fpath = os.path.join(savedir, '{}_df.pkl'.format(acq))
-
-    if not create_new:
-        if os.path.exists(parquet_fpath):
-            return pd.read_parquet(parquet_fpath)
-        elif os.path.exists(pkl_fpath):
-            df_, _ = util.replace_pkl_with_parquet(pkl_fpath)
-            return df_
 
     print("Not loading old, creating new: {}".format('{}_df.parquet'.format(acq)))
     # load flyracker data
@@ -833,49 +873,15 @@ def get_metrics_relative_to_focal_fly(acqdir, mov_is_upstream=False, fps=60, cop
 
 def load_processed_data(acqdir, savedir=None, load=True):
     '''
-    Load processed feat and trk dataframes (pkl files) from savedir.
+    Backward-compatible wrapper around :func:`load_processed_df`.
 
-    Arguments:
-        acq_dir -- _description_
-
-    Keyword Arguments:
-        savedir -- _description_ (default: {None})
-
-    Returns:
-        _description_
+    When *load* is True, returns the DataFrame (or None).
+    When *load* is False, returns True/False indicating whether a file exists.
     '''
-    feat_=None; trk=None;
-    if savedir is None:
-        savedir = acqdir
-
-    acq = os.path.split(acqdir)[-1]
-    df_fpath = os.path.join(savedir, '{}_df.pkl'.format(acq))
-    #feat_fpath = os.path.join(savedir, '{}_feat.pkl'.format(acq))
-    #trk_fpath = os.path.join(savedir, '{}_trk.pkl'.format(acq))
-
-    check_exists = True
+    df_ = load_processed_df(acqdir, savedir=savedir)
     if load:
-        try:
-            with open(df_fpath, 'rb') as f:
-                df_ = pkl.load(f) 
-            print('Loaded: {}'.format(df_fpath))
-    #        with open(feat_fpath, 'rb') as f:
-    #            feat_ = pkl.load(f) 
-    #        print('Loaded: {}'.format(feat_fpath))
-    #
-    #        with open(trk_fpath, 'rb') as f:
-    #            trk = pkl.load(f)
-    #        print('Loaded: {}'.format(trk_fpath))
-        except Exception as e:
-            check_exists = True
-
-    if check_exists:
-        df_ = os.path.exists(df_fpath)
-
-#        feat_ = os.path.exists(feat_fpath)
-#        trk = os.path.exists(trk_fpath)
-
-    return df_ #feat_, trk
+        return df_
+    return df_ is not None
     
 
 

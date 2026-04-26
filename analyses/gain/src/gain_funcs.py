@@ -80,6 +80,7 @@ def transform_projector_data(acquisition_parentdir, acqs, processedmat_dir,
             df_['acquisition'] = ['_'.join([a, b]) for a, b in df_[['date_fly', 'species']].values]
         else:
             df_['acquisition'] = acq #os.path.split(acq)[-1] 
+        
         d_list.append(df_)
 
     if len(d_list) == 0:
@@ -117,18 +118,14 @@ def assign_paint_conditions(df0, meta):
     return df0
 
 def load_transformed_data(parquet_path):
-    """Load DataFrame from parquet. If not found, load from pkl and save as parquet for next time."""
-    pkl_path = parquet_path.replace('.parquet', '.pkl') if parquet_path.endswith('.parquet') else parquet_path + '.pkl'
-    if os.path.exists(parquet_path):
-        print("Loading parquet from: {}".format(parquet_path))
-        return pd.read_parquet(parquet_path)
-    if os.path.exists(pkl_path):
-        print("Loading pkl from: {}".format(pkl_path))
-        df = pd.read_pickle(pkl_path)
-        df.to_parquet(parquet_path, index=False)
-        print("Saved parquet to: {}".format(parquet_path))
-        return df
-    raise FileNotFoundError("Neither {} nor {} found".format(parquet_path, pkl_path))
+    """Thin wrapper: derive acqdir/savedir from a parquet path, delegate to rel.load_processed_df."""
+    savedir = os.path.dirname(parquet_path)
+    acq = os.path.basename(parquet_path).replace('_df.parquet', '').replace('_df.pkl', '')
+    acqdir = os.path.join(savedir, acq)
+    df = rel.load_processed_df(acqdir, savedir=savedir)
+    if df is None:
+        raise FileNotFoundError("No processed df found at {}".format(parquet_path))
+    return df
 
 def get_heading_diff(expr, heading_var='integrated_heading', invert_heading=True):
     '''
