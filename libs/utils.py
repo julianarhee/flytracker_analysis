@@ -701,6 +701,32 @@ def load_ft_actions(found_actions_paths, split_end=False):
 
     return actions_df
 
+def assign_action_frames_to_df(df, actions):
+    '''
+    Assign action frames to df.
+
+    Arguments:
+        df -- dataframe with frame column
+        actions -- dataframe with actions, boutnums, and start/end frames (Created by FlyTracker annotations)
+
+    Returns:
+        df -- dataframe with action columns and boutnums
+    '''
+    for (action_name, bout_num), a_df in actions.groupby(['action', 'boutnum']):
+        #print(action_name, bout_num)
+        if action_name not in df.columns:
+            print("Adding new action column: ", action_name)
+            df[action_name] = 0
+            df[f'{action_name}_boutnum'] = None
+        # Assign all frames between start and end in df
+        start, end = a_df['start'].item(), a_df['end'].item()
+        frame_range = np.arange(start, end + 1)
+        df.loc[df['frame'].isin(frame_range), action_name] = 1
+        df.loc[df['frame'].isin(frame_range), f'{action_name}_boutnum'] = bout_num
+
+    return df
+
+
 def combine_jaaba_and_processed_df(df, jaaba):
     '''
     Combines processed df (containing feat, trk data, or equivalent) with jaaba data.
