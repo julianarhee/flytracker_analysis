@@ -1208,13 +1208,13 @@ def add_frame_nums(trackdf, fps=None):
     '''Add frame index and sec to dataframes
     '''
     frame_ixs = trackdf[trackdf['id']==0].index.tolist()
-    trackdf['frame'] = None
+    trackdf['frame'] = np.nan
     for i, g in trackdf.groupby('id'):
         trackdf.loc[g.index, 'frame'] = frame_ixs
-    
-    # add sec
+    trackdf['frame'] = trackdf['frame'].astype(int)
+
     if fps is not None:
-        trackdf['sec'] = trackdf['frame']/float(fps)
+        trackdf['sec'] = trackdf['frame'] / float(fps)
     
     return trackdf
 
