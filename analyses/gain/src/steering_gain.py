@@ -529,7 +529,7 @@ else:
 grouper = ['species', 'acquisition'] #, 'stim_direction']
 #else:
 #    grouper = ['species', 'acquisition']
-chase_counts = the.count_chasing_frames(f1, 
+chase_counts = util.count_chasing_frames(f1, 
                         grouper=grouper,
                         chase_var='chasing_heuristic')
 #print(chase_counts)

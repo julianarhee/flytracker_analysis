@@ -18,6 +18,7 @@ import seaborn as sns
 
 import libs.utils as util
 import libs.plotting as putil
+import libs.stats as lstats
 
 # %%
 # Set plotting
@@ -102,7 +103,7 @@ sns.regplot(data=intdf, x=xvar, y=yvar, ax=ax, color=bg_color,
 ax.axvline(x=0, color=bg_color, linestyle='--', lw=0.5)
 ax.axhline(y=0, color=bg_color, linestyle='--', lw=0.5)
 ax.set_box_aspect(1)
-lr, r2 = th.get_R2_ols(intdf, xvar, yvar)
+lr, r2 = lstats.get_R2_ols(intdf, xvar, yvar)
 r2_str = 'OLS: y = {:.2f}x + {:.2f}\nR2={:.2f}'.format(lr.coef_[0], 
                                                             lr.intercept_,
                                                             r2)

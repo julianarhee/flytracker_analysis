@@ -2108,3 +2108,49 @@ def shift_variables_by_lag(df, file_grouper='acquisition', lag=2):
     df['vel_shifted_abs'] = np.abs(df['vel_shifted'])
     df['ang_vel_shifted'] = df.groupby(file_grouper)['ang_vel'].shift(-lag)
     return df
+
+
+def split_theta_error(chase_, theta_error_small=np.deg2rad(10),
+                      theta_error_large=np.deg2rad(25)):
+    """Label each row's theta_error as 'small' or 'large' based on thresholds.
+
+    Adds an 'error_size' column: 'small' if |theta_error| < *theta_error_small*,
+    'large' if |theta_error| > *theta_error_large*, else None.
+    """
+    chase_['error_size'] = None
+    chase_.loc[
+        (chase_['theta_error'] < theta_error_small)
+        & (chase_['theta_error'] > -theta_error_small),
+        'error_size',
+    ] = 'small'
+    chase_.loc[
+        (chase_['theta_error'] > theta_error_large)
+        | (chase_['theta_error'] < -theta_error_large),
+        'error_size',
+    ] = 'large'
+    return chase_
+
+
+def count_chasing_frames(ftjaaba, grouper=['species', 'acquisition'],
+                         chase_var='chasing_binary'):
+    """Count chasing and total frames per group and compute the fraction.
+
+    Returns:
+        chase_counts DataFrame with n_frames_chasing, n_frames_total,
+        and frac_frames_chasing columns.
+    """
+    n_frames_chasing = (
+        ftjaaba[ftjaaba[chase_var] > 0]
+        .groupby(grouper)['frame'].count()
+        .reset_index()
+    )
+    n_frames_chasing.rename(columns={'frame': 'n_frames_chasing'}, inplace=True)
+    n_frames_total = (
+        ftjaaba.groupby(grouper)['frame'].count().reset_index()
+    )
+    n_frames_total.rename(columns={'frame': 'n_frames_total'}, inplace=True)
+    chase_counts = n_frames_chasing.merge(n_frames_total, on=grouper, how='left')
+    chase_counts['frac_frames_chasing'] = (
+        chase_counts['n_frames_chasing'] / chase_counts['n_frames_total']
+    )
+    return chase_counts

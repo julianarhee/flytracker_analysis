@@ -630,9 +630,9 @@ theta_error_large_deg = 25
 theta_error_small = np.deg2rad(theta_error_small_deg)
 theta_error_large = np.deg2rad(theta_error_large_deg)
 
-chase_ = the.split_theta_error(court_, theta_error_small=theta_error_small, theta_error_large=theta_error_large)
+chase_ = util.split_theta_error(court_, theta_error_small=theta_error_small, theta_error_large=theta_error_large)
 
-fig = the.plot_ang_v_fwd_vel_by_theta_error_size(chase_, 
+fig = putil.plot_ang_v_fwd_vel_by_theta_error_size(chase_, 
             var1=var1, var2=var2, err_palette=err_palette, lw=2)
 fig.text(0.1, 0.9, cond_str, fontsize=12)
 

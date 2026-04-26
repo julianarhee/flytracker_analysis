@@ -880,3 +880,96 @@ def diagnostics_plot_2d_traj_and_rel(stretch, stretch_targ, f_start, f_end,
         fig.suptitle(title, y=1.02)
     plt.tight_layout()
     return fig, (ax_traj, ax_rel)
+
+
+def annotate_axis(ax, annot_str, fontsize=6, color='k'):
+    """Place a centered annotation near the top of an axes."""
+    ax.annotate(annot_str, xy=(0.5, 0.95), xycoords='axes fraction',
+                fontsize=fontsize, ha='center', va='center', color=color)
+
+
+def plot_ang_v_fwd_vel_by_theta_error_size(
+    chase_, var1='vel_shifted', var2='ang_vel_shifted',
+    lw=1, err_palette=None,
+    figsize=(10, 4), fly_marker='o', fly_marker_size=5, fly_color='gray',
+    median_marker_size=3, scatter_size=3, scatter_alpha=0.5,
+    axis_off=True, plot_dir='E', use_mm=True,
+    plot_scatter_axes=True, x_scale=5,
+    scatter_xlim=None, scatter_ylim=None, scatter_int=1,
+):
+    """3-panel figure: spatial error distribution, forward-vel histogram, angular-vel histogram.
+
+    Requires an 'error_size' column (see ``split_theta_error``).
+    """
+    if err_palette is None:
+        err_palette = {'small': 'r', 'large': 'b'}
+
+    fig = pl.figure(figsize=figsize, dpi=300)
+
+    ax = fig.add_subplot(1, 3, 1)
+    if plot_dir == 'E':
+        xvar = 'targ_rel_pos_x_mm' if use_mm else 'targ_rel_pos_x'
+        yvar = 'targ_rel_pos_y_mm' if use_mm else 'targ_rel_pos_y'
+    elif plot_dir == 'N':
+        xvar = 'targ_rel_pos_y_mm' if use_mm else 'targ_rel_pos_y'
+        yvar = 'targ_rel_pos_x_mm' if use_mm else 'targ_rel_pos_x'
+    sns.scatterplot(data=chase_.iloc[0::scatter_int], x=xvar, y=yvar, ax=ax,
+                    hue='error_size', palette=err_palette, s=scatter_size,
+                    alpha=scatter_alpha)
+    if plot_scatter_axes:
+        ax.set_xlabel('Relative x (mm)' if use_mm else 'Relative x (px)',
+                       labelpad=2)
+        ax.set_ylabel('Relative y (mm)' if use_mm else 'Relative y (px)',
+                       labelpad=2)
+        pl.tick_params(axis='both', which='both', pad=0)
+    else:
+        ax.set_xticks([0, x_scale])
+        ax.set_xticklabels([
+            '', '{} mm'.format(x_scale) if use_mm else '{} px'.format(x_scale)
+        ])
+        ax.set_xlabel('')
+        ax.set_ylabel('')
+        ax.set_yticks([])
+        sns.despine(ax=ax, bottom=True, left=True, trim=True)
+        ax.spines['left'].set_visible(False)
+    if scatter_xlim is not None:
+        if plot_dir == 'E':
+            ax.set_xlim([0, scatter_xlim])
+            ax.set_ylim([-scatter_ylim, scatter_ylim])
+        else:
+            ax.set_xlim([-scatter_xlim, scatter_xlim])
+            ax.set_ylim([0, scatter_ylim])
+    ax.set_aspect(1)
+    ax.plot(0, 0, marker=fly_marker, color=fly_color,
+            markersize=fly_marker_size)
+    if axis_off:
+        ax.axis('off')
+    ax.legend_.remove()
+
+    ax1 = fig.add_subplot(1, 3, 2)
+    sns.histplot(data=chase_, x=var1, ax=ax1, bins=50, linewidth=lw,
+                 stat='probability', cumulative=False, element='step',
+                 fill=False, hue='error_size', palette=err_palette,
+                 common_norm=False, legend=0)
+    ax1.set_xlabel('Forward vel', labelpad=2)
+    pl.tick_params(axis='both', which='both', pad=0)
+
+    ax2 = fig.add_subplot(1, 3, 3, sharey=ax1)
+    sns.histplot(data=chase_, x=var2, ax=ax2, color='r', bins=50,
+                 stat='probability', cumulative=False, element='step',
+                 fill=False, hue='error_size', palette=err_palette,
+                 common_norm=False)
+    ax2.set_xlabel('Angular vel', labelpad=2)
+    pl.tick_params(axis='both', which='both', pad=0)
+    sns.move_legend(ax2, bbox_to_anchor=(1, 1), loc='upper left',
+                    frameon=False)
+
+    curr_ylim = np.round(ax1.get_ylim()[-1], 2) * 1.15
+    for v, ax in zip([var1, var2], [ax1, ax2]):
+        med_ = chase_.groupby('error_size')[v].median()
+        for mval, cval in err_palette.items():
+            ax.plot(med_[mval], curr_ylim, color=cval, marker='v',
+                    markersize=median_marker_size)
+        ax.set_box_aspect(1)
+
+    return fig
