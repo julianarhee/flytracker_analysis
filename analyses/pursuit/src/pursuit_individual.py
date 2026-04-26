@@ -16,7 +16,7 @@ import pylab as pl
 
 import libs.utils as util
 import libs.plotting as putil
-import libs.theta_error as the
+import analyses.pursuit.src.pursuit_funcs as pf
 
 import statsmodels.api as sm
 import libs.regplot as rpl
@@ -309,19 +309,17 @@ if __name__ == '__main__':
     # ----------------------------
     # Look at moments of high ang vel.
 
-    import theta_error as the
-
     fps = 60.
     min_vel = 15
     min_dist_to_other = 25
     min_facing_angle = np.deg2rad(90)
     min_ang_acc = 120
 
-    turn_bout_starts, high_ang_start_frames = the.select_turn_bouts_for_plotting(flydf,
+    turn_bout_starts, high_ang_start_frames = pf.select_turn_bouts_for_plotting(flydf,
                                             min_ang_acc=min_ang_acc, min_dist_to_other=min_dist_to_other,
                                             min_facing_angle=min_facing_angle, min_vel=min_vel)
     #%
-    turn_counts = the.count_n_turns_in_window(flydf, turn_bout_starts, high_ang_start_frames, fps=fps)
+    turn_counts = pf.count_n_turns_in_window(flydf, turn_bout_starts, high_ang_start_frames, fps=fps)
     print(turn_counts.sort_values(by='n_turns', ascending=False))
     #%
     # PLOT TIME COURSES
@@ -342,7 +340,7 @@ if __name__ == '__main__':
     # varset1 = facing_angle, ang_vel
     # varset2 = theta_error, ang_vel_fly
     # varset2_smoothed = theta_error_smoothed, ang_vel_fly_smoothed
-    fig = the.plot_timecourses_for_turn_bouts(plotdf, high_ang_start_frames, xvar=xvar, varset=varset, 
+    fig = pf.plot_timecourses_for_turn_bouts(plotdf, high_ang_start_frames, xvar=xvar, varset=varset, 
                                           targ_color=col1, fly_color=col2)
     fig.axes[0].set_title('{}, frames: {}-{}'.format(acq, start_ix, stop_ix), loc='left', 
                     fontsize=8)
@@ -424,13 +422,13 @@ if __name__ == '__main__':
     curr_high_ang_start_frames = [f for f in high_ang_start_frames if f in plotdf['frame']]
     print(len(curr_high_ang_start_frames))
 
-    turns_, t_lags = the.get_turn_psth_values(plotdf, curr_high_ang_start_frames, interval=1,
+    turns_, t_lags = pf.get_turn_psth_values(plotdf, curr_high_ang_start_frames, interval=1,
                                                   yvar1=yvar1, yvar2=yvar2, nframes_win=nframes_win, fps=fps)
     # Get mean 
     mean_turns_ = turns_.groupby(['rel_sec']).mean().reset_index() #rop=True)
 
     # Plot PSTH all turns
-    fig = the.plot_psth_all_turns(turns_, yvar1=yvar1, yvar2=yvar2, col1=col1, col2=col2, lw_all=1, lw_mean=2)
+    fig = pf.plot_psth_all_turns(turns_, yvar1=yvar1, yvar2=yvar2, col1=col1, col2=col2, lw_all=1, lw_mean=2)
 
     fig.axes[0].set_title('{}, frames: {}-{}'.format(acq, start_ix, stop_ix), loc='left', 
                     fontsize=8)
@@ -443,7 +441,7 @@ if __name__ == '__main__':
     #%%  Cross Correlate vars
     correlation, lags, lag_frames, t_lag = util.cross_correlation_lag(mean_turns_[yvar2], mean_turns_[yvar1], fps=60)
 
-    fig = the.plot_mean_cross_corr_results(mean_turns_, correlation, lags, t_lags, t_lag=t_lag,
+    fig = pf.plot_mean_cross_corr_results(mean_turns_, correlation, lags, t_lags, t_lag=t_lag,
                                   yvar1=yvar1, yvar2=yvar2, col1=col1, col2=col2, bg_color=bg_color)
     #pl.subplots_adjust(wspace=1)
 
@@ -469,7 +467,7 @@ if __name__ == '__main__':
     min_facing_angle = np.deg2rad(90)
     nframes_win = 0.1*fps
 
-    turnbouts = the.get_turn_bouts(flydf, min_ang_acc=min_ang_acc, #min_ang_vel=min_ang_vel, 
+    turnbouts = pf.get_turn_bouts(flydf, min_ang_acc=min_ang_acc, #min_ang_vel=min_ang_vel, 
                             min_vel=min_vel, min_dist_to_other=min_dist_to_other,
                             min_facing_angle=min_facing_angle, 
                             nframes_win=nframes_win)
@@ -478,7 +476,7 @@ if __name__ == '__main__':
     #%% 
     v1 = 'facing_angle' #'theta_error' #'theta_error'
     v2 = 'ang_vel' #'ang_vel_fly' #'ang_vel_fly'
-    xcorr, lags, t_lags = the.cross_corr_each_bout(turnbouts, v1=v1, v2=v2)
+    xcorr, lags, t_lags = pf.cross_corr_each_bout(turnbouts, v1=v1, v2=v2)
 
     #%% Add delta t to turnbouts DF
     for ((turn_ix, t), l) in zip(turnbouts.groupby('turn_bout_num'), t_lags):
@@ -493,7 +491,7 @@ if __name__ == '__main__':
     # Trio: Average aligned turn bouts, cross-correlation, distribution of time lags
     v1_label = r'$\theta_{E}$' + '\n{}'.format(v1)
     v2_label = r'$\omega_{f}$' + '\n{}'.format(v2)
-    fig = the.plot_cross_corr_results(turnbouts, xcorr, lags, t_lags, v1=v1, v2=v2, 
+    fig = pf.plot_cross_corr_results(turnbouts, xcorr, lags, t_lags, v1=v1, v2=v2, 
                                   col1=col1, col2=col2, v1_label=v1_label, v2_label=v2_label,
                                   fig_h=4, fig_w=14)
 
@@ -508,7 +506,7 @@ if __name__ == '__main__':
     print(curr_figdir, figname)
 
     #% Aligned INDIVIUAL TURNS, 2 subplots of theta_error and ang_vel
-    fig = the.plot_individual_turns(turnbouts, v1=v1, v2=v2)
+    fig = pf.plot_individual_turns(turnbouts, v1=v1, v2=v2)
     fig.text(0.1, 0.95,  '{}, all turns ang_acc > {:.2f}'.format(acq, min_ang_acc), 
                     fontsize=8)
 
@@ -522,7 +520,7 @@ if __name__ == '__main__':
     # shift target variables by lag_frames, compare with flydf on current frames
     # of high_ang_start_frames
     med_lag = np.median(np.array(t_lags))
-    shifted, unshifted = the.shift_vars_by_lag(flydf, high_ang_start_frames, med_lag, fps=fps)
+    shifted, unshifted = pf.shift_vars_by_lag(flydf, high_ang_start_frames, med_lag, fps=fps)
 
     #%% Plot correlations between theta_error and ang_vel for same frame and lagged frame
     col = bg_color
@@ -537,7 +535,7 @@ if __name__ == '__main__':
         x = 'facing_angle'
         y = 'ang_vel'
         x1 = 'facing_angle_vel'
-    fig = the.compare_regr_pre_post_shift(flydf, shifted, x=x, y=y, x1=x1, col=col, markersize=markersize)
+    fig = pf.compare_regr_pre_post_shift(flydf, shifted, x=x, y=y, x1=x1, col=col, markersize=markersize)
     pl.subplots_adjust(bottom=0.2, wspace=0.6, hspace=0.6, left=0.1, right=0.9)
 
     # save
