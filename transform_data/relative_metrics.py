@@ -712,7 +712,8 @@ def do_transformations_on_df(trk_, frame_width, frame_height,
     return df
 
 
-def load_processed_df(acqdir, savedir=None, create_new=False):
+def load_processed_df(processedmat_dir, acqdir=None, acq=None,
+                    create_new=False):
     '''
     Load a processed DataFrame from the processed-mats directory.
 
@@ -720,7 +721,7 @@ def load_processed_df(acqdir, savedir=None, create_new=False):
     Returns None if ``create_new`` is True or no file is found.
 
     Arguments:
-        acqdir (str): Path to the acquisition directory (basename used as acq name).
+        acqdir (str): Path to the acquisition video directory (basename used as acq name).
 
     Keyword Arguments:
         savedir (str or None): Directory containing processed files.
@@ -731,12 +732,16 @@ def load_processed_df(acqdir, savedir=None, create_new=False):
     Returns:
         pd.DataFrame or None
     '''
-    if savedir is None:
-        savedir = acqdir
+    if acqdir is None:
+        assert acq is not None, "Either acqdir or acq must be provided"
+        acqdir = os.path.join(processedmat_dir, acq)
+    elif acq is None:
+        assert acqdir is not None, "Either acqdir or acq must be provided"
+        acq = os.path.split(acqdir)[-1]
 
-    acq = os.path.split(acqdir)[-1]
-    parquet_fpath = os.path.join(savedir, '{}_df.parquet'.format(acq))
-    pkl_fpath = os.path.join(savedir, '{}_df.pkl'.format(acq))
+    #acq = os.path.split(acqdir)[-1]
+    parquet_fpath = os.path.join(processedmat_dir, '{}_df.parquet'.format(acq))
+    pkl_fpath = os.path.join(processedmat_dir, '{}_df.pkl'.format(acq))
 
     if create_new:
         return None
@@ -775,12 +780,13 @@ def get_metrics_relative_to_focal_fly(acqdir, mov_is_upstream=False, fps=60, cop
         savedir (str, None): Save processed _df.pkl (default: {None})
     '''
     # check output dir
-    if savedir is None and save is True:
-        print("No save directory provided. Saving to acquisition directory.")
+    if savedir is None:
+        if save is True:
+            print("No save directory provided. Saving to acquisition directory.")
         savedir = acqdir
 
     # try loading existing processed df
-    cached = load_processed_df(acqdir, savedir=savedir, create_new=create_new)
+    cached = load_processed_df(savedir, acqdir=acqdir, create_new=create_new)
     if cached is not None:
         return cached
 
@@ -878,7 +884,9 @@ def load_processed_data(acqdir, savedir=None, load=True):
     When *load* is True, returns the DataFrame (or None).
     When *load* is False, returns True/False indicating whether a file exists.
     '''
-    df_ = load_processed_df(acqdir, savedir=savedir)
+    if savedir is None:
+        savedir = acqdir
+    df_ = load_processed_df(savedir, acqdir=acqdir)
     if load:
         return df_
     return df_ is not None
