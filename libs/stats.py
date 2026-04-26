@@ -71,3 +71,14 @@ def add_multiple_comparisons(results_df):
     results_df['p_bonf'] = pvals_bonf
     results_df['sig_bonf'] = reject_bonf
     return results_df
+
+
+def pval_to_stars(pval):
+    """Convert a p-value to a significance string."""
+    if pval < 0.001:
+        return '***'
+    elif pval < 0.01:
+        return '**'
+    elif pval < 0.05:
+        return '*'
+    return 'ns'
