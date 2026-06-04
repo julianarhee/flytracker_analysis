@@ -26,6 +26,7 @@ CLI usage:
 import os
 import argparse
 
+import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 
@@ -161,7 +162,8 @@ for ai, beh in enumerate(['all', 'chasing', 'singing']):
     axn[ai].set_ylabel('Mean velocity (mm/s)')
     axn[ai].set_ylim([0, 20])
 splot.label_figure(fig, figid)
-plt.savefig(os.path.join(figdir, 'mean_vel_by_behavior_per_strain.png'))
+plt.savefig(os.path.join(figdir, 'mean_vel_by_behavior_per_strain.png'),
+            bbox_inches='tight')
 
 #%%
 # ---------------------------------------------------------------------------
@@ -179,7 +181,8 @@ fig, axn = splot.compare_metrics_row(
     between_group_spacing=5, within_group_spacing=0.6, box_width=0.5)
 splot.label_figure(fig, figid)
 data_type = 'courtframes' if COURTING_FRAMES_ONLY else 'allframes'
-plt.savefig(os.path.join(figdir, 'p-behaviors_{}.png'.format(data_type)))
+plt.savefig(os.path.join(figdir, 'p-behaviors_{}.png'.format(data_type)),
+            bbox_inches='tight')
 
 #%%
 # ---------------------------------------------------------------------------
@@ -190,11 +193,13 @@ dist, _ = sm.add_legend_column_with_n(dist, key='strain_name')
 fig, ax = plt.subplots(figsize=(5, 4))
 splot.compare_metric(dist, 'dist_to_other', ax=ax, x='strain_name_legend',
                      edgecolor=bg_color, between_group_spacing=10,
-                     within_group_spacing=1.2, box_width=1.0)
+                     within_group_spacing=1.2, box_width=1.0,
+                     show_legend=True)
 ax.set_ylabel('Interfly distance (mm)')
 ax.set_ylim([0, 25])
 splot.label_figure(fig, figid)
-plt.savefig(os.path.join(figdir, 'dist_to_other_{}.png'.format(data_type)))
+plt.savefig(os.path.join(figdir, 'dist_to_other_{}.png'.format(data_type)),
+            bbox_inches='tight')
 
 #%%
 # ---------------------------------------------------------------------------
