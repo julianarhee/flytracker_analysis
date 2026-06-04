@@ -18,6 +18,45 @@ Per focal male, per behavior, we compute:
   - frame-wise agreement, Cohen's kappa, Jaccard (intersection / union),
   - treating JAABA as the reference: precision / recall / F1 of the heuristic,
   - the confusion breakdown (both / jaaba-only / kin-only / neither).
+
+Agreement metrics — summary and value ranges
+--------------------------------------------
+All metrics are computed per fly-pair and are stored in the `summary` DataFrame
+returned by `compare_labelings`.  In ``agreement_metrics_by_species.png`` they
+are shown as boxplots (one box per species per behavior panel), with individual
+pair dots overlaid.  All three range from 0 (no agreement) to 1 (perfect
+agreement); kappa can additionally go negative when the methods disagree worse
+than chance.
+
+kappa (Cohen's κ)
+    Observed agreement corrected for the agreement expected by chance given
+    each labeler's marginal positive rate:
+        κ = (p_observed − p_expected) / (1 − p_expected)
+    Range: (−∞, 1].  Typical interpretation:
+        < 0   worse than chance (systematic disagreement)
+        0     no better than chance
+        0–0.2 slight; 0.2–0.4 fair; 0.4–0.6 moderate
+        0.6–0.8 substantial; > 0.8 near-perfect
+    Preferred for imbalanced labels because it accounts for the rarity of the
+    positive class (courtship behaviors occupy a small fraction of frames).
+
+jaccard (Jaccard index / intersection-over-union)
+    Fraction of frames called positive by *either* labeler that are called
+    positive by *both*:
+        J = |JAABA ∩ kin| / |JAABA ∪ kin|
+    Range: [0, 1].  Ignores frames where both labelers call negative, so it
+    focuses purely on the overlap of the detected positive sets.  Can be low
+    even when overall frame-wise agreement is high, because rare behaviors
+    have a small union.
+
+f1 (F1 score)
+    Harmonic mean of precision and recall, with JAABA treated as the ground
+    truth:
+        recall    = |both| / (|both| + |JAABA-only|)   # kin captures JAABA+
+        precision = |both| / (|both| + |kin-only|)     # kin+ JAABA agrees
+        F1        = 2 · precision · recall / (precision + recall)
+    Range: [0, 1].  Low recall → kinematic gate misses frames JAABA detects;
+    low precision → kinematic gate fires on frames JAABA does not.
 """
 import os
 import sys
@@ -193,24 +232,51 @@ def plot_pbeh_paired(summary, behavior, ax=None):
 
 
 def plot_confusion_breakdown(summary, behavior, ax=None):
-    """Stacked frame-fraction bars: both / JAABA-only / kin-only per pair."""
+    """Dot plot of per-pair frame fractions for each agreement category.
+
+    Replaces the old stacked-bar layout.  Each category (both / JAABA-only /
+    kinematic-only) is drawn as a lollipop (vertical stem + filled circle) so
+    all three share a common zero baseline and can be compared directly.  One
+    cluster of three lollipops is drawn per fly-pair, separated by a small gap.
+
+    Categories shown (``neither`` is omitted — it is the complement):
+        both           — JAABA and kinematic both positive  (green)
+        JAABA only     — JAABA positive, kinematic negative (blue)
+        kinematic only — kinematic positive, JAABA negative (orange)
+    """
     import matplotlib.pyplot as plt
     if ax is None:
         _, ax = plt.subplots(figsize=(6, 4))
     sub = summary[summary['behavior'] == behavior].copy()
     n = sub['n'].to_numpy()
-    both = sub['both'] / n
+    both  = sub['both']  / n
     jonly = sub['jaaba_only'] / n
-    konly = sub['kin_only'] / n
+    konly = sub['kin_only']   / n
     labels = ['{}\npair{}'.format(s.split()[0], int(fp))
               for s, fp in zip(sub['strain'], sub['fly_pair'])]
-    x = np.arange(len(sub))
-    ax.bar(x, both, label='both', color='#55a868')
-    ax.bar(x, jonly, bottom=both, label='JAABA only', color='#4c72b0')
-    ax.bar(x, konly, bottom=both + jonly, label='kinematic only', color='#dd8452')
-    ax.set_xticks(x)
+
+    categories = [
+        ('both',           both,  '#55a868'),
+        ('JAABA only',     jonly, '#4c72b0'),
+        ('kinematic only', konly, '#dd8452'),
+    ]
+    n_pairs = len(sub)
+    n_cats  = len(categories)
+    # Spread: each pair occupies a unit-width slot; categories sit at ±offsets.
+    offsets = np.linspace(-0.25, 0.25, n_cats)
+    x_centers = np.arange(n_pairs, dtype=float)
+
+    for (cat_label, vals, color), offset in zip(categories, offsets):
+        xs = x_centers + offset
+        for xi, yi in zip(xs, vals):
+            ax.plot([xi, xi], [0, yi], color=color, lw=1.2, alpha=0.7)
+        ax.scatter(xs, vals, label=cat_label, color=color,
+                   s=30, zorder=3, linewidths=0)
+
+    ax.set_xticks(x_centers)
     ax.set_xticklabels(labels, fontsize=6)
     ax.set_ylabel('frame fraction')
+    ax.set_ylim(bottom=0)
     ax.set_title('{}: agreement / disagreement'.format(behavior))
     ax.legend(frameon=False, fontsize=6)
     return ax
@@ -235,9 +301,12 @@ def plot_comparison(summary, figid=None):
 def plot_pbeh_scatter(summary, behaviors=None, palette=None, figsize=None):
     """Scatter p(behavior) under JAABA vs kinematic across all pairs.
 
-    One panel per behavior. Each dot is one fly-pair; species-colored when
-    'species' is in the summary. An identity line (y = x) is drawn for
-    reference so systematic over- or under-detection is visible at a glance.
+    One panel per behavior.  Each dot is one fly-pair (a single male tracked
+    across an entire acquisition); color indicates species.  The dashed
+    identity line (y = x) marks perfect agreement — dots above the line mean
+    the kinematic gate detects more of that behavior than JAABA, dots below
+    mean JAABA detects more.  The legend on the last panel labels species and
+    notes that each dot = one fly-pair.
 
     Args:
         summary (pd.DataFrame): output of `compare_labelings`.
@@ -281,7 +350,8 @@ def plot_pbeh_scatter(summary, behaviors=None, palette=None, figsize=None):
         ax.set_ylabel('p({}) kinematic'.format(beh), fontsize=8)
         ax.set_title(beh)
         if ai == n - 1 and has_species:
-            ax.legend(frameon=False, fontsize=7)
+            ax.legend(frameon=False, fontsize=7,
+                      title='each dot = one fly-pair', title_fontsize=6)
     plt.subplots_adjust(wspace=0.4)
     return fig, axn
 
