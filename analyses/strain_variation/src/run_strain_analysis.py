@@ -79,6 +79,7 @@ bg_color = [0.7] * 3 if plot_style == 'dark' else 'k'
 _, aggdir = pm.get_output_dirs(rootdir, make=False)
 figdir = os.path.join(aggdir, 'figures', 'strain_comparison')
 os.makedirs(figdir, exist_ok=True)
+label_sfx = '_{}'.format(LABEL_SOURCE)
 figid = aggdir
 
 #%%
@@ -162,7 +163,7 @@ for ai, beh in enumerate(['all', 'chasing', 'singing']):
     axn[ai].set_ylabel('Mean velocity (mm/s)')
     axn[ai].set_ylim([0, 20])
 splot.label_figure(fig, figid)
-plt.savefig(os.path.join(figdir, 'mean_vel_by_behavior_per_strain.png'),
+plt.savefig(os.path.join(figdir, 'mean_vel_by_behavior_per_strain{}.png'.format(label_sfx)),
             bbox_inches='tight')
 
 #%%
@@ -181,7 +182,7 @@ fig, axn = splot.compare_metrics_row(
     between_group_spacing=5, within_group_spacing=0.6, box_width=0.5)
 splot.label_figure(fig, figid)
 data_type = 'courtframes' if COURTING_FRAMES_ONLY else 'allframes'
-plt.savefig(os.path.join(figdir, 'p-behaviors_{}.png'.format(data_type)),
+plt.savefig(os.path.join(figdir, 'p-behaviors_{}{}.png'.format(data_type, label_sfx)),
             bbox_inches='tight')
 
 #%%
@@ -198,7 +199,7 @@ splot.compare_metric(dist, 'dist_to_other', ax=ax, x='strain_name_legend',
 ax.set_ylabel('Interfly distance (mm)')
 ax.set_ylim([0, 25])
 splot.label_figure(fig, figid)
-plt.savefig(os.path.join(figdir, 'dist_to_other_{}.png'.format(data_type)),
+plt.savefig(os.path.join(figdir, 'dist_to_other_{}{}.png'.format(data_type, label_sfx)),
             bbox_inches='tight')
 
 #%%
@@ -226,7 +227,7 @@ for curr_species, sub in distbeh.groupby('species'):
         axn[ai].set_ylim([0, 0.8])
     splot.label_figure(fig, figid)
     plt.savefig(os.path.join(
-        figdir, 'p-behaviors_v_binned_dist_{}.png'.format(curr_species)))
+        figdir, 'p-behaviors_v_binned_dist_{}{}.png'.format(curr_species, label_sfx)))
 
 #%%
 # ---------------------------------------------------------------------------
@@ -242,7 +243,7 @@ for curr_species, sub in male_from_female.groupby('species'):
         sub, grouper='strain', ncols=4, marker_color=bg_color, figid=figid,
         suptitle='Male position, female-centered ({})'.format(curr_species))
     plt.savefig(os.path.join(
-        figdir, 'male-rel-pos_all-pairs_{}.png'.format(curr_species)))
+        figdir, 'male-rel-pos_all-pairs_{}{}.png'.format(curr_species, label_sfx)))
 
 # Male-centered view: where does the male keep the female.
 female_from_male = smaps.female_position_from_male_view(court_)
@@ -251,7 +252,7 @@ for curr_species, sub in female_from_male.groupby('species'):
         sub, grouper='strain', ncols=4, marker_color=bg_color, figid=figid,
         suptitle='Female position, male-centered ({})'.format(curr_species))
     plt.savefig(os.path.join(
-        figdir, 'female-rel-pos_all-pairs_{}.png'.format(curr_species)))
+        figdir, 'female-rel-pos_all-pairs_{}{}.png'.format(curr_species, label_sfx)))
 
 # %%
 # ---------------------------------------------------------------------------
