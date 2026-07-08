@@ -248,6 +248,33 @@ def filter_bouts_by_frame_duration(consec_bouts, min_bout_len, fps=60, return_in
         return incl_bouts
 
 def subdivide_into_subbouts(ftjaaba, bout_dur=0.2, grouper='acquisition'):
+    '''
+    Assign each frame to a fixed-duration time window via the 'subboutnum' column.
+
+    NOTE: a "subbout" here is NOT a behavioral bout. Each group's full timeline
+    (per `grouper`, e.g. acquisition) is sliced into contiguous, equal-length
+    windows of `bout_dur` seconds, and every frame is labeled with the index of
+    the window it falls into. The grid is purely time-based and ignores behavior
+    onsets/offsets, so a single behavioral episode can be split across several
+    subbouts and one subbout can straddle a behavior on->off transition.
+
+    This is the unit later averaged in `meanbouts` (groupby subboutnum -> mean).
+    Because per-frame `*_binary` behavior columns are 0/1, their per-subbout MEAN
+    is the *fraction of frames in the window classified as that behavior* -- this
+    is the value thresholded by `min_frac_bout` downstream. For behavior-aware
+    bouts (windows that respect consecutive-behavior boundaries) use
+    `subdivide_bouts_into_subbouts` / `mat_split_courtship_bouts` instead.
+
+    Arguments:
+        ftjaaba -- frame-level dataframe; must contain a 'sec' time column.
+
+    Keyword Arguments:
+        bout_dur -- window length in seconds (default: {0.2}).
+        grouper -- column to slice timelines within (default: {'acquisition'}).
+
+    Returns:
+        ftjaaba with an added categorical 'subboutnum' column.
+    '''
     d_list = []
     for acq, df_ in ftjaaba.groupby(grouper):
         sec_min, sec_max = df_['sec'].min(), df_['sec'].max()

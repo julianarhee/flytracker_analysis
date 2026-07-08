@@ -390,7 +390,29 @@ def plot_regr_by_hue(chase_, xvar, yvar, hue_var='stim_hz', stimhz_palette=None,
 def select_data_subset(filtdf, meanbouts, do_bouts=False, behav='chasing', min_frac_bout=0.5, is_flytracker=True):
 
     '''
-    Select subset of the dataframe where <behav> is True (JAABA-classified behavior, for ex.)
+    Select the rows where <behav> is occurring, in either FRAMES or BOUTS mode.
+
+    FRAMES (do_bouts=False): rows are individual video frames; keep every frame
+    where `<behav>_binary` > 0 (i.e. the JAABA score exceeded threshold on that
+    frame).
+
+    BOUTS (do_bouts=True): rows come from `meanbouts`, i.e. per-`subboutnum`
+    (fixed 100ms-window) averages. Here `<behav>_binary` is the FRACTION of
+    frames in the window classified as <behav>, so `min_frac_bout` keeps only
+    windows that were sufficiently "pure" (e.g. 0.5 = majority of frames in the
+    window were chasing). `min_frac_bout` is meaningful ONLY in this mode.
+
+    See `util.subdivide_into_subbouts` for how subbouts (windows) are defined.
+
+    Arguments:
+        filtdf -- frame-level dataframe (used in FRAMES mode).
+        meanbouts -- per-subbout averaged dataframe (used in BOUTS mode).
+
+    Keyword Arguments:
+        do_bouts -- if True use BOUTS (meanbouts), else FRAMES (default: {False}).
+        behav -- behavior name; expects a '<behav>_binary' column (default: {'chasing'}).
+        min_frac_bout -- min fraction of frames-per-window in BOUTS mode (default: {0.5}).
+        is_flytracker -- if True flip facing_angle sign (FlyTracker convention) (default: {True}).
     '''
     sign = -1 if is_flytracker else 1
     #chase_ = meanbouts[meanbouts['{}_binary'.format(behav)]>=min_frac_bout].copy()
